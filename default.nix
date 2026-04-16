@@ -36,6 +36,11 @@ python.pkgs.buildPythonApplication {
     mkdir -p $out/bin
     printf '%s\n' '#!${python}/bin/python' 'import sys' 'from uvicorn.main import main' 'sys.exit(main())' > $out/bin/skynetcontrol-server
     chmod +x $out/bin/skynetcontrol-server
+
+    # Create an alembic entry point so the NixOS module can run migrations.
+    # wrapPythonPrograms will wrap this with the correct PYTHONPATH.
+    printf '%s\n' '#!${python}/bin/python' 'import sys' 'from alembic.config import main' 'sys.exit(main())' > $out/bin/skynetcontrol-alembic
+    chmod +x $out/bin/skynetcontrol-alembic
   '';
 
   # Set SKYNET_STATIC_DIR on all wrapped programs
