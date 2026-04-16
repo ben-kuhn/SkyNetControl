@@ -33,7 +33,7 @@ SkyNetControl/
 **Tech stack:**
 - Backend: Python, FastAPI, SQLAlchemy, Alembic
 - Frontend: React, TypeScript
-- Database: SQLite
+- Database: SQLAlchemy ORM with Alembic migrations — database-agnostic. SQLite is the default and recommended for small/single-operator deployments. PostgreSQL supported for larger nets. Configured via a single database URL setting.
 - Packaging: Nix overlay, NixOS module, OCI image via `dockerTools.buildLayeredImage`
 
 ## Module 1: Net Schedule
@@ -62,7 +62,9 @@ The schedule is the foundational module. Reminders, activities, check-ins, and r
 **NetSession:**
 - `id` — primary key
 - `season_id` — foreign key to NetSeason
-- `date` — session date
+- `start_date` — session start date/time
+- `end_date` — session end date/time
+- `grace_period_hours` — configurable grace period (default from app config); check-ins outside the session window but within the grace period are accepted but flagged as early/late
 - `session_type` — enum: `regular_checkin`, `activity`
 - `status` — enum: `scheduled`, `completed`, `cancelled`
 - `activity_id` — foreign key to Activity, nullable
@@ -181,7 +183,7 @@ Status lifecycle: `draft` → `approved` → `sent` (or `skipped`).
 - Configurable mailbox path (PAT stores messages as files on disk)
 - Configurable net address (e.g., w0ne@winlink.org)
 - On-demand scan (button in UI) or scheduled scan during/after net sessions
-- Reads messages addressed to the net address, filtered by date window around the net session
+- Reads messages addressed to the net address, filtered by session start/end dates plus grace period; messages within the grace period are accepted but flagged as early/late
 
 ### Message Parsing Pipeline
 
@@ -218,6 +220,7 @@ Status lifecycle: `draft` → `approved` → `sent` (or `skipped`).
 - `latitude` — nullable, from GPS-equipped forms
 - `longitude` — nullable, from GPS-equipped forms
 - `parse_status` — enum: `auto`, `manual_review`, `manually_entered`
+- `timing_status` — enum: `on_time`, `early`, `late`; determined by whether the message was received within the session window or within the fudge factor
 - `is_new_member` — boolean, determined by lookup in long-term roster
 
 ### Manual Review UI
@@ -275,8 +278,7 @@ Status lifecycle: `draft` → `approved` → `sent` (or `skipped`).
 ### Long-term Roster
 
 **Member:**
-- `id` — primary key
-- `callsign` — unique
+- `callsign` — primary key
 - `name` — participant name
 - `first_check_in_date` — date of first check-in
 - `last_check_in_date` — date of most recent check-in
@@ -299,6 +301,12 @@ Status lifecycle: `draft` → `approved` → `sent` (or `skipped`).
 - `admin` — full access: manage schedule, configuration, all modules
 - `net_control` — review and approve check-ins and rosters for assigned sessions, manage activities
 - `viewer` — read-only: view schedules, rosters, maps, participation history
+
+### User Identity
+
+- Callsign is the primary key for users — globally unique in ham radio
+- OIDC subject is mapped to a callsign on first login (admin assigns or user self-registers their callsign)
+- All foreign keys referencing users (net_control_callsign, approved_by, etc.) use the callsign directly
 
 ### Role Assignment
 
@@ -332,7 +340,7 @@ Secrets (API keys, OIDC client secret) are stored encrypted or managed via envir
 
 - Declarative configuration for all settings (net address, mailbox path, OIDC, etc.)
 - Runs as a systemd service
-- SQLite database in a configurable state directory
+- Database URL configurable — defaults to SQLite in a configurable state directory, supports PostgreSQL
 - Secrets via sops-nix or agenix
 
 ### OCI Image (`oci.nix`)
@@ -340,7 +348,7 @@ Secrets (API keys, OIDC client secret) are stored encrypted or managed via envir
 - Built via `dockerTools.buildLayeredImage` — no Dockerfile
 - Same Nix derivation as the NixOS package
 - Configuration via environment variables
-- SQLite database on a mounted volume
+- Database URL via environment variable — SQLite on a mounted volume by default, or point to an external PostgreSQL
 
 ### Development Environment
 
