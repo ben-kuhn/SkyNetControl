@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# Node
+node_modules/
+frontend/dist/
+
+# Database
+*.db
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Nix
+result
+result-*
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Superpowers
+.superpowers/
+
+# Environment
+.env
+.env.local
