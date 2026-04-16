@@ -1,4 +1,8 @@
+import os
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from backend.config import Settings, settings as default_settings
@@ -24,5 +28,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             pass
         return {"status": "ok", "version": "0.1.0", "database": db_status}
+
+    # Serve frontend static files if the directory exists
+    if os.path.isdir(settings.static_dir):
+        assets_dir = os.path.join(settings.static_dir, "assets")
+        if os.path.isdir(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        @app.get("/{path:path}")
+        async def serve_frontend(path: str):
+            # Serve the file if it exists, otherwise fall back to index.html (SPA routing)
+            file_path = os.path.join(settings.static_dir, path)
+            if path and os.path.isfile(file_path):
+                return FileResponse(file_path)
+            return FileResponse(os.path.join(settings.static_dir, "index.html"))
 
     return app
