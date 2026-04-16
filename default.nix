@@ -22,6 +22,9 @@ python.pkgs.buildPythonApplication {
     alembic
     pydantic
     pydantic-settings
+    authlib
+    python-jose
+    httpx
   ];
 
   postInstall = ''
