@@ -2,11 +2,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.app import create_app
+from backend.config import Settings
 
 
 @pytest.fixture
-def app():
-    return create_app()
+def test_settings():
+    return Settings(database_url="sqlite:///", debug=True)
+
+
+@pytest.fixture
+def app(test_settings):
+    return create_app(settings=test_settings)
 
 
 @pytest.fixture
