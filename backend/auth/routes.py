@@ -1,5 +1,7 @@
+import secrets
+
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -24,20 +26,33 @@ async def _get_oidc_client(settings: Settings) -> AsyncOAuth2Client:
 @auth_router.get("/login")
 async def login(request: Request, app_settings: Settings = Depends(get_settings)):
     client = await _get_oidc_client(app_settings)
-    authorization_url, state = await client.create_authorization_url(
-        f"{app_settings.oidc_issuer_url}/authorize"
+    state = secrets.token_urlsafe(32)
+    authorization_url, _ = await client.create_authorization_url(
+        f"{app_settings.oidc_issuer_url}/authorize", state=state
     )
-    request.session_state = state
-    return RedirectResponse(url=authorization_url)
+    response = RedirectResponse(url=authorization_url)
+    response.set_cookie(
+        key="oauth_state",
+        value=state,
+        httponly=True,
+        samesite="lax",
+        max_age=600,  # 10 minutes
+    )
+    return response
 
 
 @auth_router.get("/callback")
 async def callback(
     request: Request,
     code: str,
+    state: str = "",
+    oauth_state: str | None = Cookie(default=None),
     db: Session = Depends(get_db_session),
     app_settings: Settings = Depends(get_settings),
 ):
+    if not oauth_state or not secrets.compare_digest(oauth_state, state):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
     client = await _get_oidc_client(app_settings)
     token_response = await client.fetch_token(
         f"{app_settings.oidc_issuer_url}/token",
@@ -49,6 +64,8 @@ async def callback(
     userinfo_data = userinfo.json()
 
     oidc_subject = userinfo_data.get("sub", "")
+    if not oidc_subject:
+        raise HTTPException(status_code=400, detail="OIDC provider did not return a subject")
     name = userinfo_data.get("name", userinfo_data.get("preferred_username", "Unknown"))
 
     # Look up existing user by OIDC subject
@@ -79,10 +96,12 @@ async def callback(
         user.callsign, user.role.value, app_settings
     )
     response = RedirectResponse(url=app_settings.app_base_url)
+    is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
+        secure=is_secure,
         samesite="lax",
         max_age=app_settings.jwt_expire_minutes * 60,
     )
@@ -101,12 +120,12 @@ async def me(user: User = Depends(get_current_user)):
 @auth_router.post("/logout")
 async def logout():
     response = Response(content='{"message": "logged out"}', media_type="application/json")
-    response.delete_cookie(key="access_token")
+    response.delete_cookie(key="access_token", httponly=True, samesite="lax")
     return response
 
 
 class UserRoleUpdate(BaseModel):
-    role: str
+    role: UserRole
 
 
 @auth_router.get("/users")
@@ -135,7 +154,7 @@ async def update_user_role(
     target_user = db.get(User, callsign)
     if target_user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    target_user.role = UserRole(body.role)
+    target_user.role = body.role
     db.commit()
     db.refresh(target_user)
     return {

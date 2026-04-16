@@ -59,8 +59,8 @@ class SeasonResponse(BaseModel):
 
 
 class SessionUpdate(BaseModel):
-    status: str | None = None
-    session_type: str | None = None
+    status: SessionStatus | None = None
+    session_type: SessionType | None = None
     net_control_callsign: str | None = None
     activity_id: int | None = None
     grace_period_hours: float | None = None
@@ -186,9 +186,9 @@ async def update_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     if body.status is not None:
-        session_obj.status = SessionStatus(body.status)
+        session_obj.status = body.status
     if body.session_type is not None:
-        session_obj.session_type = SessionType(body.session_type)
+        session_obj.session_type = body.session_type
     if body.net_control_callsign is not None:
         session_obj.net_control_callsign = body.net_control_callsign
     if body.activity_id is not None:
