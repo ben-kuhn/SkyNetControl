@@ -7,6 +7,9 @@ from sqlalchemy import text
 
 from backend.config import Settings, settings as default_settings
 from backend.db.session import create_engine_from_url, create_session_factory
+from backend.auth.routes import auth_router
+from backend.config_mgmt.routes import config_router
+from backend.modules.schedule.routes import schedule_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -17,6 +20,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     session_factory = create_session_factory(engine)
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.settings = settings
 
     @app.get("/api/health")
     async def health():
@@ -29,6 +33,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         return {"status": "ok", "version": "0.1.0", "database": db_status}
 
+    # Register API routers
+    app.include_router(auth_router, prefix="/api/auth")
+    app.include_router(config_router, prefix="/api/config")
+    app.include_router(schedule_router, prefix="/api/schedule")
+
     # Serve frontend static files if the directory exists
     if os.path.isdir(settings.static_dir):
         assets_dir = os.path.join(settings.static_dir, "assets")
@@ -37,7 +46,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         @app.get("/{path:path}")
         async def serve_frontend(path: str):
-            # Serve the file if it exists, otherwise fall back to index.html (SPA routing)
             file_path = os.path.join(settings.static_dir, path)
             if path and os.path.isfile(file_path):
                 return FileResponse(file_path)
