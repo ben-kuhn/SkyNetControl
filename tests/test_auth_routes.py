@@ -114,3 +114,83 @@ async def test_login_redirects(test_client):
             "/api/auth/login", follow_redirects=False
         )
         assert response.status_code == 307 or response.status_code == 302
+
+
+@pytest.mark.asyncio
+async def test_admin_can_list_users(test_client, test_settings, db_setup):
+    _, factory = db_setup
+    with factory() as session:
+        user = User(
+            callsign="W0NE",
+            oidc_subject="auth0|admin",
+            name="Admin",
+            role=UserRole.ADMIN,
+        )
+        session.add(user)
+        session.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    response = await test_client.get(
+        "/api/auth/users", cookies={"access_token": token}
+    )
+    assert response.status_code == 200
+    users = response.json()
+    assert len(users) == 1
+    assert users[0]["callsign"] == "W0NE"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_update_user_role(test_client, test_settings, db_setup):
+    _, factory = db_setup
+    with factory() as session:
+        admin = User(
+            callsign="W0NE",
+            oidc_subject="auth0|admin",
+            name="Admin",
+            role=UserRole.ADMIN,
+        )
+        viewer = User(
+            callsign="KD0TST",
+            oidc_subject="auth0|viewer",
+            name="Viewer",
+            role=UserRole.VIEWER,
+        )
+        session.add_all([admin, viewer])
+        session.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    response = await test_client.patch(
+        "/api/auth/users/KD0TST",
+        json={"role": "net_control"},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["role"] == "net_control"
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_update_roles(test_client, test_settings, db_setup):
+    _, factory = db_setup
+    with factory() as session:
+        admin = User(
+            callsign="W0NE",
+            oidc_subject="auth0|admin",
+            name="Admin",
+            role=UserRole.ADMIN,
+        )
+        viewer = User(
+            callsign="KD0TST",
+            oidc_subject="auth0|viewer",
+            name="Viewer",
+            role=UserRole.VIEWER,
+        )
+        session.add_all([admin, viewer])
+        session.commit()
+
+    token = create_access_token("KD0TST", "viewer", test_settings)
+    response = await test_client.patch(
+        "/api/auth/users/W0NE",
+        json={"role": "viewer"},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 403

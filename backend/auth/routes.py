@@ -1,9 +1,10 @@
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, get_settings
+from backend.auth.dependencies import get_current_user, get_db_session, get_settings, require_role
 from backend.auth.models import User, UserRole
 from backend.auth.service import create_access_token
 from backend.config import Settings
@@ -102,3 +103,43 @@ async def logout():
     response = Response(content='{"message": "logged out"}', media_type="application/json")
     response.delete_cookie(key="access_token")
     return response
+
+
+class UserRoleUpdate(BaseModel):
+    role: str
+
+
+@auth_router.get("/users")
+async def list_users(
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    users = db.query(User).order_by(User.callsign).all()
+    return [
+        {
+            "callsign": u.callsign,
+            "name": u.name,
+            "role": u.role.value,
+        }
+        for u in users
+    ]
+
+
+@auth_router.patch("/users/{callsign}")
+async def update_user_role(
+    callsign: str,
+    body: UserRoleUpdate,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    target_user = db.get(User, callsign)
+    if target_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    target_user.role = UserRole(body.role)
+    db.commit()
+    db.refresh(target_user)
+    return {
+        "callsign": target_user.callsign,
+        "name": target_user.name,
+        "role": target_user.role.value,
+    }
