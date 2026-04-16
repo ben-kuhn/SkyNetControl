@@ -31,6 +31,9 @@ alembic/versions/__pycache__/
 # Superpowers
 .superpowers/
 
+# Worktrees
+.worktrees/
+
 # Environment
 .env
 .env.local
