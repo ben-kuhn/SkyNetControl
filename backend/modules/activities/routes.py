@@ -4,7 +4,16 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session, require_role
 from backend.auth.models import User, UserRole
+from backend.config_mgmt.service import get_config_value
+from backend.modules.activities.chat_service import (
+    create_chat_session,
+    get_chat_history,
+    get_chat_session,
+    link_chat_to_activity,
+    send_message,
+)
 from backend.modules.activities.models import Activity, ActivityTag
+from backend.modules.activities.models import ChatSession as ChatSessionModel
 from backend.modules.activities.service import (
     create_activity,
     delete_activity,
@@ -137,3 +146,121 @@ async def delete_activity_route(
     if activity.is_default:
         raise HTTPException(status_code=403, detail="Cannot delete the default activity")
     delete_activity(db, activity_id)
+
+
+# --- Chat schemas ---
+
+
+class ChatMessageRequest(BaseModel):
+    content: str
+
+
+class ChatApproveRequest(BaseModel):
+    title: str
+    description: str
+    instructions: str
+    tag_names: list[str] = []
+
+
+# --- Chat helpers ---
+
+
+def _chat_session_to_response(chat, messages=None):
+    msgs = messages if messages is not None else (chat.messages if chat.messages else [])
+    return {
+        "id": chat.id,
+        "activity_id": chat.activity_id,
+        "created_at": chat.created_at.isoformat(),
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role.value,
+                "content": m.content,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in msgs
+        ],
+    }
+
+
+def _message_to_response(msg):
+    return {
+        "id": msg.id,
+        "role": msg.role.value,
+        "content": msg.content,
+        "created_at": msg.created_at.isoformat(),
+    }
+
+
+# --- Chat routes ---
+
+
+@activities_router.post("/chat/sessions", status_code=201)
+async def create_chat_session_route(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    chat = create_chat_session(db)
+    return _chat_session_to_response(chat)
+
+
+@activities_router.get("/chat/sessions/{chat_session_id}")
+async def get_chat_session_route(
+    chat_session_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    chat = get_chat_session(db, chat_session_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    messages = get_chat_history(db, chat_session_id)
+    return _chat_session_to_response(chat, messages)
+
+
+@activities_router.post("/chat/sessions/{chat_session_id}/messages")
+async def send_chat_message_route(
+    chat_session_id: int,
+    body: ChatMessageRequest,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    chat = get_chat_session(db, chat_session_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    api_key = get_config_value(db, "claude_api_key")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Claude API key not configured. Set 'claude_api_key' in app config.",
+        )
+
+    user_msg, assistant_msg = send_message(
+        db, chat_session_id, body.content, api_key=api_key
+    )
+    return {
+        "user_message": _message_to_response(user_msg),
+        "assistant_message": _message_to_response(assistant_msg),
+    }
+
+
+@activities_router.post("/chat/sessions/{chat_session_id}/approve", status_code=201)
+async def approve_chat_route(
+    chat_session_id: int,
+    body: ChatApproveRequest,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    chat = get_chat_session(db, chat_session_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    activity = create_activity(
+        db,
+        title=body.title,
+        description=body.description,
+        instructions=body.instructions,
+        tag_names=body.tag_names,
+    )
+    link_chat_to_activity(db, chat_session_id, activity.id)
+    return _activity_to_response(activity)
