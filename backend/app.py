@@ -11,6 +11,7 @@ from backend.auth.routes import auth_router
 from backend.config_mgmt.routes import config_router
 from backend.modules.schedule.routes import schedule_router
 from backend.modules.activities.routes import activities_router
+from backend.modules.checkins.routes import checkins_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(config_router, prefix="/api/config")
     app.include_router(schedule_router, prefix="/api/schedule")
     app.include_router(activities_router, prefix="/api/activities")
+    app.include_router(checkins_router, prefix="/api/checkins")
 
     # Serve frontend static files if the directory exists
     if os.path.isdir(settings.static_dir):
