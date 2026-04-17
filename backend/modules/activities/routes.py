@@ -12,8 +12,7 @@ from backend.modules.activities.chat_service import (
     link_chat_to_activity,
     send_message,
 )
-from backend.modules.activities.models import Activity, ActivityTag
-from backend.modules.activities.models import ChatSession as ChatSessionModel
+from backend.modules.activities.models import Activity, ActivityTag, ChatMessage, ChatSession
 from backend.modules.activities.service import (
     create_activity,
     delete_activity,
@@ -165,7 +164,7 @@ class ChatApproveRequest(BaseModel):
 # --- Chat helpers ---
 
 
-def _chat_session_to_response(chat, messages=None):
+def _chat_session_to_response(chat: ChatSession, messages: list[ChatMessage] | None = None) -> dict:
     msgs = messages if messages is not None else (chat.messages if chat.messages else [])
     return {
         "id": chat.id,
@@ -183,7 +182,7 @@ def _chat_session_to_response(chat, messages=None):
     }
 
 
-def _message_to_response(msg):
+def _message_to_response(msg: ChatMessage) -> dict:
     return {
         "id": msg.id,
         "role": msg.role.value,
@@ -235,9 +234,14 @@ async def send_chat_message_route(
             detail="Claude API key not configured. Set 'claude_api_key' in app config.",
         )
 
-    user_msg, assistant_msg = send_message(
-        db, chat_session_id, body.content, api_key=api_key
-    )
+    try:
+        user_msg, assistant_msg = send_message(
+            db, chat_session_id, body.content, api_key=api_key
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Claude API error: {exc}"
+        ) from exc
     return {
         "user_message": _message_to_response(user_msg),
         "assistant_message": _message_to_response(assistant_msg),
