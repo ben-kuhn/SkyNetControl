@@ -99,15 +99,13 @@ def scan_and_import_messages(
     net_session: NetSession,
 ) -> list[CheckIn]:
     """Import raw message dicts, deduplicate by callsign (keep latest), skip existing."""
-    existing_ids = set()
-    for msg in raw_messages:
-        existing = (
-            db.query(RawMessage)
-            .filter(RawMessage.message_id == msg["message_id"])
-            .first()
-        )
-        if existing:
-            existing_ids.add(msg["message_id"])
+    all_msg_ids = [msg["message_id"] for msg in raw_messages]
+    existing_ids = set(
+        row[0]
+        for row in db.query(RawMessage.message_id)
+        .filter(RawMessage.message_id.in_(all_msg_ids))
+        .all()
+    )
 
     new_messages = [m for m in raw_messages if m["message_id"] not in existing_ids]
 
@@ -118,15 +116,14 @@ def scan_and_import_messages(
 
     parsed_checkins: dict[str, CheckIn] = {}
     for msg_dict in new_messages:
-        msg_type, fields = parse_message(msg_dict["body"])
         raw = RawMessage(
             message_id=msg_dict["message_id"],
             from_address=msg_dict["from_address"],
             received_at=msg_dict["received_at"],
             subject=msg_dict["subject"],
             body=msg_dict["body"],
-            message_type=msg_type,
-            parsed=True,
+            message_type=MessageType.UNKNOWN,
+            parsed=False,
         )
         db.add(raw)
         db.flush()
