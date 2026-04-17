@@ -25,6 +25,7 @@ python.pkgs.buildPythonApplication {
     authlib
     python-jose
     httpx
+    anthropic
   ];
 
   postInstall = ''
