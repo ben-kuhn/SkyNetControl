@@ -26,6 +26,7 @@ python.pkgs.buildPythonApplication {
     python-jose
     httpx
     anthropic
+    jinja2
   ];
 
   postInstall = ''
