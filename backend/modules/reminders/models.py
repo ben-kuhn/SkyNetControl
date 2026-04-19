@@ -13,7 +13,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.db.base import Base
-from backend.modules.schedule.models import NetSession
 
 
 class TemplateType(str, enum.Enum):
@@ -40,7 +39,7 @@ class ReminderTemplate(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     logs: Mapped[list["ReminderLog"]] = relationship(
-        back_populates="template", cascade="all, delete-orphan"
+        back_populates="template"
     )
 
 
@@ -70,5 +69,5 @@ class ReminderLog(Base):
     )
     approved_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    session: Mapped[NetSession] = relationship()
+    session: Mapped["NetSession"] = relationship()
     template: Mapped["ReminderTemplate | None"] = relationship(back_populates="logs")

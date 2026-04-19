@@ -187,7 +187,7 @@ async def list_reminders_route(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
         query = query.filter(ReminderLog.status == status_enum)
-    logs = query.all()
+    logs = query.order_by(ReminderLog.drafted_at.desc()).all()
     return [_reminder_to_response(log) for log in logs]
 
 

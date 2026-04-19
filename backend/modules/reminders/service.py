@@ -133,6 +133,7 @@ def _build_next_week_preview(db: Session, current_session: NetSession) -> str:
         .filter(
             NetSession.season_id == current_session.season_id,
             NetSession.start_date > current_session.start_date,
+            NetSession.status != SessionStatus.CANCELLED,
         )
         .order_by(NetSession.start_date)
         .first()
@@ -154,9 +155,6 @@ def build_template_context(db: Session, net_session: NetSession) -> dict:
     season = net_session.season
 
     # Date formatting
-    date_str = net_session.start_date.strftime("%-B %-d, %Y")
-    # Use platform-portable strftime for month/day without leading zeros
-    # strftime("%-B") is Linux-specific; construct manually for portability
     month_name = net_session.start_date.strftime("%B")
     day = net_session.start_date.day
     year = net_session.start_date.year
@@ -210,7 +208,10 @@ def render_reminder(
     """Render subject and body from a ReminderTemplate and context dict."""
     env = jinja2.Environment(undefined=jinja2.Undefined)
 
-    subject = env.from_string(template.subject_template).render(context)
+    try:
+        subject = env.from_string(template.subject_template).render(context)
+    except jinja2.TemplateError as exc:
+        subject = f"Template rendering error: {exc}"
 
     try:
         body = env.from_string(template.body_template).render(context)
