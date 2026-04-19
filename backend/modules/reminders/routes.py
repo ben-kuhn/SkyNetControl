@@ -1,0 +1,260 @@
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.auth.dependencies import get_current_user, get_db_session, require_role
+from backend.auth.models import User, UserRole
+from backend.modules.reminders.models import ReminderLog, ReminderStatus, ReminderTemplate, TemplateType
+from backend.modules.reminders.service import (
+    approve_reminder,
+    create_template,
+    delete_template,
+    generate_draft,
+    generate_due_drafts,
+    list_templates,
+    mark_sent,
+    skip_reminder,
+    update_draft,
+    update_template,
+)
+
+reminders_router = APIRouter(tags=["reminders"])
+
+
+# --- Pydantic schemas ---
+
+
+class TemplateCreate(BaseModel):
+    name: str
+    template_type: TemplateType
+    subject_template: str
+    body_template: str
+    lead_time_days: int = 2
+    is_default: bool = False
+
+
+class TemplateUpdate(BaseModel):
+    name: str | None = None
+    template_type: TemplateType | None = None
+    subject_template: str | None = None
+    body_template: str | None = None
+    lead_time_days: int | None = None
+    is_default: bool | None = None
+
+
+class DraftUpdate(BaseModel):
+    content_subject: str | None = None
+    content_body: str | None = None
+
+
+# --- Helpers ---
+
+
+def _template_to_response(template: ReminderTemplate) -> dict:
+    return {
+        "id": template.id,
+        "name": template.name,
+        "template_type": template.template_type.value,
+        "subject_template": template.subject_template,
+        "body_template": template.body_template,
+        "lead_time_days": template.lead_time_days,
+        "is_default": template.is_default,
+    }
+
+
+def _reminder_to_response(log: ReminderLog) -> dict:
+    return {
+        "id": log.id,
+        "session_id": log.session_id,
+        "template_id": log.template_id,
+        "status": log.status.value,
+        "content_subject": log.content_subject,
+        "content_body": log.content_body,
+        "drafted_at": log.drafted_at.isoformat(),
+        "approved_at": log.approved_at.isoformat() if log.approved_at else None,
+        "sent_at": log.sent_at.isoformat() if log.sent_at else None,
+        "approved_by": log.approved_by,
+    }
+
+
+# --- Template routes ---
+
+
+@reminders_router.post("/templates", status_code=201)
+async def create_template_route(
+    body: TemplateCreate,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    template = create_template(
+        db,
+        name=body.name,
+        template_type=body.template_type,
+        subject_template=body.subject_template,
+        body_template=body.body_template,
+        lead_time_days=body.lead_time_days,
+        is_default=body.is_default,
+    )
+    return _template_to_response(template)
+
+
+@reminders_router.get("/templates")
+async def list_templates_route(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    templates = list_templates(db)
+    return [_template_to_response(t) for t in templates]
+
+
+@reminders_router.patch("/templates/{template_id}")
+async def update_template_route(
+    template_id: int,
+    body: TemplateUpdate,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    template = update_template(
+        db,
+        template_id,
+        name=body.name,
+        template_type=body.template_type,
+        subject_template=body.subject_template,
+        body_template=body.body_template,
+        lead_time_days=body.lead_time_days,
+        is_default=body.is_default,
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return _template_to_response(template)
+
+
+@reminders_router.delete("/templates/{template_id}", status_code=204)
+async def delete_template_route(
+    template_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.reminders.service import get_template
+    template = get_template(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if template.is_default:
+        raise HTTPException(status_code=400, detail="Cannot delete the default template")
+    delete_template(db, template_id)
+
+
+# --- Generation routes ---
+
+
+@reminders_router.post("/generate")
+async def generate_due_drafts_route(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    reminders = generate_due_drafts(db)
+    return {
+        "generated": len(reminders),
+        "reminders": [_reminder_to_response(r) for r in reminders],
+    }
+
+
+@reminders_router.post("/generate/{session_id}")
+async def generate_draft_route(
+    session_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = generate_draft(db, session_id)
+    if log is None:
+        raise HTTPException(status_code=404, detail="Session not found or no default template")
+    return _reminder_to_response(log)
+
+
+# --- Reminder list and detail routes ---
+
+
+@reminders_router.get("/")
+async def list_reminders_route(
+    status: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    query = db.query(ReminderLog)
+    if status is not None:
+        try:
+            status_enum = ReminderStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        query = query.filter(ReminderLog.status == status_enum)
+    logs = query.all()
+    return [_reminder_to_response(log) for log in logs]
+
+
+@reminders_router.get("/session/{session_id}")
+async def get_reminder_for_session_route(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    log = db.query(ReminderLog).filter(ReminderLog.session_id == session_id).first()
+    if log is None:
+        raise HTTPException(status_code=404, detail="Reminder not found for session")
+    return _reminder_to_response(log)
+
+
+# --- Reminder action routes ---
+
+
+@reminders_router.patch("/{reminder_id}")
+async def update_draft_route(
+    reminder_id: int,
+    body: DraftUpdate,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = update_draft(
+        db,
+        reminder_id,
+        content_subject=body.content_subject,
+        content_body=body.content_body,
+    )
+    if log is None:
+        raise HTTPException(status_code=409, detail="Reminder not in draft status")
+    return _reminder_to_response(log)
+
+
+@reminders_router.post("/{reminder_id}/approve")
+async def approve_reminder_route(
+    reminder_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = approve_reminder(db, reminder_id, approver_callsign=user.callsign)
+    if log is None:
+        raise HTTPException(status_code=409, detail="Reminder not in draft status")
+    return _reminder_to_response(log)
+
+
+@reminders_router.post("/{reminder_id}/send")
+async def mark_sent_route(
+    reminder_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = mark_sent(db, reminder_id)
+    if log is None:
+        raise HTTPException(status_code=409, detail="Reminder not in approved status")
+    return _reminder_to_response(log)
+
+
+@reminders_router.post("/{reminder_id}/skip")
+async def skip_reminder_route(
+    reminder_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = skip_reminder(db, reminder_id)
+    if log is None:
+        raise HTTPException(status_code=409, detail="Reminder not in skippable status")
+    return _reminder_to_response(log)
