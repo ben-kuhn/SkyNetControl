@@ -1,5 +1,6 @@
 import pytest
 from datetime import date, time
+from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -7,9 +8,9 @@ from backend.db.base import Base
 import backend.modules.schedule.models
 import backend.modules.activities.models
 import backend.modules.reminders.models
-from backend.modules.schedule.models import NetSeason, NetSession, SessionType
+from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
-from backend.modules.reminders.models import ReminderTemplate, TemplateType
+from backend.modules.reminders.models import ReminderTemplate, TemplateType, ReminderLog, ReminderStatus
 from backend.modules.reminders.service import (
     create_template,
     get_template,
@@ -18,6 +19,12 @@ from backend.modules.reminders.service import (
     delete_template,
     build_template_context,
     render_reminder,
+    generate_draft,
+    generate_due_drafts,
+    approve_reminder,
+    mark_sent,
+    skip_reminder,
+    update_draft,
 )
 
 
@@ -277,3 +284,282 @@ def test_render_reminder_bad_syntax(db: Session):
     )
     _, body = render_reminder(template, {})
     assert "error" in body.lower()
+
+
+# --- Draft generation and status transition tests ---
+
+def test_generate_draft(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    tmpl = create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }} at {{ time }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    assert log.template_id == tmpl.id
+    assert log.status == ReminderStatus.DRAFT
+    assert log.drafted_at is not None
+    assert "April 10, 2026" in log.content_subject
+    assert "April 10, 2026" in log.content_body
+
+
+def test_generate_draft_is_idempotent(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log1 = generate_draft(db, session1.id)
+    log2 = generate_draft(db, session1.id)
+    assert log1 is not None
+    assert log2 is not None
+    assert log1.id == log2.id
+
+
+def test_generate_draft_with_explicit_template(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    # Create a default template and a separate explicit one
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Default Subject",
+        body_template="Default body.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    explicit_tmpl = create_template(
+        db,
+        name="Explicit Template",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Explicit: {{ date }}",
+        body_template="Explicit body for {{ date }}.",
+        lead_time_days=3,
+        is_default=False,
+    )
+    log = generate_draft(db, session1.id, template_id=explicit_tmpl.id)
+    assert log is not None
+    assert log.template_id == explicit_tmpl.id
+    assert "Explicit" in log.content_subject
+
+
+def test_generate_due_drafts(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    # session1 is April 10, session2 is April 17
+    # With today=April 8, lead_time=3: session1 (2 days away) is due, session2 (9 days away) is not
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    create_template(
+        db,
+        name="Activity Default",
+        template_type=TemplateType.ACTIVITY,
+        subject_template="Activity: {{ activity_title }}",
+        body_template="Join us for {{ activity_title }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
+        drafts = generate_due_drafts(db)
+
+    assert len(drafts) == 1
+    assert drafts[0].session_id == session1.id
+
+
+def test_generate_due_drafts_skips_completed_sessions(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    # Mark session1 as completed
+    session1.status = SessionStatus.COMPLETED
+    db.commit()
+
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
+        drafts = generate_due_drafts(db)
+
+    session_ids = [d.session_id for d in drafts]
+    assert session1.id not in session_ids
+
+
+def test_approve_reminder(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+
+    approved = approve_reminder(db, log.id, approver_callsign="W0NE")
+    assert approved is not None
+    assert approved.status == ReminderStatus.APPROVED
+    assert approved.approved_by == "W0NE"
+    assert approved.approved_at is not None
+
+
+def test_approve_non_draft_returns_none(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    approve_reminder(db, log.id, approver_callsign="W0NE")
+
+    # Trying to approve again should return None
+    result = approve_reminder(db, log.id, approver_callsign="W0NE")
+    assert result is None
+
+
+def test_mark_sent(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    approve_reminder(db, log.id, approver_callsign="W0NE")
+
+    sent = mark_sent(db, log.id)
+    assert sent is not None
+    assert sent.status == ReminderStatus.SENT
+    assert sent.sent_at is not None
+
+
+def test_mark_sent_non_approved_returns_none(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+
+    # Trying to mark as sent while still DRAFT should return None
+    result = mark_sent(db, log.id)
+    assert result is None
+
+
+def test_skip_reminder_from_draft(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+
+    skipped = skip_reminder(db, log.id)
+    assert skipped is not None
+    assert skipped.status == ReminderStatus.SKIPPED
+
+
+def test_skip_reminder_from_approved(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    approve_reminder(db, log.id, approver_callsign="W0NE")
+
+    skipped = skip_reminder(db, log.id)
+    assert skipped is not None
+    assert skipped.status == ReminderStatus.SKIPPED
+
+
+def test_update_draft(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+
+    updated = update_draft(db, log.id, content_subject="New Subject", content_body="New Body")
+    assert updated is not None
+    assert updated.content_subject == "New Subject"
+    assert updated.content_body == "New Body"
+    assert updated.status == ReminderStatus.DRAFT
+
+
+def test_update_draft_non_draft_returns_none(db: Session, season_and_sessions):
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    approve_reminder(db, log.id, approver_callsign="W0NE")
+
+    # Cannot edit an approved reminder
+    result = update_draft(db, log.id, content_subject="Should Fail")
+    assert result is None

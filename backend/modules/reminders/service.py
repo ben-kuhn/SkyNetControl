@@ -1,18 +1,30 @@
 from __future__ import annotations
 
 import calendar
+from datetime import date as date_type, datetime, timezone
 
 import jinja2
 from sqlalchemy.orm import Session
 
 from backend.modules.activities.models import Activity
-from backend.modules.reminders.models import ReminderTemplate, TemplateType
-from backend.modules.schedule.models import NetSession, SessionType
+from backend.modules.reminders.models import ReminderTemplate, ReminderLog, ReminderStatus, TemplateType
+from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _today() -> date_type:
+    """Return today's date. Extracted for test mocking."""
+    return date_type.today()
+
+
+def _session_type_to_template_type(session_type: SessionType) -> TemplateType:
+    if session_type == SessionType.ACTIVITY:
+        return TemplateType.ACTIVITY
+    return TemplateType.REGULAR_CHECKIN
+
 
 def _clear_default(db: Session, template_type: TemplateType) -> None:
     """Clear is_default on all existing templates of the given type."""
@@ -206,3 +218,160 @@ def render_reminder(
         body = f"Template rendering error: {exc}"
 
     return subject, body
+
+
+# ---------------------------------------------------------------------------
+# Draft generation
+# ---------------------------------------------------------------------------
+
+def generate_draft(
+    db: Session,
+    session_id: int,
+    template_id: int | None = None,
+) -> ReminderLog | None:
+    """Create a DRAFT ReminderLog for the given session. Idempotent."""
+    # Idempotency: return existing log if one already exists for this session
+    existing = db.query(ReminderLog).filter(ReminderLog.session_id == session_id).first()
+    if existing is not None:
+        return existing
+
+    net_session = db.get(NetSession, session_id)
+    if net_session is None:
+        return None
+
+    if template_id is not None:
+        template = db.get(ReminderTemplate, template_id)
+    else:
+        tmpl_type = _session_type_to_template_type(net_session.session_type)
+        template = (
+            db.query(ReminderTemplate)
+            .filter(
+                ReminderTemplate.template_type == tmpl_type,
+                ReminderTemplate.is_default.is_(True),
+            )
+            .first()
+        )
+
+    if template is None:
+        return None
+
+    context = build_template_context(db, net_session)
+    subject, body = render_reminder(template, context)
+
+    log = ReminderLog(
+        session_id=session_id,
+        template_id=template.id,
+        status=ReminderStatus.DRAFT,
+        content_subject=subject,
+        content_body=body,
+        drafted_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def generate_due_drafts(db: Session) -> list[ReminderLog]:
+    """Generate drafts for all SCHEDULED sessions that are within their lead time."""
+    today = _today()
+
+    # Get all default templates to determine lead times per type
+    default_templates: dict[TemplateType, ReminderTemplate] = {}
+    for tmpl in db.query(ReminderTemplate).filter(ReminderTemplate.is_default.is_(True)).all():
+        default_templates[tmpl.template_type] = tmpl
+
+    # Find all SCHEDULED sessions that don't yet have a ReminderLog
+    existing_session_ids = {row[0] for row in db.query(ReminderLog.session_id).all()}
+
+    scheduled_sessions = (
+        db.query(NetSession)
+        .filter(NetSession.status == SessionStatus.SCHEDULED)
+        .all()
+    )
+
+    drafts: list[ReminderLog] = []
+    for session in scheduled_sessions:
+        if session.id in existing_session_ids:
+            continue
+
+        tmpl_type = _session_type_to_template_type(session.session_type)
+        template = default_templates.get(tmpl_type)
+        if template is None:
+            continue
+
+        days_until = (session.start_date - today).days
+        if days_until <= template.lead_time_days:
+            log = generate_draft(db, session.id, template_id=template.id)
+            if log is not None:
+                drafts.append(log)
+
+    return drafts
+
+
+# ---------------------------------------------------------------------------
+# Status transitions
+# ---------------------------------------------------------------------------
+
+def approve_reminder(
+    db: Session,
+    reminder_id: int,
+    approver_callsign: str,
+) -> ReminderLog | None:
+    """Transition a DRAFT reminder to APPROVED."""
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or log.status != ReminderStatus.DRAFT:
+        return None
+
+    log.status = ReminderStatus.APPROVED
+    log.approved_by = approver_callsign
+    log.approved_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def mark_sent(db: Session, reminder_id: int) -> ReminderLog | None:
+    """Transition an APPROVED reminder to SENT."""
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or log.status != ReminderStatus.APPROVED:
+        return None
+
+    log.status = ReminderStatus.SENT
+    log.sent_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def skip_reminder(db: Session, reminder_id: int) -> ReminderLog | None:
+    """Transition a DRAFT or APPROVED reminder to SKIPPED."""
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or log.status not in (ReminderStatus.DRAFT, ReminderStatus.APPROVED):
+        return None
+
+    log.status = ReminderStatus.SKIPPED
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def update_draft(
+    db: Session,
+    reminder_id: int,
+    content_subject: str | None = None,
+    content_body: str | None = None,
+) -> ReminderLog | None:
+    """Edit the subject/body of a DRAFT reminder."""
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or log.status != ReminderStatus.DRAFT:
+        return None
+
+    if content_subject is not None:
+        log.content_subject = content_subject
+    if content_body is not None:
+        log.content_body = content_body
+
+    db.commit()
+    db.refresh(log)
+    return log
