@@ -10,6 +10,81 @@ from backend.modules.schedule.models import (
 )
 
 
+def create_session(
+    db: Session,
+    start_date: date,
+    session_type: SessionType,
+    end_date: date | None = None,
+    season_id: int | None = None,
+    grace_period_hours: float = 24.0,
+    net_control_callsign: str | None = None,
+    activity_id: int | None = None,
+) -> NetSession:
+    session_obj = NetSession(
+        season_id=season_id,
+        start_date=start_date,
+        end_date=end_date,
+        grace_period_hours=grace_period_hours,
+        session_type=session_type,
+        status=SessionStatus.SCHEDULED,
+        net_control_callsign=net_control_callsign,
+        activity_id=activity_id,
+    )
+    db.add(session_obj)
+    db.commit()
+    db.refresh(session_obj)
+    return session_obj
+
+
+def get_session(db: Session, session_id: int) -> NetSession | None:
+    return db.get(NetSession, session_id)
+
+
+def list_sessions(
+    db: Session,
+    season_id: int | None = None,
+    status: SessionStatus | None = None,
+) -> list[NetSession]:
+    query = db.query(NetSession)
+    if season_id is not None:
+        query = query.filter(NetSession.season_id == season_id)
+    if status is not None:
+        query = query.filter(NetSession.status == status)
+    return query.order_by(NetSession.start_date).all()
+
+
+def update_session(
+    db: Session,
+    session_id: int,
+    status: SessionStatus | None = None,
+    session_type: SessionType | None = None,
+    net_control_callsign: str | None = None,
+    activity_id: int | None = None,
+    grace_period_hours: float | None = None,
+    end_date: date | None = None,
+) -> NetSession | None:
+    session_obj = db.get(NetSession, session_id)
+    if session_obj is None:
+        return None
+
+    if status is not None:
+        session_obj.status = status
+    if session_type is not None:
+        session_obj.session_type = session_type
+    if net_control_callsign is not None:
+        session_obj.net_control_callsign = net_control_callsign
+    if activity_id is not None:
+        session_obj.activity_id = activity_id
+    if grace_period_hours is not None:
+        session_obj.grace_period_hours = grace_period_hours
+    if end_date is not None:
+        session_obj.end_date = end_date
+
+    db.commit()
+    db.refresh(session_obj)
+    return session_obj
+
+
 def generate_sessions(
     db: Session,
     season: NetSeason,

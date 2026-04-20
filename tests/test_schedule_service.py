@@ -10,7 +10,13 @@ from backend.modules.schedule.models import (
     SessionType,
     SessionStatus,
 )
-from backend.modules.schedule.service import generate_sessions
+from backend.modules.schedule.service import (
+    generate_sessions,
+    create_session,
+    get_session,
+    list_sessions,
+    update_session,
+)
 
 
 @pytest.fixture
@@ -114,3 +120,139 @@ def test_generate_week_long_sessions(db: Session):
     assert sessions[1].end_date == date(2026, 6, 14)
     assert sessions[2].start_date == date(2026, 6, 15)
     assert sessions[2].end_date == date(2026, 6, 21)
+
+
+def test_create_adhoc_session(db: Session):
+    session_obj = create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REGULAR_CHECKIN,
+        net_control_callsign="W0NE",
+    )
+    assert session_obj.id is not None
+    assert session_obj.season_id is None
+    assert session_obj.end_date is None
+    assert session_obj.session_type == SessionType.REGULAR_CHECKIN
+    assert session_obj.status == SessionStatus.SCHEDULED
+    assert session_obj.grace_period_hours == 24.0
+
+
+def test_create_real_event_session(db: Session):
+    session_obj = create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REAL_EVENT,
+        net_control_callsign="W0NE",
+    )
+    assert session_obj.session_type == SessionType.REAL_EVENT
+    assert session_obj.season_id is None
+    assert session_obj.end_date is None
+
+
+def test_get_session(db: Session):
+    created = create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REGULAR_CHECKIN,
+    )
+    fetched = get_session(db, created.id)
+    assert fetched is not None
+    assert fetched.id == created.id
+
+    missing = get_session(db, 9999)
+    assert missing is None
+
+
+def test_list_sessions_no_filter(db: Session):
+    season = NetSeason(
+        name="Test",
+        start_date=date(2026, 9, 3),
+        end_date=date(2026, 9, 10),
+        day_of_week=3,
+        time=time(19, 0),
+        is_week_long=False,
+        activity_cadence=2,
+    )
+    db.add(season)
+    db.commit()
+    generate_sessions(db, season, default_net_control="W0NE")
+
+    create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REAL_EVENT,
+    )
+
+    all_sessions = list_sessions(db)
+    assert len(all_sessions) == 3  # 2 from season + 1 ad-hoc
+
+
+def test_list_sessions_filter_by_season(db: Session):
+    season = NetSeason(
+        name="Test",
+        start_date=date(2026, 9, 3),
+        end_date=date(2026, 9, 10),
+        day_of_week=3,
+        time=time(19, 0),
+        is_week_long=False,
+        activity_cadence=2,
+    )
+    db.add(season)
+    db.commit()
+    generate_sessions(db, season, default_net_control="W0NE")
+
+    create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REAL_EVENT,
+    )
+
+    season_sessions = list_sessions(db, season_id=season.id)
+    assert len(season_sessions) == 2
+    for s in season_sessions:
+        assert s.season_id == season.id
+
+
+def test_list_sessions_filter_by_status(db: Session):
+    s1 = create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REAL_EVENT,
+    )
+    create_session(
+        db,
+        start_date=date(2026, 4, 16),
+        session_type=SessionType.REGULAR_CHECKIN,
+    )
+
+    s1.status = SessionStatus.CANCELLED
+    db.commit()
+
+    cancelled = list_sessions(db, status=SessionStatus.CANCELLED)
+    assert len(cancelled) == 1
+    assert cancelled[0].id == s1.id
+
+
+def test_update_session(db: Session):
+    session_obj = create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REAL_EVENT,
+    )
+
+    updated = update_session(
+        db,
+        session_obj.id,
+        status=SessionStatus.COMPLETED,
+        end_date=date(2026, 4, 17),
+        net_control_callsign="W0NE",
+    )
+    assert updated is not None
+    assert updated.status == SessionStatus.COMPLETED
+    assert updated.end_date == date(2026, 4, 17)
+    assert updated.net_control_callsign == "W0NE"
+
+
+def test_update_session_not_found(db: Session):
+    result = update_session(db, 9999, status=SessionStatus.COMPLETED)
+    assert result is None
