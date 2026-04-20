@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn
 from backend.modules.roster.models import RosterTemplate, RosterLog, RosterStatus
-from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
+from backend.modules.schedule.models import NetSession, NetSeason, SessionStatus, SessionType
 
 
 # ---------------------------------------------------------------------------
@@ -240,3 +240,292 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
         "total_count": len(checkins),
         "map_url": map_url,
     }
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+def render_roster(
+    template: RosterTemplate,
+    context: dict,
+) -> dict[str, str]:
+    """Render all five template sections. Returns dict with keys: subject, header, welcome, comments, footer."""
+    env = jinja2.Environment(undefined=jinja2.Undefined)
+    sections = {}
+
+    for key, attr in [
+        ("subject", "subject_template"),
+        ("header", "header_template"),
+        ("welcome", "welcome_template"),
+        ("comments", "comments_template"),
+        ("footer", "footer_template"),
+    ]:
+        try:
+            sections[key] = env.from_string(getattr(template, attr)).render(context)
+        except jinja2.TemplateError as exc:
+            sections[key] = f"Template rendering error: {exc}"
+
+    return sections
+
+
+# ---------------------------------------------------------------------------
+# Draft Generation
+# ---------------------------------------------------------------------------
+
+def generate_draft(
+    db: Session,
+    session_id: int,
+    template_id: int | None = None,
+) -> RosterLog | None:
+    """Create a DRAFT RosterLog for the given session. Idempotent."""
+    existing = db.query(RosterLog).filter(RosterLog.session_id == session_id).first()
+    if existing is not None:
+        return existing
+
+    net_session = db.get(NetSession, session_id)
+    if net_session is None:
+        return None
+
+    if template_id is not None:
+        template = db.get(RosterTemplate, template_id)
+    else:
+        template = (
+            db.query(RosterTemplate)
+            .filter(RosterTemplate.is_default.is_(True))
+            .first()
+        )
+
+    if template is None:
+        return None
+
+    context = build_roster_context(db, net_session)
+    sections = render_roster(template, context)
+
+    log = RosterLog(
+        session_id=session_id,
+        template_id=template.id,
+        status=RosterStatus.DRAFT,
+        content_subject=sections["subject"],
+        content_header=sections["header"],
+        content_welcome=sections["welcome"],
+        content_comments=sections["comments"],
+        content_footer=sections["footer"],
+        map_url=context["map_url"] or None,
+        drafted_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def generate_due_drafts(db: Session) -> list[RosterLog]:
+    """Generate drafts for completed sessions past their lead time without a roster."""
+    today = _today()
+
+    default_template = (
+        db.query(RosterTemplate)
+        .filter(RosterTemplate.is_default.is_(True))
+        .first()
+    )
+    if default_template is None:
+        return []
+
+    existing_session_ids = {row[0] for row in db.query(RosterLog.session_id).all()}
+
+    completed_sessions = (
+        db.query(NetSession)
+        .filter(NetSession.status == SessionStatus.COMPLETED)
+        .all()
+    )
+
+    drafts: list[RosterLog] = []
+    for session in completed_sessions:
+        if session.id in existing_session_ids:
+            continue
+        # Skip sessions without end_date (real events need manual generation)
+        if session.end_date is None:
+            continue
+
+        days_since = (today - session.end_date).days
+        if days_since >= default_template.lead_time_days:
+            log = generate_draft(db, session.id, template_id=default_template.id)
+            if log is not None:
+                notify_ncs(db, session)
+                drafts.append(log)
+
+    return drafts
+
+
+# ---------------------------------------------------------------------------
+# Assembly
+# ---------------------------------------------------------------------------
+
+def assemble_roster(db: Session, roster_id: int) -> str | None:
+    """Assemble the full plain-text roster from prose sections and current check-in data."""
+    log = db.get(RosterLog, roster_id)
+    if log is None:
+        return None
+
+    checkins = (
+        db.query(CheckIn)
+        .filter(CheckIn.session_id == log.session_id)
+        .order_by(CheckIn.name)
+        .all()
+    )
+
+    table_lines = []
+    for ci in checkins:
+        marker = " *" if ci.is_new_member else ""
+        parts = [ci.name, ci.callsign]
+        if ci.city:
+            parts.append(ci.city)
+        if ci.county:
+            parts.append(ci.county)
+        if ci.state:
+            parts.append(ci.state)
+        parts.append(ci.mode)
+        if ci.comments:
+            parts.append(ci.comments)
+        table_lines.append(" | ".join(parts) + marker)
+
+    table = "\n".join(table_lines)
+
+    parts = [log.content_subject, "", log.content_header]
+    if table:
+        parts.extend(["", table])
+    if log.content_welcome.strip():
+        parts.extend(["", log.content_welcome])
+    if log.content_comments.strip():
+        parts.extend(["", log.content_comments])
+    parts.extend(["", log.content_footer])
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Status Transitions
+# ---------------------------------------------------------------------------
+
+def approve_roster(
+    db: Session,
+    roster_id: int,
+    approver_callsign: str,
+) -> RosterLog | None:
+    """Transition DRAFT → APPROVED. Finalizes member records via approve_session_checkins."""
+    from backend.modules.checkins.service import approve_session_checkins
+
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status != RosterStatus.DRAFT:
+        return None
+
+    approve_session_checkins(db, log.session_id)
+
+    log.status = RosterStatus.APPROVED
+    log.approved_by = approver_callsign
+    log.approved_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def mark_sent(db: Session, roster_id: int) -> RosterLog | None:
+    """Transition APPROVED → SENT."""
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status != RosterStatus.APPROVED:
+        return None
+
+    log.status = RosterStatus.SENT
+    log.sent_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def skip_roster(db: Session, roster_id: int) -> RosterLog | None:
+    """Transition DRAFT or APPROVED → SKIPPED."""
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status not in (RosterStatus.DRAFT, RosterStatus.APPROVED):
+        return None
+
+    log.status = RosterStatus.SKIPPED
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def update_draft(
+    db: Session,
+    roster_id: int,
+    content_subject: str | None = None,
+    content_header: str | None = None,
+    content_welcome: str | None = None,
+    content_comments: str | None = None,
+    content_footer: str | None = None,
+) -> RosterLog | None:
+    """Edit prose sections while status is DRAFT."""
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status != RosterStatus.DRAFT:
+        return None
+
+    if content_subject is not None:
+        log.content_subject = content_subject
+    if content_header is not None:
+        log.content_header = content_header
+    if content_welcome is not None:
+        log.content_welcome = content_welcome
+    if content_comments is not None:
+        log.content_comments = content_comments
+    if content_footer is not None:
+        log.content_footer = content_footer
+
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+# ---------------------------------------------------------------------------
+# GeoJSON
+# ---------------------------------------------------------------------------
+
+def get_session_geojson(db: Session, session_id: int) -> dict:
+    """Return a GeoJSON FeatureCollection of check-ins with GPS coordinates."""
+    checkins = (
+        db.query(CheckIn)
+        .filter(
+            CheckIn.session_id == session_id,
+            CheckIn.latitude.isnot(None),
+            CheckIn.longitude.isnot(None),
+        )
+        .all()
+    )
+
+    features = []
+    for ci in checkins:
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [ci.longitude, ci.latitude],
+            },
+            "properties": {
+                "name": ci.name,
+                "callsign": ci.callsign,
+                "is_new_member": ci.is_new_member,
+            },
+        })
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Notification Stub
+# ---------------------------------------------------------------------------
+
+def notify_ncs(db: Session, net_session: NetSession) -> None:
+    """No-op stub. Hook point for future notification system."""
+    pass
