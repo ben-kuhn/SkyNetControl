@@ -1,6 +1,6 @@
 from datetime import date, time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,13 @@ from backend.modules.schedule.models import (
     SessionStatus,
     SessionType,
 )
-from backend.modules.schedule.service import generate_sessions
+from backend.modules.schedule.service import (
+    generate_sessions,
+    create_session as create_session_service,
+    get_session as get_session_service,
+    list_sessions as list_sessions_service,
+    update_session as update_session_service,
+)
 
 schedule_router = APIRouter(tags=["schedule"])
 
@@ -64,9 +70,34 @@ class SessionUpdate(BaseModel):
     net_control_callsign: str | None = None
     activity_id: int | None = None
     grace_period_hours: float | None = None
+    end_date: date | None = None
 
 
-# --- Helper ---
+class SessionCreate(BaseModel):
+    start_date: date
+    end_date: date | None = None
+    session_type: SessionType
+    season_id: int | None = None
+    grace_period_hours: float = 24.0
+    net_control_callsign: str | None = None
+    activity_id: int | None = None
+
+
+# --- Helpers ---
+
+
+def _session_to_response(s: NetSession) -> dict:
+    return {
+        "id": s.id,
+        "season_id": s.season_id,
+        "start_date": s.start_date.isoformat(),
+        "end_date": s.end_date.isoformat() if s.end_date else None,
+        "grace_period_hours": s.grace_period_hours,
+        "session_type": s.session_type.value,
+        "status": s.status.value,
+        "activity_id": s.activity_id,
+        "net_control_callsign": s.net_control_callsign,
+    }
 
 
 def _season_to_response(season: NetSeason) -> dict:
@@ -79,19 +110,7 @@ def _season_to_response(season: NetSeason) -> dict:
         "time": season.time.strftime("%H:%M") if season.time else None,
         "is_week_long": season.is_week_long,
         "activity_cadence": season.activity_cadence,
-        "sessions": [
-            {
-                "id": s.id,
-                "start_date": s.start_date.isoformat(),
-                "end_date": s.end_date.isoformat(),
-                "grace_period_hours": s.grace_period_hours,
-                "session_type": s.session_type.value,
-                "status": s.status.value,
-                "activity_id": s.activity_id,
-                "net_control_callsign": s.net_control_callsign,
-            }
-            for s in season.sessions
-        ],
+        "sessions": [_session_to_response(s) for s in season.sessions],
     }
 
 
@@ -104,6 +123,11 @@ async def create_season(
     user: User = Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db_session),
 ):
+    if body.end_date < body.start_date:
+        raise HTTPException(status_code=400, detail="end_date must not be before start_date")
+    if not body.is_week_long and body.day_of_week is None:
+        raise HTTPException(status_code=400, detail="day_of_week is required for non-week-long seasons")
+
     parsed_time = None
     if body.time:
         parts = body.time.split(":")
@@ -151,7 +175,7 @@ async def get_season(
 
 
 @schedule_router.get("/seasons/{season_id}/sessions")
-async def list_sessions(
+async def list_season_sessions(
     season_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
@@ -159,19 +183,59 @@ async def list_sessions(
     season = db.get(NetSeason, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
-    return [
-        {
-            "id": s.id,
-            "start_date": s.start_date.isoformat(),
-            "end_date": s.end_date.isoformat(),
-            "grace_period_hours": s.grace_period_hours,
-            "session_type": s.session_type.value,
-            "status": s.status.value,
-            "activity_id": s.activity_id,
-            "net_control_callsign": s.net_control_callsign,
-        }
-        for s in season.sessions
-    ]
+    return [_session_to_response(s) for s in season.sessions]
+
+
+@schedule_router.post("/sessions", status_code=201)
+async def create_session_route(
+    body: SessionCreate,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    if body.session_type == SessionType.REAL_EVENT and body.season_id is not None:
+        raise HTTPException(status_code=400, detail="Real event sessions cannot belong to a season")
+
+    session_obj = create_session_service(
+        db,
+        start_date=body.start_date,
+        session_type=body.session_type,
+        end_date=body.end_date,
+        season_id=body.season_id,
+        grace_period_hours=body.grace_period_hours,
+        net_control_callsign=body.net_control_callsign,
+        activity_id=body.activity_id,
+    )
+    return _session_to_response(session_obj)
+
+
+@schedule_router.get("/sessions")
+async def list_sessions_route(
+    season_id: int | None = Query(default=None),
+    status: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    status_enum = None
+    if status is not None:
+        try:
+            status_enum = SessionStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+    sessions = list_sessions_service(db, season_id=season_id, status=status_enum)
+    return [_session_to_response(s) for s in sessions]
+
+
+@schedule_router.get("/sessions/{session_id}")
+async def get_session_route(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    session_obj = get_session_service(db, session_id)
+    if session_obj is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return _session_to_response(session_obj)
 
 
 @schedule_router.patch("/sessions/{session_id}")
@@ -181,34 +245,19 @@ async def update_session(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    session_obj = db.get(NetSession, session_id)
+    session_obj = update_session_service(
+        db,
+        session_id,
+        status=body.status,
+        session_type=body.session_type,
+        net_control_callsign=body.net_control_callsign,
+        activity_id=body.activity_id,
+        grace_period_hours=body.grace_period_hours,
+        end_date=body.end_date,
+    )
     if session_obj is None:
         raise HTTPException(status_code=404, detail="Session not found")
-
-    if body.status is not None:
-        session_obj.status = body.status
-    if body.session_type is not None:
-        session_obj.session_type = body.session_type
-    if body.net_control_callsign is not None:
-        session_obj.net_control_callsign = body.net_control_callsign
-    if body.activity_id is not None:
-        session_obj.activity_id = body.activity_id
-    if body.grace_period_hours is not None:
-        session_obj.grace_period_hours = body.grace_period_hours
-
-    db.commit()
-    db.refresh(session_obj)
-
-    return {
-        "id": session_obj.id,
-        "start_date": session_obj.start_date.isoformat(),
-        "end_date": session_obj.end_date.isoformat(),
-        "grace_period_hours": session_obj.grace_period_hours,
-        "session_type": session_obj.session_type.value,
-        "status": session_obj.status.value,
-        "activity_id": session_obj.activity_id,
-        "net_control_callsign": session_obj.net_control_callsign,
-    }
+    return _session_to_response(session_obj)
 
 
 @schedule_router.delete("/seasons/{season_id}", status_code=204)
