@@ -1,0 +1,294 @@
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.auth.dependencies import get_current_user, get_db_session, require_role
+from backend.auth.models import User, UserRole
+from backend.modules.roster.models import RosterLog, RosterStatus
+from backend.modules.roster.service import (
+    approve_roster as approve_roster_service,
+    assemble_roster as assemble_roster_service,
+    create_template as create_template_service,
+    delete_template as delete_template_service,
+    generate_draft as generate_draft_service,
+    generate_due_drafts as generate_due_drafts_service,
+    get_session_geojson as get_session_geojson_service,
+    get_template as get_template_service,
+    list_templates as list_templates_service,
+    mark_sent as mark_sent_service,
+    skip_roster as skip_roster_service,
+    update_draft as update_draft_service,
+    update_template as update_template_service,
+)
+
+roster_router = APIRouter(tags=["roster"])
+
+
+# --- Pydantic schemas ---
+
+class TemplateCreate(BaseModel):
+    name: str
+    subject_template: str
+    header_template: str
+    welcome_template: str
+    comments_template: str
+    footer_template: str
+    lead_time_days: int = 1
+    is_default: bool = False
+
+
+class TemplateUpdate(BaseModel):
+    name: str | None = None
+    subject_template: str | None = None
+    header_template: str | None = None
+    welcome_template: str | None = None
+    comments_template: str | None = None
+    footer_template: str | None = None
+    lead_time_days: int | None = None
+    is_default: bool | None = None
+
+
+class DraftUpdate(BaseModel):
+    content_subject: str | None = None
+    content_header: str | None = None
+    content_welcome: str | None = None
+    content_comments: str | None = None
+    content_footer: str | None = None
+
+
+# --- Helpers ---
+
+def _template_to_response(template) -> dict:
+    return {
+        "id": template.id,
+        "name": template.name,
+        "subject_template": template.subject_template,
+        "header_template": template.header_template,
+        "welcome_template": template.welcome_template,
+        "comments_template": template.comments_template,
+        "footer_template": template.footer_template,
+        "lead_time_days": template.lead_time_days,
+        "is_default": template.is_default,
+    }
+
+
+def _roster_to_response(log: RosterLog) -> dict:
+    return {
+        "id": log.id,
+        "session_id": log.session_id,
+        "template_id": log.template_id,
+        "status": log.status.value,
+        "content_subject": log.content_subject,
+        "content_header": log.content_header,
+        "content_welcome": log.content_welcome,
+        "content_comments": log.content_comments,
+        "content_footer": log.content_footer,
+        "map_url": log.map_url,
+        "drafted_at": log.drafted_at.isoformat(),
+        "approved_at": log.approved_at.isoformat() if log.approved_at else None,
+        "sent_at": log.sent_at.isoformat() if log.sent_at else None,
+        "approved_by": log.approved_by,
+    }
+
+
+# --- Template routes ---
+
+@roster_router.post("/templates", status_code=201)
+async def create_template_route(
+    body: TemplateCreate,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    template = create_template_service(
+        db,
+        name=body.name,
+        subject_template=body.subject_template,
+        header_template=body.header_template,
+        welcome_template=body.welcome_template,
+        comments_template=body.comments_template,
+        footer_template=body.footer_template,
+        lead_time_days=body.lead_time_days,
+        is_default=body.is_default,
+    )
+    return _template_to_response(template)
+
+
+@roster_router.get("/templates")
+async def list_templates_route(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    templates = list_templates_service(db)
+    return [_template_to_response(t) for t in templates]
+
+
+@roster_router.patch("/templates/{template_id}")
+async def update_template_route(
+    template_id: int,
+    body: TemplateUpdate,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    template = update_template_service(
+        db, template_id,
+        name=body.name,
+        subject_template=body.subject_template,
+        header_template=body.header_template,
+        welcome_template=body.welcome_template,
+        comments_template=body.comments_template,
+        footer_template=body.footer_template,
+        lead_time_days=body.lead_time_days,
+        is_default=body.is_default,
+    )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return _template_to_response(template)
+
+
+@roster_router.delete("/templates/{template_id}", status_code=204)
+async def delete_template_route(
+    template_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    template = get_template_service(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if template.is_default:
+        raise HTTPException(status_code=400, detail="Cannot delete the default template")
+    delete_template_service(db, template_id)
+
+
+# --- Generation routes ---
+
+@roster_router.post("/generate/{session_id}")
+async def generate_draft_route(
+    session_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = generate_draft_service(db, session_id)
+    if log is None:
+        raise HTTPException(status_code=404, detail="Session not found or no default template")
+    return _roster_to_response(log)
+
+
+@roster_router.post("/generate")
+async def generate_due_drafts_route(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    rosters = generate_due_drafts_service(db)
+    return {
+        "generated": len(rosters),
+        "rosters": [_roster_to_response(r) for r in rosters],
+    }
+
+
+# --- Roster management routes ---
+
+@roster_router.get("/")
+async def list_rosters_route(
+    status: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    query = db.query(RosterLog)
+    if status is not None:
+        try:
+            status_enum = RosterStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        query = query.filter(RosterLog.status == status_enum)
+    logs = query.order_by(RosterLog.drafted_at.desc()).all()
+    return [_roster_to_response(log) for log in logs]
+
+
+@roster_router.get("/session/{session_id}")
+async def get_roster_for_session_route(
+    session_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    log = db.query(RosterLog).filter(RosterLog.session_id == session_id).first()
+    if log is None:
+        raise HTTPException(status_code=404, detail="Roster not found for session")
+    return _roster_to_response(log)
+
+
+@roster_router.get("/{roster_id}/preview")
+async def preview_roster_route(
+    roster_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    text = assemble_roster_service(db, roster_id)
+    if text is None:
+        raise HTTPException(status_code=404, detail="Roster not found")
+    return {"text": text}
+
+
+@roster_router.patch("/{roster_id}")
+async def update_draft_route(
+    roster_id: int,
+    body: DraftUpdate,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = update_draft_service(
+        db, roster_id,
+        content_subject=body.content_subject,
+        content_header=body.content_header,
+        content_welcome=body.content_welcome,
+        content_comments=body.content_comments,
+        content_footer=body.content_footer,
+    )
+    if log is None:
+        raise HTTPException(status_code=409, detail="Roster not in draft status")
+    return _roster_to_response(log)
+
+
+@roster_router.post("/{roster_id}/approve")
+async def approve_roster_route(
+    roster_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = approve_roster_service(db, roster_id, approver_callsign=user.callsign)
+    if log is None:
+        raise HTTPException(status_code=409, detail="Roster not in draft status")
+    return _roster_to_response(log)
+
+
+@roster_router.post("/{roster_id}/send")
+async def mark_sent_route(
+    roster_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = mark_sent_service(db, roster_id)
+    if log is None:
+        raise HTTPException(status_code=409, detail="Roster not in approved status")
+    return _roster_to_response(log)
+
+
+@roster_router.post("/{roster_id}/skip")
+async def skip_roster_route(
+    roster_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = skip_roster_service(db, roster_id)
+    if log is None:
+        raise HTTPException(status_code=409, detail="Roster not in skippable status")
+    return _roster_to_response(log)
+
+
+# --- GeoJSON route (no auth) ---
+
+@roster_router.get("/session/{session_id}/geojson")
+async def geojson_route(
+    session_id: int,
+    db: Session = Depends(get_db_session),
+):
+    return get_session_geojson_service(db, session_id)
