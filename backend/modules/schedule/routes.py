@@ -39,8 +39,9 @@ class SeasonCreate(BaseModel):
 
 class SessionResponse(BaseModel):
     id: int
+    season_id: int | None
     start_date: date
-    end_date: date
+    end_date: date | None
     grace_period_hours: float
     session_type: str
     status: str

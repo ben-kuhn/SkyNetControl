@@ -21,15 +21,24 @@ def classify_timing(
     session_start = datetime.combine(
         net_session.start_date, datetime.min.time(), tzinfo=timezone.utc
     )
-    session_end = datetime.combine(
-        net_session.end_date, datetime.max.time(), tzinfo=timezone.utc
-    )
-
-    grace = timedelta(hours=net_session.grace_period_hours)
 
     # Ensure received_at is timezone-aware (SQLite may strip tzinfo on round-trip)
     if received_at.tzinfo is None:
         received_at = received_at.replace(tzinfo=timezone.utc)
+
+    grace = timedelta(hours=net_session.grace_period_hours)
+
+    # Open-ended sessions (real events) — no end date, so anything after start is on time
+    if net_session.end_date is None:
+        if received_at >= session_start:
+            return TimingStatus.ON_TIME
+        elif session_start - grace <= received_at < session_start:
+            return TimingStatus.EARLY
+        return TimingStatus.EARLY
+
+    session_end = datetime.combine(
+        net_session.end_date, datetime.max.time(), tzinfo=timezone.utc
+    )
 
     if session_start <= received_at <= session_end:
         return TimingStatus.ON_TIME
