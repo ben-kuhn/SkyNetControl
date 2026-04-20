@@ -2,7 +2,7 @@
 
 **Goal:** Automate testing, linting, Nix build verification, and OCI container publishing via GitHub Actions.
 
-**Architecture:** Two workflows — `ci.yml` (test + lint + build on every push/PR) and `container.yml` (build and push OCI image on push to main). All Nix-based using DeterminateSystems actions.
+**Architecture:** Two workflows — `ci.yml` (test + lint + build on every push/PR) and `container.yml` (build and push OCI image on push to main and version tags). All Nix-based using DeterminateSystems actions.
 
 **Tech Stack:** GitHub Actions, Nix, Ruff, pytest, `dockerTools.buildLayeredImage`
 
@@ -45,19 +45,20 @@ nix-build default.nix
 
 ## Container Workflow (`.github/workflows/container.yml`)
 
-**Trigger:** `push` to `main` only
+**Trigger:** `push` to `main` and version tags (`v*`)
 
 ### Job: build-and-push
 
 1. Install Nix + Magic Nix Cache
 2. `nix-build oci.nix` — produces Docker image tarball
 3. `docker load < result` — loads image into Docker
-4. Tag as `ghcr.io/<owner>/skynetcontrol:latest`
-5. `docker push` to GitHub Container Registry
+4. Tag and push to `ghcr.io/<owner>/skynetcontrol`
 
 **Auth:** Built-in `GITHUB_TOKEN` with `packages: write` permission. No manual secret configuration needed.
 
-**Image tag:** `latest` only (no version tags).
+**Image tags:**
+- Push to main: `latest`
+- Version tag (e.g., `v0.2.0`): `0.2.0` (strip the `v` prefix) + `latest`
 
 ---
 
@@ -109,7 +110,6 @@ Add `pkgs.ruff` to `buildInputs` so `ruff` is available in the dev shell.
 
 ## What This Phase Does NOT Include
 
-- **Version-tagged container images** — only `latest` for now; add tag-based builds when release workflow is needed
 - **Deployment automation** — pipeline builds and pushes images but does not deploy to any environment
 - **Secrets management** — OIDC/JWT secrets handled separately (future sops-nix/agenix integration)
 - **Frontend build step** — `frontend.nix` is a stub; real frontend build will replace it
