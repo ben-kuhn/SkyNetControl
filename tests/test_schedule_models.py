@@ -99,3 +99,24 @@ def test_session_belongs_to_season(db: Session):
     db.refresh(season)
     assert len(season.sessions) == 1
     assert season.sessions[0].id == s1.id
+
+
+def test_create_real_event_session_no_season(db: Session):
+    session_obj = NetSession(
+        season_id=None,
+        start_date=date(2026, 4, 15),
+        end_date=None,
+        grace_period_hours=24,
+        session_type=SessionType.REAL_EVENT,
+        status=SessionStatus.SCHEDULED,
+        net_control_callsign="W0NE",
+    )
+    db.add(session_obj)
+    db.commit()
+
+    fetched = db.get(NetSession, session_obj.id)
+    assert fetched is not None
+    assert fetched.session_type == SessionType.REAL_EVENT
+    assert fetched.season_id is None
+    assert fetched.end_date is None
+    assert fetched.season is None

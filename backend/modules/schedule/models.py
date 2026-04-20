@@ -19,6 +19,7 @@ from backend.db.base import Base
 class SessionType(str, enum.Enum):
     REGULAR_CHECKIN = "regular_checkin"
     ACTIVITY = "activity"
+    REAL_EVENT = "real_event"
 
 
 class SessionStatus(str, enum.Enum):
@@ -48,9 +49,9 @@ class NetSession(Base):
     __tablename__ = "net_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    season_id: Mapped[int] = mapped_column(Integer, ForeignKey("net_seasons.id"), nullable=False)
+    season_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("net_seasons.id"), nullable=True)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
-    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     grace_period_hours: Mapped[float] = mapped_column(Float, nullable=False, default=24.0)
     session_type: Mapped[SessionType] = mapped_column(Enum(SessionType), nullable=False)
     status: Mapped[SessionStatus] = mapped_column(
@@ -59,4 +60,4 @@ class NetSession(Base):
     activity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     net_control_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    season: Mapped["NetSeason"] = relationship(back_populates="sessions")
+    season: Mapped["NetSeason | None"] = relationship(back_populates="sessions")
