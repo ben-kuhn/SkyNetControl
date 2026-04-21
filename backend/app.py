@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from backend.auth.service import init_providers
 from backend.config import Settings, settings as default_settings
 from backend.db.session import create_engine_from_url, create_session_factory
 from backend.auth.routes import auth_router
@@ -25,6 +26,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.settings = settings
+
+    @app.on_event("startup")
+    async def startup():
+        app.state.providers = await init_providers(settings)
 
     @app.get("/api/health")
     async def health():
