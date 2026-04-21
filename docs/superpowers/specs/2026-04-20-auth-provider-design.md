@@ -238,6 +238,80 @@ The migration adds `ON UPDATE CASCADE` to all foreign keys referencing `users.ca
 
 ---
 
+## Email Notifications
+
+SMTP-based notifications for two events: new user registration (to admins) and user approval (to the user).
+
+### SMTP Configuration
+
+```
+SKYNET_SMTP_HOST=smtp.example.com
+SKYNET_SMTP_PORT=587
+SKYNET_SMTP_USERNAME=skynetcontrol@example.com
+SKYNET_SMTP_PASSWORD=app-password-here
+SKYNET_SMTP_USE_TLS=true
+SKYNET_SMTP_FROM_ADDRESS=skynetcontrol@example.com
+```
+
+**Pydantic Settings:**
+
+```python
+class SmtpSettings(BaseModel):
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password: str = ""
+    use_tls: bool = True
+    from_address: str = ""
+
+class Settings(BaseSettings):
+    # ... existing fields ...
+    smtp: SmtpSettings = SmtpSettings()
+```
+
+If `smtp.host` is empty, email is disabled — notifications are skipped silently with a log warning. The app functions normally without email configured.
+
+### Notification: New Registration → Admins
+
+**Triggered by:** `POST /api/auth/register` (after successful callsign registration)
+
+**Recipients:** All users with role `ADMIN` who have an email address on file.
+
+**Email content:**
+- Subject: `[SkyNetControl] New registration: {callsign}`
+- Body: `{name} has registered as {callsign} and is awaiting approval. Review pending users at {app_base_url}.`
+
+### Notification: Approval → User
+
+**Triggered by:** `PATCH /api/users/{callsign}` when `role` changes from `PENDING` to any non-PENDING role.
+
+**Recipient:** The approved user (by email address).
+
+**Email content:**
+- Subject: `[SkyNetControl] Your account has been approved`
+- Body: `Your account ({callsign}) has been approved as {role}. You can now access SkyNetControl at {app_base_url}.`
+
+### User Email Storage
+
+Add an `email` field to the `User` model:
+
+```python
+email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+```
+
+Populated from the OAuth provider's userinfo response during callback (most providers return `email` in their claims). Users without an email from their provider simply don't receive approval notifications — no blocker.
+
+### Implementation
+
+A single `backend/auth/email.py` module with:
+- `send_email(to, subject, body)` — sends via SMTP using Python's `smtplib` + `email.message`. Runs in a thread executor (`asyncio.to_thread`) to avoid blocking the event loop.
+- `notify_admins_new_registration(db, user, settings)` — queries admins, sends notification
+- `notify_user_approved(user, settings)` — sends approval notification
+
+Email sending is fire-and-forget: failures are logged but never raise to the caller. A failed notification should not block registration or approval.
+
+---
+
 ## Secrets Management (Documentation Only)
 
 No code changes. Add a `docs/deployment/secrets.md` guide covering:
@@ -256,9 +330,11 @@ All secrets use the `SKYNET_` prefix (handled by Pydantic Settings):
 | `SKYNET_AUTH_OIDC_ISSUER_URL` | Generic OIDC issuer URL | `https://auth.example.com/application/o/skynetcontrol` |
 | `SKYNET_AUTH_OIDC_CLIENT_ID` | Generic OIDC client ID | From provider dashboard |
 | `SKYNET_AUTH_OIDC_CLIENT_SECRET` | Generic OIDC client secret | From provider dashboard |
+| `SKYNET_SMTP_HOST` | SMTP server hostname | `smtp.example.com` |
+| `SKYNET_SMTP_PASSWORD` | SMTP auth password | App password from email provider |
 | `SKYNET_DATABASE_URL` | Database connection string | `postgresql://user:pass@host/db` |
 
-(Microsoft, Discord, Facebook follow the same `_CLIENT_ID` / `_CLIENT_SECRET` pattern.)
+(Microsoft, Discord, Facebook follow the same `_CLIENT_ID` / `_CLIENT_SECRET` pattern. See SMTP Configuration section for full SMTP settings.)
 
 ### Deployment Patterns
 
@@ -284,6 +360,7 @@ systemd.services.skynetcontrol.serviceConfig.EnvironmentFile =
 SKYNET_JWT_SECRET_KEY=hex-string-here
 SKYNET_AUTH_GOOGLE_CLIENT_SECRET=secret-here
 SKYNET_AUTH_GITHUB_CLIENT_SECRET=secret-here
+SKYNET_SMTP_PASSWORD=app-password-here
 ```
 
 **Docker/OCI:**
@@ -303,14 +380,15 @@ docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
 
 | File | Action | Description |
 |------|--------|-------------|
-| `backend/auth/models.py` | Modify | Add `PENDING` to `UserRole` enum |
+| `backend/auth/models.py` | Modify | Add `PENDING` to `UserRole` enum, add `email` field to `User` |
 | `backend/auth/providers.py` | Create | Provider registry — per-provider OAuth2/OIDC config, endpoint URLs, userinfo extraction |
 | `backend/auth/routes.py` | Rewrite | Multi-provider login/callback, registration endpoint, callsign change endpoint, providers list |
 | `backend/auth/dependencies.py` | Modify | Add `require_not_pending()` dependency |
+| `backend/auth/email.py` | Create | SMTP email sending, admin notification on registration, user notification on approval |
 | `backend/auth/service.py` | Modify | Add OIDC discovery fetch, provider initialization |
-| `backend/config.py` | Modify | Replace single OIDC settings with per-provider `ProviderSettings` models, add `env_nested_delimiter` |
+| `backend/config.py` | Modify | Replace single OIDC settings with per-provider `ProviderSettings` + `SmtpSettings` models, add `env_nested_delimiter` |
 | `backend/app.py` | Modify | Initialize enabled providers on startup, store in `app.state.providers` |
-| `alembic/versions/XXXX_add_pending_role_and_cascade.py` | Create | Add PENDING enum value, add ON UPDATE CASCADE to callsign FKs |
+| `alembic/versions/XXXX_add_pending_role_and_cascade.py` | Create | Add PENDING enum value, add `email` column to users, add ON UPDATE CASCADE to callsign FKs |
 | `docs/deployment/secrets.md` | Create | Secrets management guide |
 
 ---
@@ -318,7 +396,6 @@ docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
 ## What This Phase Does NOT Include
 
 - **Apple Sign In** — Unusual POST-based callback and key rotation adds complexity for limited user base benefit. Can be added later using the same provider registry pattern.
-- **Email notifications** — Admin approval is manual via the existing `/users/{callsign}` PATCH endpoint. No email/notification on approval.
 - **Rate limiting** — Callsign changes and registration are naturally infrequent.
 - **Frontend changes** — Frontend will need a provider selection screen, registration form, and pending-state UI, but that's a separate spec.
 - **Provider linking** — A user who signs in with Google and later signs in with GitHub gets two separate accounts. Account linking is a future enhancement.
