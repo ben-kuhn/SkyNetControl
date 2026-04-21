@@ -11,6 +11,7 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"
     NET_CONTROL = "net_control"
     VIEWER = "viewer"
+    PENDING = "pending"
 
 
 class User(Base):
@@ -20,6 +21,8 @@ class User(Base):
     oidc_subject: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pending_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

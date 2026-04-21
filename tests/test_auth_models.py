@@ -70,3 +70,51 @@ def test_oidc_subject_is_unique(db: Session):
     db.add(user2)
     with pytest.raises(Exception):
         db.commit()
+
+
+def test_pending_role_exists():
+    assert UserRole.PENDING.value == "pending"
+
+
+def test_user_email_nullable(app):
+    with app.state.session_factory() as session:
+        user = User(
+            callsign="W0TST",
+            oidc_subject="test|email",
+            name="Test",
+            role=UserRole.VIEWER,
+            email="test@example.com",
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        assert user.email == "test@example.com"
+
+
+def test_user_email_defaults_none(app):
+    with app.state.session_factory() as session:
+        user = User(
+            callsign="W0NOE",
+            oidc_subject="test|noemail",
+            name="No Email",
+            role=UserRole.VIEWER,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        assert user.email is None
+
+
+def test_user_pending_callsign(app):
+    with app.state.session_factory() as session:
+        user = User(
+            callsign="W0OLD",
+            oidc_subject="test|pending_cs",
+            name="Pending CS",
+            role=UserRole.VIEWER,
+            pending_callsign="W0NEW",
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        assert user.pending_callsign == "W0NEW"
