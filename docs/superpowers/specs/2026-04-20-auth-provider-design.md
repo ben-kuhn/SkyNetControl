@@ -276,7 +276,7 @@ The `GET /api/auth/me` response includes `pending_callsign` when set, so the fro
 
 ## Email Notifications
 
-SMTP-based notifications for two events: new user registration (to admins) and user approval (to the user).
+SMTP-based notifications for three events: new user registration (to admins), callsign change requests (to admins), and approvals (to the user).
 
 ### SMTP Configuration
 
@@ -351,8 +351,10 @@ Populated from the OAuth provider's userinfo response during callback (most prov
 
 A single `backend/auth/email.py` module with:
 - `send_email(to, subject, body)` — sends via SMTP using Python's `smtplib` + `email.message`. Runs in a thread executor (`asyncio.to_thread`) to avoid blocking the event loop.
-- `notify_admins_new_registration(db, user, settings)` — queries admins, sends notification
+- `notify_admins_new_registration(db, user, settings)` — queries admins, sends registration notification
+- `notify_admins_callsign_change(db, user, new_callsign, settings)` — queries admins, sends callsign change request notification
 - `notify_user_approved(user, settings)` — sends approval notification
+- `notify_user_callsign_approved(user, old_callsign, settings)` — sends callsign change confirmation
 
 Email sending is fire-and-forget: failures are logged but never raise to the caller. A failed notification should not block registration or approval.
 
