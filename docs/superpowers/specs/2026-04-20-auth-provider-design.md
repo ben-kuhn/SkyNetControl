@@ -1,39 +1,143 @@
 # Auth Provider Configuration & Secrets Management — Design Spec
 
-**Goal:** Replace hardcoded OIDC endpoint paths with discovery, add a registration flow with admin approval for new users, introduce a PENDING role, allow callsign changes, and document secrets management patterns.
+**Goal:** Support multiple auth providers (Google, Microsoft, GitHub, Discord, Facebook, Generic OIDC) as peers, add a registration flow with admin approval for new users, introduce a PENDING role, allow callsign changes, and document secrets management patterns.
 
-**Architecture:** OIDC discovery via `.well-known/openid-configuration` cached in app state. New users land in PENDING status with a placeholder callsign, then self-register with a validated callsign. Admins approve users via the existing role-update endpoint. Callsign changes cascade through a single transaction.
+**Architecture:** A provider registry maps provider names to their OAuth2/OIDC configuration. Each provider is independently enabled/disabled via settings. New users land in PENDING status, self-register with a validated callsign, and await admin approval. Callsign changes cascade via foreign keys.
 
 **Tech Stack:** FastAPI, Authlib, python-jose, SQLAlchemy 2.0+, Alembic, httpx
 
 ---
 
-## OIDC Discovery
+## Multi-Provider Auth
 
-Replace the current hardcoded endpoint construction (`{issuer}/authorize`, `{issuer}/token`, `{issuer}/userinfo`) with standard OIDC discovery.
+### Provider Registry
 
-**On app startup:**
+Six providers supported as peers — each is a named entry with its own enable flag and credentials:
 
-1. Fetch `{oidc_issuer_url}/.well-known/openid-configuration`
-2. Extract and cache `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint` in `app.state.oidc_config`
-3. If the fetch fails, log an error and raise — the app cannot start without valid OIDC configuration
+| Provider | Protocol | Discovery | Userinfo Mapping |
+|----------|----------|-----------|-----------------|
+| Google | OIDC | `https://accounts.google.com/.well-known/openid-configuration` | `sub`, `name`, `email` from ID token |
+| Microsoft | OIDC | `https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration` | `sub`, `name`, `email` from ID token |
+| GitHub | OAuth2 | Hardcoded (`https://github.com/login/oauth/authorize`, `/access_token`) | `id` as subject, `name` from `https://api.github.com/user` |
+| Discord | OAuth2 | Hardcoded (`https://discord.com/api/oauth2/authorize`, `/token`) | `id` as subject, `username` from `https://discord.com/api/users/@me` |
+| Facebook | OAuth2 | Hardcoded (`https://www.facebook.com/v19.0/dialog/oauth`, token + userinfo URLs) | `id` as subject, `name` from Graph API `/me?fields=id,name,email` |
+| Generic OIDC | OIDC | `{issuer_url}/.well-known/openid-configuration` | `sub`, `name` or `preferred_username` from userinfo endpoint |
 
-**Usage in auth routes:**
+Each provider entry in the registry defines:
+- `authorize_url`, `token_url`, `userinfo_url` (or `discovery_url` for OIDC providers)
+- `scopes` (provider-specific defaults, e.g., `openid email profile` for OIDC, `read:user` for GitHub)
+- `extract_subject(userinfo) -> str` — how to get the unique user identifier
+- `extract_name(userinfo) -> str` — how to get the display name
 
-- `login` reads `app.state.oidc_config["authorization_endpoint"]` instead of constructing `{issuer}/authorize`
-- `callback` reads `token_endpoint` and `userinfo_endpoint` similarly
+### Configuration
 
-**Config changes:** No new settings. The existing `oidc_issuer_url` is the discovery base URL.
+Settings use the existing `SKYNET_` env prefix. Each provider has three settings (plus `issuer_url` for Generic OIDC):
 
-**Why discovery matters:** Different OIDC providers (Authentik, PocketID, social providers behind a proxy) use different endpoint paths. Discovery eliminates provider-specific assumptions.
+```
+SKYNET_AUTH_GOOGLE_ENABLED=true
+SKYNET_AUTH_GOOGLE_CLIENT_ID=...
+SKYNET_AUTH_GOOGLE_CLIENT_SECRET=...
+
+SKYNET_AUTH_MICROSOFT_ENABLED=false
+SKYNET_AUTH_MICROSOFT_CLIENT_ID=
+SKYNET_AUTH_MICROSOFT_CLIENT_SECRET=
+
+SKYNET_AUTH_GITHUB_ENABLED=true
+SKYNET_AUTH_GITHUB_CLIENT_ID=...
+SKYNET_AUTH_GITHUB_CLIENT_SECRET=...
+
+SKYNET_AUTH_DISCORD_ENABLED=false
+SKYNET_AUTH_DISCORD_CLIENT_ID=
+SKYNET_AUTH_DISCORD_CLIENT_SECRET=
+
+SKYNET_AUTH_FACEBOOK_ENABLED=false
+SKYNET_AUTH_FACEBOOK_CLIENT_ID=
+SKYNET_AUTH_FACEBOOK_CLIENT_SECRET=
+
+SKYNET_AUTH_OIDC_ENABLED=false
+SKYNET_AUTH_OIDC_CLIENT_ID=
+SKYNET_AUTH_OIDC_CLIENT_SECRET=
+SKYNET_AUTH_OIDC_ISSUER_URL=
+```
+
+The existing `SKYNET_OIDC_*` settings are replaced by the `SKYNET_AUTH_OIDC_*` and `SKYNET_AUTH_{PROVIDER}_*` settings. The old settings are removed.
+
+**Pydantic Settings structure:**
+
+```python
+class ProviderSettings(BaseModel):
+    enabled: bool = False
+    client_id: str = ""
+    client_secret: str = ""
+
+class OIDCProviderSettings(ProviderSettings):
+    issuer_url: str = ""
+
+class Settings(BaseSettings):
+    # ... existing fields ...
+    auth_google: ProviderSettings = ProviderSettings()
+    auth_microsoft: ProviderSettings = ProviderSettings()
+    auth_github: ProviderSettings = ProviderSettings()
+    auth_discord: ProviderSettings = ProviderSettings()
+    auth_facebook: ProviderSettings = ProviderSettings()
+    auth_oidc: OIDCProviderSettings = OIDCProviderSettings()
+```
+
+Pydantic Settings with `env_prefix="SKYNET_"` and `env_nested_delimiter="_"` maps `SKYNET_AUTH_GOOGLE_CLIENT_ID` to `settings.auth_google.client_id`.
+
+### App Startup
+
+On startup, for each enabled provider:
+
+1. **OIDC providers** (Google, Microsoft, Generic OIDC): Fetch discovery document, cache endpoints in `app.state.providers[name]`
+2. **OAuth2 providers** (GitHub, Discord, Facebook): Endpoints are hardcoded in the registry, stored in `app.state.providers[name]`
+3. If no providers are enabled, log an error and raise — the app cannot function without auth
+4. If an OIDC discovery fetch fails, log the error and skip that provider (don't block startup for optional providers). Raise only if *all* providers fail.
+
+### Routes
+
+Replace the current single-provider endpoints with provider-aware routes:
+
+**`GET /api/auth/providers`** — Returns list of enabled providers (public, no auth):
+```json
+[
+  {"name": "google", "label": "Google"},
+  {"name": "github", "label": "GitHub"}
+]
+```
+
+**`GET /api/auth/login/{provider}`** — Initiates OAuth2/OIDC flow for the named provider. Sets `oauth_state` cookie with both the CSRF token and the provider name so the callback knows which provider to use.
+
+**`GET /api/auth/callback/{provider}`** — Handles the OAuth2/OIDC callback:
+1. Validate state cookie matches (CSRF protection)
+2. Exchange code for token using the provider's token endpoint
+3. Fetch user info using the provider's userinfo endpoint/method
+4. Extract subject and name using the provider's mapping functions
+5. Store subject as `{provider}:{subject}` in `oidc_subject` to avoid collisions across providers
+6. Continue to user lookup/creation (see Registration Flow)
+
+**`POST /api/auth/logout`** — Unchanged.
+
+### User Model Changes
+
+The `oidc_subject` field stores `{provider}:{subject}` (e.g., `google:1234567890`, `github:42`). This ensures uniqueness across providers and identifies which provider a user authenticated with.
+
+No changes to the `User` model schema — the `oidc_subject` field (String 255) is already sufficient.
+
+### Redirect URI Configuration
+
+Each provider needs a redirect URI registered in its developer console. The pattern is:
+`{app_base_url}/api/auth/callback/{provider}`
+
+The existing `oidc_redirect_uri` setting is removed. Redirect URIs are constructed at runtime from `app_base_url` + provider name.
 
 ---
 
 ## Registration Flow
 
-New users created during OIDC callback start in `PENDING` status with a placeholder callsign. They must complete registration before accessing the app.
+New users created during OAuth callback start in `PENDING` status with a placeholder callsign. They must complete registration before accessing the app.
 
-### OIDC Callback Changes
+### Callback User Creation
 
 When a new user arrives (no existing `oidc_subject` match):
 
@@ -41,7 +145,7 @@ When a new user arrives (no existing `oidc_subject` match):
 2. Create `User(callsign=placeholder, oidc_subject=..., name=..., role=PENDING)`
 3. Issue JWT and redirect to app (frontend handles the PENDING state)
 
-When an existing user arrives: no change to current behavior.
+When an existing user arrives: no change — issue JWT and redirect.
 
 ### Registration Endpoint
 
@@ -87,6 +191,7 @@ PENDING users can access:
 | `/api/auth/register` | POST | Complete registration |
 | `/api/auth/logout` | POST | Log out |
 | `/api/auth/me` | PATCH | Change callsign |
+| `/api/auth/providers` | GET | List providers (public) |
 
 Everything else returns 403 for PENDING users.
 
@@ -144,17 +249,22 @@ All secrets use the `SKYNET_` prefix (handled by Pydantic Settings):
 | Variable | Purpose | Example |
 |----------|---------|---------|
 | `SKYNET_JWT_SECRET_KEY` | JWT signing key | Random 256-bit hex string |
-| `SKYNET_OIDC_CLIENT_ID` | OIDC client identifier | From provider dashboard |
-| `SKYNET_OIDC_CLIENT_SECRET` | OIDC client secret | From provider dashboard |
-| `SKYNET_OIDC_ISSUER_URL` | OIDC issuer base URL | `https://auth.example.com/application/o/skynetcontrol` |
+| `SKYNET_AUTH_GOOGLE_CLIENT_ID` | Google OAuth client ID | From Google Cloud Console |
+| `SKYNET_AUTH_GOOGLE_CLIENT_SECRET` | Google OAuth client secret | From Google Cloud Console |
+| `SKYNET_AUTH_GITHUB_CLIENT_ID` | GitHub OAuth app client ID | From GitHub Developer Settings |
+| `SKYNET_AUTH_GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret | From GitHub Developer Settings |
+| `SKYNET_AUTH_OIDC_ISSUER_URL` | Generic OIDC issuer URL | `https://auth.example.com/application/o/skynetcontrol` |
+| `SKYNET_AUTH_OIDC_CLIENT_ID` | Generic OIDC client ID | From provider dashboard |
+| `SKYNET_AUTH_OIDC_CLIENT_SECRET` | Generic OIDC client secret | From provider dashboard |
 | `SKYNET_DATABASE_URL` | Database connection string | `postgresql://user:pass@host/db` |
+
+(Microsoft, Discord, Facebook follow the same `_CLIENT_ID` / `_CLIENT_SECRET` pattern.)
 
 ### Deployment Patterns
 
 **NixOS with sops-nix:**
 ```nix
-sops.secrets."skynetcontrol/jwt-secret" = {};
-sops.secrets."skynetcontrol/oidc-client-secret" = {};
+sops.secrets."skynetcontrol/env" = {};
 
 systemd.services.skynetcontrol.serviceConfig.EnvironmentFile =
   config.sops.secrets."skynetcontrol/env".path;
@@ -172,7 +282,8 @@ systemd.services.skynetcontrol.serviceConfig.EnvironmentFile =
 ```ini
 # /etc/skynetcontrol/env (mode 0600, owned by service user)
 SKYNET_JWT_SECRET_KEY=hex-string-here
-SKYNET_OIDC_CLIENT_SECRET=secret-here
+SKYNET_AUTH_GOOGLE_CLIENT_SECRET=secret-here
+SKYNET_AUTH_GITHUB_CLIENT_SECRET=secret-here
 ```
 
 **Docker/OCI:**
@@ -193,11 +304,12 @@ docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
 | File | Action | Description |
 |------|--------|-------------|
 | `backend/auth/models.py` | Modify | Add `PENDING` to `UserRole` enum |
-| `backend/auth/routes.py` | Modify | OIDC discovery endpoints, registration endpoint, callsign change endpoint, PENDING callback logic |
+| `backend/auth/providers.py` | Create | Provider registry — per-provider OAuth2/OIDC config, endpoint URLs, userinfo extraction |
+| `backend/auth/routes.py` | Rewrite | Multi-provider login/callback, registration endpoint, callsign change endpoint, providers list |
 | `backend/auth/dependencies.py` | Modify | Add `require_not_pending()` dependency |
-| `backend/auth/service.py` | Modify | Add OIDC discovery fetch function |
-| `backend/config.py` | No change | Existing settings suffice |
-| `backend/app.py` | Modify | Call OIDC discovery on startup, store in `app.state` |
+| `backend/auth/service.py` | Modify | Add OIDC discovery fetch, provider initialization |
+| `backend/config.py` | Modify | Replace single OIDC settings with per-provider `ProviderSettings` models, add `env_nested_delimiter` |
+| `backend/app.py` | Modify | Initialize enabled providers on startup, store in `app.state.providers` |
 | `alembic/versions/XXXX_add_pending_role_and_cascade.py` | Create | Add PENDING enum value, add ON UPDATE CASCADE to callsign FKs |
 | `docs/deployment/secrets.md` | Create | Secrets management guide |
 
@@ -205,7 +317,8 @@ docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
 
 ## What This Phase Does NOT Include
 
-- **Social login aggregation** — The app supports any OIDC-compliant provider. Users who want Google/GitHub/etc. login configure that at the OIDC provider level (e.g., Authentik federates social providers). No multi-provider code needed.
+- **Apple Sign In** — Unusual POST-based callback and key rotation adds complexity for limited user base benefit. Can be added later using the same provider registry pattern.
 - **Email notifications** — Admin approval is manual via the existing `/users/{callsign}` PATCH endpoint. No email/notification on approval.
 - **Rate limiting** — Callsign changes and registration are naturally infrequent.
-- **Frontend changes** — Frontend will need a registration form and pending-state UI, but that's a separate spec.
+- **Frontend changes** — Frontend will need a provider selection screen, registration form, and pending-state UI, but that's a separate spec.
+- **Provider linking** — A user who signs in with Google and later signs in with GitHub gets two separate accounts. Account linking is a future enhancement.
