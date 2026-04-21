@@ -49,3 +49,9 @@ def require_role(*roles: UserRole) -> Callable:
         return user
 
     return dependency
+
+
+def require_not_pending(user: User = Depends(get_current_user)) -> User:
+    if user.role == UserRole.PENDING:
+        raise HTTPException(status_code=403, detail="Account pending approval")
+    return user

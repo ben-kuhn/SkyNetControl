@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from backend.db.base import Base
 from backend.auth.models import User, UserRole
 from backend.auth.service import create_access_token
-from backend.auth.dependencies import get_current_user, require_role
+from backend.auth.dependencies import get_current_user, require_role, require_not_pending
 from backend.config import Settings
 
 
@@ -52,7 +52,13 @@ def seeded_db(db_session_factory):
             name="Viewer User",
             role=UserRole.VIEWER,
         )
-        session.add_all([admin, viewer])
+        pending = User(
+            callsign="PENDING-abc123",
+            oidc_subject="auth0|pending",
+            name="Pending User",
+            role=UserRole.PENDING,
+        )
+        session.add_all([admin, viewer, pending])
         session.commit()
     return db_session_factory
 
@@ -70,6 +76,10 @@ def test_app(test_settings, seeded_db):
     @app.get("/api/test/admin-only")
     async def admin_only(user: User = Depends(require_role(UserRole.ADMIN))):
         return {"message": "admin access granted"}
+
+    @app.get("/api/test/not-pending")
+    async def not_pending(user: User = Depends(require_not_pending)):
+        return {"callsign": user.callsign}
 
     return app
 
@@ -107,3 +117,25 @@ async def test_viewer_cannot_access_admin(test_client, test_settings):
     token = create_access_token("KD0TST", "viewer", test_settings)
     response = await test_client.get("/api/test/admin-only", cookies={"access_token": token})
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_pending_user_blocked_by_require_not_pending(test_client, test_settings):
+    token = create_access_token("PENDING-abc123", "pending", test_settings)
+    response = await test_client.get("/api/test/not-pending", cookies={"access_token": token})
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_viewer_passes_require_not_pending(test_client, test_settings):
+    token = create_access_token("KD0TST", "viewer", test_settings)
+    response = await test_client.get("/api/test/not-pending", cookies={"access_token": token})
+    assert response.status_code == 200
+    assert response.json()["callsign"] == "KD0TST"
+
+
+@pytest.mark.asyncio
+async def test_admin_passes_require_not_pending(test_client, test_settings):
+    token = create_access_token("W0NE", "admin", test_settings)
+    response = await test_client.get("/api/test/not-pending", cookies={"access_token": token})
+    assert response.status_code == 200
