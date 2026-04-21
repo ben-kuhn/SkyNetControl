@@ -211,6 +211,10 @@ Add `PENDING` to the `userrole` enum type. For SQLite (dev), this requires no sp
 
 ## Callsign Changes
 
+Callsign changes require admin approval, following the same pattern as new user registration.
+
+### Request Endpoint
+
 `PATCH /api/auth/me`
 
 **Request body:**
@@ -225,16 +229,48 @@ Add `PENDING` to the `userrole` enum type. For SQLite (dev), this requires no sp
 - Must not already exist (409)
 - User must be authenticated
 
-**Implementation:**
+**On success:**
+- Store the requested callsign in a new `pending_callsign` field on the `User` model
+- User's current callsign remains active until an admin approves the change
+- Email admins (same pattern as new registration notification)
+- Return `{"message": "Callsign change requested, awaiting admin approval", "pending_callsign": "W0XYZ"}`
+
+### Approval Endpoint
+
+`POST /api/auth/users/{callsign}/approve-callsign`
+
+**Auth:** `require_role(ADMIN)`
+
+**On success:**
+- Update the user's primary key from current callsign to `pending_callsign` (ON UPDATE CASCADE propagates to all FK references)
+- Clear `pending_callsign` to null
+- Email the user confirming the change
+- Return updated user object
+
+**On rejection (optional, v1 scope):**
+
+`DELETE /api/auth/users/{callsign}/pending-callsign`
+
+- Clears `pending_callsign` without applying it
+- Optionally email the user that their request was denied
+
+### User Model Changes
+
+Add to `User`:
+```python
+pending_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
+```
+
+### Implementation
 
 Callsign is the primary key of the `users` table and is referenced as a foreign key in:
 - `check_ins.callsign`
 - `roster_logs` (via session → check-ins)
 - Any future tables
 
-The migration adds `ON UPDATE CASCADE` to all foreign keys referencing `users.callsign`. With cascading in place, the update is a single `UPDATE users SET callsign = :new WHERE callsign = :old` — the database propagates the change to all referencing tables automatically.
+The migration adds `ON UPDATE CASCADE` to all foreign keys referencing `users.callsign`. With cascading in place, the actual rename is a single `UPDATE users SET callsign = :new WHERE callsign = :old` — the database propagates the change to all referencing tables automatically.
 
-**Rate limiting:** Not implemented in this phase. Callsign changes are infrequent by nature.
+The `GET /api/auth/me` response includes `pending_callsign` when set, so the frontend can show that a change is awaiting approval.
 
 ---
 
@@ -281,9 +317,19 @@ If `smtp.host` is empty, email is disabled — notifications are skipped silentl
 - Subject: `[SkyNetControl] New registration: {callsign}`
 - Body: `{name} has registered as {callsign} and is awaiting approval. Review pending users at {app_base_url}.`
 
+### Notification: Callsign Change Request → Admins
+
+**Triggered by:** `PATCH /api/auth/me` with a new callsign
+
+**Recipients:** All users with role `ADMIN` who have an email address on file.
+
+**Email content:**
+- Subject: `[SkyNetControl] Callsign change request: {old_callsign} → {new_callsign}`
+- Body: `{name} ({old_callsign}) has requested a callsign change to {new_callsign}. Review at {app_base_url}.`
+
 ### Notification: Approval → User
 
-**Triggered by:** `PATCH /api/users/{callsign}` when `role` changes from `PENDING` to any non-PENDING role.
+**Triggered by:** `PATCH /api/users/{callsign}` when `role` changes from `PENDING` to any non-PENDING role, or `POST /api/auth/users/{callsign}/approve-callsign` when a callsign change is approved.
 
 **Recipient:** The approved user (by email address).
 
@@ -380,7 +426,7 @@ docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
 
 | File | Action | Description |
 |------|--------|-------------|
-| `backend/auth/models.py` | Modify | Add `PENDING` to `UserRole` enum, add `email` field to `User` |
+| `backend/auth/models.py` | Modify | Add `PENDING` to `UserRole` enum, add `email` and `pending_callsign` fields to `User` |
 | `backend/auth/providers.py` | Create | Provider registry — per-provider OAuth2/OIDC config, endpoint URLs, userinfo extraction |
 | `backend/auth/routes.py` | Rewrite | Multi-provider login/callback, registration endpoint, callsign change endpoint, providers list |
 | `backend/auth/dependencies.py` | Modify | Add `require_not_pending()` dependency |
@@ -388,7 +434,7 @@ docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
 | `backend/auth/service.py` | Modify | Add OIDC discovery fetch, provider initialization |
 | `backend/config.py` | Modify | Replace single OIDC settings with per-provider `ProviderSettings` + `SmtpSettings` models, add `env_nested_delimiter` |
 | `backend/app.py` | Modify | Initialize enabled providers on startup, store in `app.state.providers` |
-| `alembic/versions/XXXX_add_pending_role_and_cascade.py` | Create | Add PENDING enum value, add `email` column to users, add ON UPDATE CASCADE to callsign FKs |
+| `alembic/versions/XXXX_add_pending_role_and_cascade.py` | Create | Add PENDING enum value, add `email` + `pending_callsign` columns to users, add ON UPDATE CASCADE to callsign FKs |
 | `docs/deployment/secrets.md` | Create | Secrets management guide |
 
 ---
