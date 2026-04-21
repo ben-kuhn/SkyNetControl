@@ -235,13 +235,9 @@ async def send_chat_message_route(
         )
 
     try:
-        user_msg, assistant_msg = send_message(
-            db, chat_session_id, body.content, api_key=api_key
-        )
+        user_msg, assistant_msg = send_message(db, chat_session_id, body.content, api_key=api_key)
     except Exception as exc:
-        raise HTTPException(
-            status_code=502, detail=f"Claude API error: {exc}"
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}") from exc
     return {
         "user_message": _message_to_response(user_msg),
         "assistant_message": _message_to_response(assistant_msg),

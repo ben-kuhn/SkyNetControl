@@ -94,13 +94,9 @@ def generate_sessions(
     sessions: list[NetSession] = []
 
     if season.is_week_long:
-        sessions = _generate_week_long_sessions(
-            season, default_net_control, default_grace_period_hours
-        )
+        sessions = _generate_week_long_sessions(season, default_net_control, default_grace_period_hours)
     else:
-        sessions = _generate_weekly_sessions(
-            season, default_net_control, default_grace_period_hours
-        )
+        sessions = _generate_weekly_sessions(season, default_net_control, default_grace_period_hours)
 
     db.add_all(sessions)
     db.commit()

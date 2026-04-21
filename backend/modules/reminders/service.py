@@ -15,6 +15,7 @@ from backend.modules.schedule.models import NetSession, SessionStatus, SessionTy
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _today() -> date_type:
     """Return today's date. Extracted for test mocking."""
     return date_type.today()
@@ -37,6 +38,7 @@ def _clear_default(db: Session, template_type: TemplateType) -> None:
 # ---------------------------------------------------------------------------
 # Template CRUD
 # ---------------------------------------------------------------------------
+
 
 def create_template(
     db: Session,
@@ -225,6 +227,7 @@ def render_reminder(
 # Draft generation
 # ---------------------------------------------------------------------------
 
+
 def generate_draft(
     db: Session,
     session_id: int,
@@ -285,11 +288,7 @@ def generate_due_drafts(db: Session) -> list[ReminderLog]:
     # Find all SCHEDULED sessions that don't yet have a ReminderLog
     existing_session_ids = {row[0] for row in db.query(ReminderLog.session_id).all()}
 
-    scheduled_sessions = (
-        db.query(NetSession)
-        .filter(NetSession.status == SessionStatus.SCHEDULED)
-        .all()
-    )
+    scheduled_sessions = db.query(NetSession).filter(NetSession.status == SessionStatus.SCHEDULED).all()
 
     drafts: list[ReminderLog] = []
     for session in scheduled_sessions:
@@ -313,6 +312,7 @@ def generate_due_drafts(db: Session) -> list[ReminderLog]:
 # ---------------------------------------------------------------------------
 # Status transitions
 # ---------------------------------------------------------------------------
+
 
 def approve_reminder(
     db: Session,

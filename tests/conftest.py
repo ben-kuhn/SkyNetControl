@@ -1,6 +1,5 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine
 
 from backend.app import create_app
 from backend.config import Settings

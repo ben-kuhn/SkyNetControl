@@ -47,4 +47,5 @@ def require_role(*roles: UserRole) -> Callable:
         if user.role not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
+
     return dependency

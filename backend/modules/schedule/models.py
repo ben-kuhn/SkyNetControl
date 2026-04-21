@@ -40,9 +40,7 @@ class NetSeason(Base):
     is_week_long: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     activity_cadence: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
 
-    sessions: Mapped[list["NetSession"]] = relationship(
-        back_populates="season", cascade="all, delete-orphan"
-    )
+    sessions: Mapped[list["NetSession"]] = relationship(back_populates="season", cascade="all, delete-orphan")
 
 
 class NetSession(Base):
@@ -54,9 +52,7 @@ class NetSession(Base):
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     grace_period_hours: Mapped[float] = mapped_column(Float, nullable=False, default=24.0)
     session_type: Mapped[SessionType] = mapped_column(Enum(SessionType), nullable=False)
-    status: Mapped[SessionStatus] = mapped_column(
-        Enum(SessionStatus), nullable=False, default=SessionStatus.SCHEDULED
-    )
+    status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), nullable=False, default=SessionStatus.SCHEDULED)
     activity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     net_control_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
 

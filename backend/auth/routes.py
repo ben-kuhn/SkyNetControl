@@ -54,7 +54,7 @@ async def callback(
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     client = await _get_oidc_client(app_settings)
-    token_response = await client.fetch_token(
+    await client.fetch_token(
         f"{app_settings.oidc_issuer_url}/token",
         code=code,
         grant_type="authorization_code",
@@ -78,9 +78,7 @@ async def callback(
 
         # Generate a placeholder callsign from the OIDC subject
         # User can update this later via profile
-        callsign = userinfo_data.get(
-            "preferred_username", oidc_subject[:20]
-        ).upper()
+        callsign = userinfo_data.get("preferred_username", oidc_subject[:20]).upper()
 
         user = User(
             callsign=callsign,
@@ -92,9 +90,7 @@ async def callback(
         db.commit()
         db.refresh(user)
 
-    access_token = create_access_token(
-        user.callsign, user.role.value, app_settings
-    )
+    access_token = create_access_token(user.callsign, user.role.value, app_settings)
     response = RedirectResponse(url=app_settings.app_base_url)
     is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(

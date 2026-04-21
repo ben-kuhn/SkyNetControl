@@ -70,9 +70,7 @@ async def test_me_returns_user(test_client, test_settings, db_setup):
         session.commit()
 
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.get(
-        "/api/auth/me", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/auth/me", cookies={"access_token": token})
     assert response.status_code == 200
     data = response.json()
     assert data["callsign"] == "W0NE"
@@ -110,9 +108,7 @@ async def test_login_redirects(test_client):
         )
         mock_get_client.return_value = mock_client
 
-        response = await test_client.get(
-            "/api/auth/login", follow_redirects=False
-        )
+        response = await test_client.get("/api/auth/login", follow_redirects=False)
         assert response.status_code == 307 or response.status_code == 302
 
 
@@ -130,9 +126,7 @@ async def test_admin_can_list_users(test_client, test_settings, db_setup):
         session.commit()
 
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.get(
-        "/api/auth/users", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/auth/users", cookies={"access_token": token})
     assert response.status_code == 200
     users = response.json()
     assert len(users) == 1

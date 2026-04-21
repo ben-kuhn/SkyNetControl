@@ -10,6 +10,7 @@ pkgs.mkShell {
     python.pkgs.virtualenv
     pkgs.nodejs_22
     pkgs.nodePackages.npm
+    pkgs.ruff
   ];
 
   shellHook = ''

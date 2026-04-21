@@ -8,7 +8,6 @@ from backend.modules.schedule.models import (
     NetSeason,
     NetSession,
     SessionType,
-    SessionStatus,
 )
 from backend.modules.reminders.models import (
     TemplateType,

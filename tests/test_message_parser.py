@@ -1,5 +1,3 @@
-import pytest
-
 from backend.modules.checkins.message_parser import (
     detect_message_type,
     parse_form_message,
@@ -10,14 +8,7 @@ from backend.modules.checkins.models import MessageType
 
 
 def test_detect_form_message():
-    body = (
-        "Name: John Smith\n"
-        "Callsign: W0ABC\n"
-        "City: Denver\n"
-        "County: Denver\n"
-        "State: CO\n"
-        "Mode: Winlink\n"
-    )
+    body = "Name: John Smith\nCallsign: W0ABC\nCity: Denver\nCounty: Denver\nState: CO\nMode: Winlink\n"
     assert detect_message_type(body) == MessageType.FORM
 
 
@@ -68,10 +59,7 @@ def test_parse_form_message_with_gps():
 
 
 def test_parse_form_message_missing_required():
-    body = (
-        "Name: John Smith\n"
-        "City: Denver\n"
-    )
+    body = "Name: John Smith\nCity: Denver\n"
     result = parse_form_message(body)
     assert result["confidence"] == "low"
 
@@ -101,13 +89,7 @@ def test_parse_plain_text_unparseable():
 
 
 def test_parse_message_dispatches_form():
-    body = (
-        "Name: John Smith\n"
-        "Callsign: W0ABC\n"
-        "City: Denver\n"
-        "State: CO\n"
-        "Mode: Winlink\n"
-    )
+    body = "Name: John Smith\nCallsign: W0ABC\nCity: Denver\nState: CO\nMode: Winlink\n"
     msg_type, fields = parse_message(body)
     assert msg_type == MessageType.FORM
     assert fields["callsign"] == "W0ABC"

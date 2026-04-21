@@ -1,7 +1,7 @@
 import pytest
-from datetime import date, datetime, time, timezone, timedelta
+from datetime import date, datetime, time, timezone
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from backend.db.base import Base
 from backend.modules.schedule.models import (
@@ -251,9 +251,7 @@ def test_update_checkin(db, season_and_session):
     db.add(checkin)
     db.commit()
 
-    updated = update_checkin(
-        db, checkin.id, name="John Smith", city="Denver", parse_status=ParseStatus.AUTO
-    )
+    updated = update_checkin(db, checkin.id, name="John Smith", city="Denver", parse_status=ParseStatus.AUTO)
     assert updated is not None
     assert updated.name == "John Smith"
     assert updated.city == "Denver"

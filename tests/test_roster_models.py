@@ -4,9 +4,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.db.base import Base
-import backend.modules.schedule.models
-import backend.modules.checkins.models
-import backend.modules.roster.models
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType
 from backend.modules.roster.models import RosterTemplate, RosterLog, RosterStatus
 
@@ -27,7 +24,7 @@ def test_create_roster_template(db):
         subject_template="W0NE Roster — {{ date }}",
         header_template="Session on {{ date }}.",
         welcome_template="{% for m in new_members %}Welcome {{ m.name }}!{% endfor %}",
-        comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}{% endif %}{% endfor %}",
+        comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}{% endif %}{% endfor %}",  # noqa: E501
         footer_template="Next week: {{ next_week_preview }}",
         lead_time_days=1,
         is_default=True,

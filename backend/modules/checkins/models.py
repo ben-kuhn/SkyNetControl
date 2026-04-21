@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import (
     Integer,
@@ -40,14 +40,10 @@ class RawMessage(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     message_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     from_address: Mapped[str] = mapped_column(String(255), nullable=False)
-    received_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     subject: Mapped[str] = mapped_column(String(500), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    message_type: Mapped[MessageType] = mapped_column(
-        Enum(MessageType), nullable=False
-    )
+    message_type: Mapped[MessageType] = mapped_column(Enum(MessageType), nullable=False)
     parsed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     checkin: Mapped["CheckIn | None"] = relationship(back_populates="raw_message")
@@ -57,12 +53,8 @@ class CheckIn(Base):
     __tablename__ = "check_ins"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("net_sessions.id"), nullable=False
-    )
-    raw_message_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("raw_messages.id"), nullable=True
-    )
+    session_id: Mapped[int] = mapped_column(Integer, ForeignKey("net_sessions.id"), nullable=False)
+    raw_message_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("raw_messages.id"), nullable=True)
     callsign: Mapped[str] = mapped_column(String(20), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     city: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -72,15 +64,9 @@ class CheckIn(Base):
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
-    parse_status: Mapped[ParseStatus] = mapped_column(
-        Enum(ParseStatus), nullable=False
-    )
-    timing_status: Mapped[TimingStatus] = mapped_column(
-        Enum(TimingStatus), nullable=False
-    )
-    is_new_member: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    parse_status: Mapped[ParseStatus] = mapped_column(Enum(ParseStatus), nullable=False)
+    timing_status: Mapped[TimingStatus] = mapped_column(Enum(TimingStatus), nullable=False)
+    is_new_member: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     raw_message: Mapped["RawMessage | None"] = relationship(back_populates="checkin")
 
@@ -90,12 +76,6 @@ class Member(Base):
 
     callsign: Mapped[str] = mapped_column(String(20), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    first_check_in_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    last_check_in_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    total_check_ins: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
-    )
+    first_check_in_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_check_in_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    total_check_ins: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

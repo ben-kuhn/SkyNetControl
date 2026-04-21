@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import (
     Integer,
@@ -13,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.db.base import Base
+from backend.modules.schedule.models import NetSession  # noqa: F401
 
 
 class RosterStatus(str, enum.Enum):
@@ -42,30 +43,18 @@ class RosterLog(Base):
     __tablename__ = "roster_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("net_sessions.id"), unique=True, nullable=False
-    )
-    template_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("roster_templates.id"), nullable=True
-    )
-    status: Mapped[RosterStatus] = mapped_column(
-        Enum(RosterStatus), nullable=False, default=RosterStatus.DRAFT
-    )
+    session_id: Mapped[int] = mapped_column(Integer, ForeignKey("net_sessions.id"), unique=True, nullable=False)
+    template_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("roster_templates.id"), nullable=True)
+    status: Mapped[RosterStatus] = mapped_column(Enum(RosterStatus), nullable=False, default=RosterStatus.DRAFT)
     content_subject: Mapped[str] = mapped_column(Text, nullable=False)
     content_header: Mapped[str] = mapped_column(Text, nullable=False)
     content_welcome: Mapped[str] = mapped_column(Text, nullable=False)
     content_comments: Mapped[str] = mapped_column(Text, nullable=False)
     content_footer: Mapped[str] = mapped_column(Text, nullable=False)
     map_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    drafted_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    drafted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     session: Mapped["NetSession"] = relationship()

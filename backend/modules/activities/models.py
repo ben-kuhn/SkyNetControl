@@ -28,17 +28,13 @@ class Activity(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tags: Mapped[list["ActivityTag"]] = relationship(
         secondary="activity_tag_assignments",
         back_populates="activities",
     )
-    usages: Mapped[list["ActivityUsage"]] = relationship(
-        back_populates="activity", cascade="all, delete-orphan"
-    )
+    usages: Mapped[list["ActivityUsage"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     chat_sessions: Mapped[list["ChatSession"]] = relationship(
         back_populates="activity",
     )
@@ -59,24 +55,16 @@ class ActivityTag(Base):
 class ActivityTagAssignment(Base):
     __tablename__ = "activity_tag_assignments"
 
-    activity_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("activities.id"), primary_key=True
-    )
-    tag_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("activity_tags.id"), primary_key=True
-    )
+    activity_id: Mapped[int] = mapped_column(Integer, ForeignKey("activities.id"), primary_key=True)
+    tag_id: Mapped[int] = mapped_column(Integer, ForeignKey("activity_tags.id"), primary_key=True)
 
 
 class ActivityUsage(Base):
     __tablename__ = "activity_usages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    activity_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("activities.id"), nullable=False
-    )
-    session_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("net_sessions.id"), nullable=False
-    )
+    activity_id: Mapped[int] = mapped_column(Integer, ForeignKey("activities.id"), nullable=False)
+    session_id: Mapped[int] = mapped_column(Integer, ForeignKey("net_sessions.id"), nullable=False)
     used_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -95,9 +83,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    activity_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("activities.id"), nullable=True
-    )
+    activity_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("activities.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -106,7 +92,8 @@ class ChatSession(Base):
 
     activity: Mapped["Activity | None"] = relationship(back_populates="chat_sessions")
     messages: Mapped[list["ChatMessage"]] = relationship(
-        back_populates="chat_session", cascade="all, delete-orphan",
+        back_populates="chat_session",
+        cascade="all, delete-orphan",
         order_by="ChatMessage.created_at",
     )
 
@@ -115,12 +102,8 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_session_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("chat_sessions.id"), nullable=False
-    )
-    role: Mapped[ChatMessageRole] = mapped_column(
-        Enum(ChatMessageRole), nullable=False
-    )
+    chat_session_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    role: Mapped[ChatMessageRole] = mapped_column(Enum(ChatMessageRole), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

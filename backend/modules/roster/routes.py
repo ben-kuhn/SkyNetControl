@@ -26,6 +26,7 @@ roster_router = APIRouter(tags=["roster"])
 
 # --- Pydantic schemas ---
 
+
 class TemplateCreate(BaseModel):
     name: str
     subject_template: str
@@ -57,6 +58,7 @@ class DraftUpdate(BaseModel):
 
 
 # --- Helpers ---
+
 
 def _template_to_response(template) -> dict:
     return {
@@ -92,6 +94,7 @@ def _roster_to_response(log: RosterLog) -> dict:
 
 
 # --- Template routes ---
+
 
 @roster_router.post("/templates", status_code=201)
 async def create_template_route(
@@ -130,7 +133,8 @@ async def update_template_route(
     db: Session = Depends(get_db_session),
 ):
     template = update_template_service(
-        db, template_id,
+        db,
+        template_id,
         name=body.name,
         subject_template=body.subject_template,
         header_template=body.header_template,
@@ -161,6 +165,7 @@ async def delete_template_route(
 
 # --- Generation routes ---
 
+
 @roster_router.post("/generate/{session_id}")
 async def generate_draft_route(
     session_id: int,
@@ -186,6 +191,7 @@ async def generate_due_drafts_route(
 
 
 # --- Roster management routes ---
+
 
 @roster_router.get("/")
 async def list_rosters_route(
@@ -236,7 +242,8 @@ async def update_draft_route(
     db: Session = Depends(get_db_session),
 ):
     log = update_draft_service(
-        db, roster_id,
+        db,
+        roster_id,
         content_subject=body.content_subject,
         content_header=body.content_header,
         content_welcome=body.content_welcome,
@@ -285,6 +292,7 @@ async def skip_roster_route(
 
 
 # --- GeoJSON route (no auth) ---
+
 
 @roster_router.get("/session/{session_id}/geojson")
 async def geojson_route(

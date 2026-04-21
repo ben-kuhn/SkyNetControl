@@ -136,6 +136,7 @@ async def delete_template_route(
     db: Session = Depends(get_db_session),
 ):
     from backend.modules.reminders.service import get_template
+
     template = get_template(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")

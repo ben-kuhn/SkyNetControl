@@ -1,5 +1,4 @@
 import pytest
-from datetime import date
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
@@ -102,9 +101,7 @@ async def test_list_seasons(test_client, test_settings):
         cookies={"access_token": token},
     )
 
-    response = await test_client.get(
-        "/api/schedule/seasons", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/schedule/seasons", cookies={"access_token": token})
     assert response.status_code == 200
     seasons = response.json()
     assert len(seasons) == 1
@@ -350,9 +347,7 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
     )
 
     # Viewer can list
-    response = await test_client.get(
-        "/api/schedule/seasons", cookies={"access_token": viewer_token}
-    )
+    response = await test_client.get("/api/schedule/seasons", cookies={"access_token": viewer_token})
     assert response.status_code == 200
 
     # Viewer cannot create

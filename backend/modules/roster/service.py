@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn
 from backend.modules.roster.models import RosterTemplate, RosterLog, RosterStatus
-from backend.modules.schedule.models import NetSession, NetSeason, SessionStatus, SessionType
+from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _today() -> date_type:
     """Return today's date. Extracted for test mocking."""
@@ -34,6 +35,7 @@ _DAY_NAMES = list(calendar.day_name)  # Monday=0 … Sunday=6
 # ---------------------------------------------------------------------------
 # Template CRUD
 # ---------------------------------------------------------------------------
+
 
 def create_template(
     db: Session,
@@ -129,6 +131,7 @@ def delete_template(db: Session, template_id: int) -> bool:
 # Context Building
 # ---------------------------------------------------------------------------
 
+
 def _build_next_week_preview(db: Session, current_session: NetSession) -> str:
     """Return a preview string for the next session in the same season."""
     if current_session.season_id is None:
@@ -196,12 +199,7 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
     next_week_preview = _build_next_week_preview(db, net_session)
 
     # Query check-ins ordered by name
-    checkins_query = (
-        db.query(CheckIn)
-        .filter(CheckIn.session_id == net_session.id)
-        .order_by(CheckIn.name)
-        .all()
-    )
+    checkins_query = db.query(CheckIn).filter(CheckIn.session_id == net_session.id).order_by(CheckIn.name).all()
 
     checkins = []
     new_members = []
@@ -246,6 +244,7 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
 # Rendering
 # ---------------------------------------------------------------------------
 
+
 def render_roster(
     template: RosterTemplate,
     context: dict,
@@ -273,6 +272,7 @@ def render_roster(
 # Draft Generation
 # ---------------------------------------------------------------------------
 
+
 def generate_draft(
     db: Session,
     session_id: int,
@@ -290,11 +290,7 @@ def generate_draft(
     if template_id is not None:
         template = db.get(RosterTemplate, template_id)
     else:
-        template = (
-            db.query(RosterTemplate)
-            .filter(RosterTemplate.is_default.is_(True))
-            .first()
-        )
+        template = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True)).first()
 
     if template is None:
         return None
@@ -324,21 +320,13 @@ def generate_due_drafts(db: Session) -> list[RosterLog]:
     """Generate drafts for completed sessions past their lead time without a roster."""
     today = _today()
 
-    default_template = (
-        db.query(RosterTemplate)
-        .filter(RosterTemplate.is_default.is_(True))
-        .first()
-    )
+    default_template = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True)).first()
     if default_template is None:
         return []
 
     existing_session_ids = {row[0] for row in db.query(RosterLog.session_id).all()}
 
-    completed_sessions = (
-        db.query(NetSession)
-        .filter(NetSession.status == SessionStatus.COMPLETED)
-        .all()
-    )
+    completed_sessions = db.query(NetSession).filter(NetSession.status == SessionStatus.COMPLETED).all()
 
     drafts: list[RosterLog] = []
     for session in completed_sessions:
@@ -362,18 +350,14 @@ def generate_due_drafts(db: Session) -> list[RosterLog]:
 # Assembly
 # ---------------------------------------------------------------------------
 
+
 def assemble_roster(db: Session, roster_id: int) -> str | None:
     """Assemble the full plain-text roster from prose sections and current check-in data."""
     log = db.get(RosterLog, roster_id)
     if log is None:
         return None
 
-    checkins = (
-        db.query(CheckIn)
-        .filter(CheckIn.session_id == log.session_id)
-        .order_by(CheckIn.name)
-        .all()
-    )
+    checkins = db.query(CheckIn).filter(CheckIn.session_id == log.session_id).order_by(CheckIn.name).all()
 
     table_lines = []
     for ci in checkins:
@@ -407,6 +391,7 @@ def assemble_roster(db: Session, roster_id: int) -> str | None:
 # ---------------------------------------------------------------------------
 # Status Transitions
 # ---------------------------------------------------------------------------
+
 
 def approve_roster(
     db: Session,
@@ -489,6 +474,7 @@ def update_draft(
 # GeoJSON
 # ---------------------------------------------------------------------------
 
+
 def get_session_geojson(db: Session, session_id: int) -> dict:
     """Return a GeoJSON FeatureCollection of check-ins with GPS coordinates."""
     checkins = (
@@ -503,18 +489,20 @@ def get_session_geojson(db: Session, session_id: int) -> dict:
 
     features = []
     for ci in checkins:
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [ci.longitude, ci.latitude],
-            },
-            "properties": {
-                "name": ci.name,
-                "callsign": ci.callsign,
-                "is_new_member": ci.is_new_member,
-            },
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [ci.longitude, ci.latitude],
+                },
+                "properties": {
+                    "name": ci.name,
+                    "callsign": ci.callsign,
+                    "is_new_member": ci.is_new_member,
+                },
+            }
+        )
 
     return {
         "type": "FeatureCollection",
@@ -525,6 +513,7 @@ def get_session_geojson(db: Session, session_id: int) -> dict:
 # ---------------------------------------------------------------------------
 # Notification Stub
 # ---------------------------------------------------------------------------
+
 
 def notify_ncs(db: Session, net_session: NetSession) -> None:
     """No-op stub. Hook point for future notification system."""

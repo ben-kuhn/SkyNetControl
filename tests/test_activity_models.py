@@ -1,10 +1,8 @@
 import pytest
-from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
-import backend.modules.schedule.models
 from backend.modules.activities.models import (
     Activity,
     ActivityTag,
@@ -85,9 +83,7 @@ def test_activity_tag_assignment(db: Session):
     db.add_all([activity, tag])
     db.commit()
 
-    assignment = ActivityTagAssignment(
-        activity_id=activity.id, tag_id=tag.id
-    )
+    assignment = ActivityTagAssignment(activity_id=activity.id, tag_id=tag.id)
     db.add(assignment)
     db.commit()
 

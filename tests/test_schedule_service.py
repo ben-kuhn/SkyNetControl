@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.db.base import Base
 from backend.modules.schedule.models import (
     NetSeason,
-    NetSession,
     SessionType,
     SessionStatus,
 )

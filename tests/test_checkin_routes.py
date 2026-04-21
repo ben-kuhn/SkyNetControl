@@ -1,4 +1,3 @@
-import os
 import pytest
 from datetime import date, datetime, timezone
 from unittest.mock import patch
@@ -16,7 +15,6 @@ from backend.modules.schedule.models import (
     NetSeason,
     NetSession,
     SessionType,
-    SessionStatus,
 )
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
 from backend.modules.checkins.routes import checkins_router
@@ -35,7 +33,8 @@ def test_settings():
 @pytest.fixture
 def db_setup():
     engine = create_engine(
-        "sqlite://", poolclass=StaticPool,
+        "sqlite://",
+        poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
@@ -250,6 +249,7 @@ async def test_viewer_can_read_but_not_scan(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_get_members(test_client, test_settings, db_setup):
     from backend.modules.checkins.models import Member
+
     with db_setup() as session:
         member = Member(
             callsign="W0ABC",

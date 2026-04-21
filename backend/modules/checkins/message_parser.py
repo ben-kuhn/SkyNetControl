@@ -6,8 +6,7 @@ from backend.modules.checkins.models import MessageType
 CALLSIGN_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z]{1,3}\b", re.IGNORECASE)
 
 # Form fields we look for (case-insensitive)
-FORM_FIELDS = {"name", "callsign", "city", "county", "state", "mode", "comments",
-               "latitude", "longitude"}
+FORM_FIELDS = {"name", "callsign", "city", "county", "state", "mode", "comments", "latitude", "longitude"}
 REQUIRED_FORM_FIELDS = {"name", "callsign", "mode"}
 
 

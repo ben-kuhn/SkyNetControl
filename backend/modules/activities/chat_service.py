@@ -88,9 +88,7 @@ def send_message(
     return user_msg, assistant_msg
 
 
-def link_chat_to_activity(
-    db: Session, chat_session_id: int, activity_id: int
-) -> None:
+def link_chat_to_activity(db: Session, chat_session_id: int, activity_id: int) -> None:
     chat = db.get(ChatSession, chat_session_id)
     if chat is not None:
         chat.activity_id = activity_id

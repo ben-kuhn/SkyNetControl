@@ -10,7 +10,6 @@ from backend.modules.checkins.models import (
     CheckIn,
     Member,
     ParseStatus,
-    TimingStatus,
 )
 from backend.modules.checkins.service import (
     approve_session_checkins,

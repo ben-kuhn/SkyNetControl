@@ -3,7 +3,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
-from backend.config_mgmt.models import AppConfig
 from backend.config_mgmt.service import get_config_value, set_config_value, get_all_config
 
 

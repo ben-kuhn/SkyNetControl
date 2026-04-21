@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.db.base import Base
 from backend.modules.activities.models import (
     Activity,
-    ChatSession,
     ChatMessage,
     ChatMessageRole,
 )
@@ -45,9 +44,7 @@ def test_send_message_stores_user_message(db: Session):
 
     with patch("backend.modules.activities.chat_service._call_claude") as mock_claude:
         mock_claude.return_value = mock_response
-        user_msg, assistant_msg = send_message(
-            db, chat.id, "I want an emergency prep activity", api_key="test-key"
-        )
+        user_msg, assistant_msg = send_message(db, chat.id, "I want an emergency prep activity", api_key="test-key")
 
     assert user_msg.role == ChatMessageRole.USER
     assert user_msg.content == "I want an emergency prep activity"

@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from backend.db.base import Base
 from backend.auth.models import User, UserRole
 from backend.auth.service import create_access_token
-from backend.auth.dependencies import get_db_session, get_current_user, require_role
+from backend.auth.dependencies import get_current_user, require_role
 from backend.config import Settings
 
 
@@ -84,9 +84,7 @@ async def test_client(test_app):
 @pytest.mark.asyncio
 async def test_authenticated_user(test_client, test_settings):
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.get(
-        "/api/test/me", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/test/me", cookies={"access_token": token})
     assert response.status_code == 200
     assert response.json()["callsign"] == "W0NE"
 
@@ -100,16 +98,12 @@ async def test_unauthenticated_returns_401(test_client):
 @pytest.mark.asyncio
 async def test_admin_role_required(test_client, test_settings):
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.get(
-        "/api/test/admin-only", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/test/admin-only", cookies={"access_token": token})
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_access_admin(test_client, test_settings):
     token = create_access_token("KD0TST", "viewer", test_settings)
-    response = await test_client.get(
-        "/api/test/admin-only", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/test/admin-only", cookies={"access_token": token})
     assert response.status_code == 403

@@ -3,8 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
-import backend.modules.schedule.models
-from backend.modules.activities.models import Activity, ActivityTag
+from backend.modules.activities.models import ActivityTag
 from backend.modules.activities.service import (
     create_activity,
     get_activity,
@@ -71,9 +70,7 @@ def test_get_activity_not_found(db: Session):
 
 
 def test_update_activity(db: Session):
-    activity = create_activity(
-        db, title="Old Title", description="old", instructions="old"
-    )
+    activity = create_activity(db, title="Old Title", description="old", instructions="old")
     updated = update_activity(
         db,
         activity.id,
@@ -97,9 +94,7 @@ def test_delete_activity(db: Session):
 
 
 def test_cannot_delete_default_activity(db: Session):
-    activity = create_activity(
-        db, title="Default", description="d", instructions="i", is_default=True
-    )
+    activity = create_activity(db, title="Default", description="d", instructions="i", is_default=True)
     result = delete_activity(db, activity.id)
     assert result is False
     assert get_activity(db, activity.id) is not None

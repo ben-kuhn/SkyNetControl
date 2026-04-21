@@ -1,5 +1,5 @@
 import pytest
-from datetime import date, datetime, time, timezone
+from datetime import date, time
 from unittest.mock import patch
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from backend.db.base import Base
 from backend.auth.models import User, UserRole
 from backend.auth.service import create_access_token
-from backend.modules.roster.models import RosterLog, RosterStatus, RosterTemplate
+from backend.modules.roster.models import RosterTemplate
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
 from backend.config import Settings
@@ -27,30 +27,40 @@ def test_settings():
 @pytest.fixture
 def db_setup():
     engine = create_engine(
-        "sqlite://", poolclass=StaticPool,
+        "sqlite://",
+        poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
         admin = User(
-            callsign="W0NE", oidc_subject="auth0|admin",
-            name="Admin", role=UserRole.ADMIN,
+            callsign="W0NE",
+            oidc_subject="auth0|admin",
+            name="Admin",
+            role=UserRole.ADMIN,
         )
         viewer = User(
-            callsign="KD0TST", oidc_subject="auth0|viewer",
-            name="Viewer", role=UserRole.VIEWER,
+            callsign="KD0TST",
+            oidc_subject="auth0|viewer",
+            name="Viewer",
+            role=UserRole.VIEWER,
         )
         season = NetSeason(
-            name="Spring 2026", start_date=date(2026, 4, 1),
-            end_date=date(2026, 6, 30), day_of_week=3, time=time(18, 0),
+            name="Spring 2026",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 6, 30),
+            day_of_week=3,
+            time=time(18, 0),
         )
         session.add_all([admin, viewer, season])
         session.flush()
 
         net_session = NetSession(
-            season_id=season.id, start_date=date(2026, 4, 10),
-            end_date=date(2026, 4, 10), grace_period_hours=24.0,
+            season_id=season.id,
+            start_date=date(2026, 4, 10),
+            end_date=date(2026, 4, 10),
+            grace_period_hours=24.0,
             session_type=SessionType.REGULAR_CHECKIN,
             net_control_callsign="W0NE",
         )
@@ -62,7 +72,7 @@ def db_setup():
             subject_template="Roster — {{ date }}",
             header_template="NCS: {{ net_control }}, Count: {{ total_count }}",
             welcome_template="{% for m in new_members %}Welcome {{ m.name }}!\n{% endfor %}",
-            comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",
+            comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",  # noqa: E501
             footer_template="73 de W0NE",
             lead_time_days=1,
             is_default=True,
@@ -71,11 +81,18 @@ def db_setup():
         session.flush()
 
         ci = CheckIn(
-            session_id=net_session.id, callsign="W0TST", name="Test Op",
-            mode="winlink", parse_status=ParseStatus.AUTO,
-            timing_status=TimingStatus.ON_TIME, is_new_member=True,
-            city="Denver", state="CO", comments="Hello!",
-            latitude=39.7, longitude=-104.9,
+            session_id=net_session.id,
+            callsign="W0TST",
+            name="Test Op",
+            mode="winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+            is_new_member=True,
+            city="Denver",
+            state="CO",
+            comments="Hello!",
+            latitude=39.7,
+            longitude=-104.9,
         )
         session.add(ci)
         session.commit()
@@ -95,6 +112,7 @@ def db_setup():
 @pytest.fixture
 def app(test_settings, db_setup):
     from backend.app import create_app
+
     application = create_app(settings=test_settings)
     application.state.engine = db_setup["engine"]
     application.state.session_factory = db_setup["factory"]
@@ -124,12 +142,20 @@ async def viewer_client(app, test_settings, db_setup):
 
 # --- Template CRUD routes ---
 
+
 @pytest.mark.anyio
 async def test_create_template(admin_client):
-    resp = await admin_client.post("/api/roster/templates", json={
-        "name": "Custom", "subject_template": "s", "header_template": "h",
-        "welcome_template": "w", "comments_template": "c", "footer_template": "f",
-    })
+    resp = await admin_client.post(
+        "/api/roster/templates",
+        json={
+            "name": "Custom",
+            "subject_template": "s",
+            "header_template": "h",
+            "welcome_template": "w",
+            "comments_template": "c",
+            "footer_template": "f",
+        },
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "Custom"
@@ -159,14 +185,22 @@ async def test_delete_template_blocked_if_default(admin_client, db_setup):
 
 @pytest.mark.anyio
 async def test_viewer_cannot_create_template(viewer_client):
-    resp = await viewer_client.post("/api/roster/templates", json={
-        "name": "X", "subject_template": "s", "header_template": "h",
-        "welcome_template": "w", "comments_template": "c", "footer_template": "f",
-    })
+    resp = await viewer_client.post(
+        "/api/roster/templates",
+        json={
+            "name": "X",
+            "subject_template": "s",
+            "header_template": "h",
+            "welcome_template": "w",
+            "comments_template": "c",
+            "footer_template": "f",
+        },
+    )
     assert resp.status_code == 403
 
 
 # --- Generation routes ---
+
 
 @pytest.mark.anyio
 async def test_generate_draft_for_session(admin_client, db_setup):
@@ -198,6 +232,7 @@ async def test_generate_due_drafts(admin_client, db_setup):
 
 
 # --- Roster management routes ---
+
 
 @pytest.mark.anyio
 async def test_list_rosters(admin_client, db_setup):
@@ -297,6 +332,7 @@ async def test_approve_non_draft_returns_409(admin_client, db_setup):
 
 
 # --- GeoJSON route ---
+
 
 @pytest.mark.anyio
 async def test_geojson_route(admin_client, db_setup):

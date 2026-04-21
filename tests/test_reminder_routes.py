@@ -28,7 +28,8 @@ def test_settings():
 @pytest.fixture
 def db_setup():
     engine = create_engine(
-        "sqlite://", poolclass=StaticPool,
+        "sqlite://",
+        poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)

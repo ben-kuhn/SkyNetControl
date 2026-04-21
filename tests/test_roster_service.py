@@ -5,14 +5,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.db.base import Base
-import backend.modules.schedule.models
-import backend.modules.activities.models
-import backend.modules.checkins.models
-import backend.modules.roster.models
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
-from backend.modules.roster.models import RosterTemplate, RosterLog, RosterStatus
+from backend.modules.roster.models import RosterStatus
 from backend.modules.roster.service import (
     create_template,
     get_template,
@@ -91,6 +87,7 @@ def season_and_sessions(db):
 
 # --- Template CRUD ---
 
+
 def test_create_template(db):
     tmpl = create_template(
         db,
@@ -109,20 +106,41 @@ def test_create_template(db):
 
 
 def test_create_template_clears_previous_default(db):
-    t1 = create_template(db, name="First", subject_template="s", header_template="h",
-                         welcome_template="w", comments_template="c", footer_template="f",
-                         is_default=True)
-    t2 = create_template(db, name="Second", subject_template="s", header_template="h",
-                         welcome_template="w", comments_template="c", footer_template="f",
-                         is_default=True)
+    t1 = create_template(
+        db,
+        name="First",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+        is_default=True,
+    )
+    t2 = create_template(
+        db,
+        name="Second",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+        is_default=True,
+    )
     db.refresh(t1)
     assert t1.is_default is False
     assert t2.is_default is True
 
 
 def test_get_template(db):
-    tmpl = create_template(db, name="T", subject_template="s", header_template="h",
-                           welcome_template="w", comments_template="c", footer_template="f")
+    tmpl = create_template(
+        db,
+        name="T",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+    )
     result = get_template(db, tmpl.id)
     assert result is not None
     assert result.name == "T"
@@ -133,18 +151,39 @@ def test_get_template_not_found(db):
 
 
 def test_list_templates(db):
-    create_template(db, name="Beta", subject_template="s", header_template="h",
-                    welcome_template="w", comments_template="c", footer_template="f")
-    create_template(db, name="Alpha", subject_template="s", header_template="h",
-                    welcome_template="w", comments_template="c", footer_template="f")
+    create_template(
+        db,
+        name="Beta",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+    )
+    create_template(
+        db,
+        name="Alpha",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+    )
     result = list_templates(db)
     assert len(result) == 2
     assert result[0].name == "Alpha"  # ordered by name
 
 
 def test_update_template(db):
-    tmpl = create_template(db, name="Old", subject_template="s", header_template="h",
-                           welcome_template="w", comments_template="c", footer_template="f")
+    tmpl = create_template(
+        db,
+        name="Old",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+    )
     updated = update_template(db, tmpl.id, name="New", lead_time_days=3)
     assert updated.name == "New"
     assert updated.lead_time_days == 3
@@ -155,34 +194,64 @@ def test_update_template_not_found(db):
 
 
 def test_delete_template(db):
-    tmpl = create_template(db, name="Del", subject_template="s", header_template="h",
-                           welcome_template="w", comments_template="c", footer_template="f")
+    tmpl = create_template(
+        db,
+        name="Del",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+    )
     assert delete_template(db, tmpl.id) is True
     assert get_template(db, tmpl.id) is None
 
 
 def test_delete_template_blocked_if_default(db):
-    tmpl = create_template(db, name="Def", subject_template="s", header_template="h",
-                           welcome_template="w", comments_template="c", footer_template="f",
-                           is_default=True)
+    tmpl = create_template(
+        db,
+        name="Def",
+        subject_template="s",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+        is_default=True,
+    )
     assert delete_template(db, tmpl.id) is False
     assert get_template(db, tmpl.id) is not None
 
 
 # --- Context Building ---
 
+
 def test_build_roster_context_regular(db, season_and_sessions):
     season, session1, _, _ = season_and_sessions
 
-    ci1 = CheckIn(session_id=session1.id, callsign="W0TST", name="Test User",
-                  mode="winlink", parse_status=ParseStatus.AUTO,
-                  timing_status=TimingStatus.ON_TIME, is_new_member=True,
-                  city="Denver", county="Denver", state="CO",
-                  comments="Hello!")
-    ci2 = CheckIn(session_id=session1.id, callsign="KD0ABC", name="Another Op",
-                  mode="vara", parse_status=ParseStatus.AUTO,
-                  timing_status=TimingStatus.ON_TIME, is_new_member=False,
-                  latitude=39.7392, longitude=-104.9903)
+    ci1 = CheckIn(
+        session_id=session1.id,
+        callsign="W0TST",
+        name="Test User",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=True,
+        city="Denver",
+        county="Denver",
+        state="CO",
+        comments="Hello!",
+    )
+    ci2 = CheckIn(
+        session_id=session1.id,
+        callsign="KD0ABC",
+        name="Another Op",
+        mode="vara",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=False,
+        latitude=39.7392,
+        longitude=-104.9903,
+    )
     db.add_all([ci1, ci2])
     db.commit()
 
@@ -216,10 +285,17 @@ def test_build_roster_context_activity(db, season_and_sessions):
 def test_build_roster_context_map_url(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions
 
-    ci = CheckIn(session_id=session1.id, callsign="W0GPS", name="GPS Op",
-                 mode="winlink", parse_status=ParseStatus.AUTO,
-                 timing_status=TimingStatus.ON_TIME, is_new_member=False,
-                 latitude=39.7392, longitude=-104.9903)
+    ci = CheckIn(
+        session_id=session1.id,
+        callsign="W0GPS",
+        name="GPS Op",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=False,
+        latitude=39.7392,
+        longitude=-104.9903,
+    )
     db.add(ci)
     db.commit()
 
@@ -235,8 +311,8 @@ def default_template(db):
         subject_template="Roster — {{ date }}",
         header_template="Session: {{ date }}, NCS: {{ net_control }}, Count: {{ total_count }}",
         welcome_template="{% for m in new_members %}Welcome {{ m.name }} ({{ m.callsign }})!\n{% endfor %}",
-        comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",
-        footer_template="{% if next_week_preview %}Next: {{ next_week_preview }}{% endif %}\n{% if map_url %}Map: {{ map_url }}{% endif %}\n73 de W0NE",
+        comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",  # noqa: E501
+        footer_template="{% if next_week_preview %}Next: {{ next_week_preview }}{% endif %}\n{% if map_url %}Map: {{ map_url }}{% endif %}\n73 de W0NE",  # noqa: E501
         lead_time_days=1,
         is_default=True,
     )
@@ -244,17 +320,41 @@ def default_template(db):
 
 # --- Rendering ---
 
+
 def test_render_roster(db, default_template):
     context = {
-        "date": "April 10, 2026", "time": "6:00 PM", "day_of_week": "Thursday",
-        "net_control": "W0NE", "activity_title": "", "activity_instructions": "",
-        "next_week_preview": "Standard Winlink Check-in", "map_url": "",
-        "checkins": [{"name": "Alice", "callsign": "W0TST", "comments": "Hi!",
-                      "city": "", "county": "", "state": "", "mode": "winlink",
-                      "is_new_member": True}],
-        "new_members": [{"name": "Alice", "callsign": "W0TST", "comments": "Hi!",
-                         "city": "", "county": "", "state": "", "mode": "winlink",
-                         "is_new_member": True}],
+        "date": "April 10, 2026",
+        "time": "6:00 PM",
+        "day_of_week": "Thursday",
+        "net_control": "W0NE",
+        "activity_title": "",
+        "activity_instructions": "",
+        "next_week_preview": "Standard Winlink Check-in",
+        "map_url": "",
+        "checkins": [
+            {
+                "name": "Alice",
+                "callsign": "W0TST",
+                "comments": "Hi!",
+                "city": "",
+                "county": "",
+                "state": "",
+                "mode": "winlink",
+                "is_new_member": True,
+            }
+        ],
+        "new_members": [
+            {
+                "name": "Alice",
+                "callsign": "W0TST",
+                "comments": "Hi!",
+                "city": "",
+                "county": "",
+                "state": "",
+                "mode": "winlink",
+                "is_new_member": True,
+            }
+        ],
         "total_count": 1,
     }
     sections = render_roster(default_template, context)
@@ -267,9 +367,13 @@ def test_render_roster(db, default_template):
 
 def test_render_roster_jinja_error(db):
     bad_template = create_template(
-        db, name="Bad", subject_template="{{ bad syntax {% }}",
-        header_template="ok", welcome_template="ok",
-        comments_template="ok", footer_template="ok",
+        db,
+        name="Bad",
+        subject_template="{{ bad syntax {% }}",
+        header_template="ok",
+        welcome_template="ok",
+        comments_template="ok",
+        footer_template="ok",
     )
     context = {"date": "test"}
     sections = render_roster(bad_template, context)
@@ -278,6 +382,7 @@ def test_render_roster_jinja_error(db):
 
 
 # --- Draft Generation ---
+
 
 def test_generate_draft(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
@@ -305,19 +410,32 @@ def test_generate_draft_no_default_template(db, season_and_sessions):
 
 def test_generate_draft_with_specific_template(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions
-    tmpl = create_template(db, name="Custom", subject_template="Custom {{ date }}",
-                           header_template="h", welcome_template="w",
-                           comments_template="c", footer_template="f")
+    tmpl = create_template(
+        db,
+        name="Custom",
+        subject_template="Custom {{ date }}",
+        header_template="h",
+        welcome_template="w",
+        comments_template="c",
+        footer_template="f",
+    )
     log = generate_draft(db, session1.id, template_id=tmpl.id)
     assert "Custom" in log.content_subject
 
 
 def test_generate_draft_sets_map_url_when_gps(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
-    ci = CheckIn(session_id=session1.id, callsign="W0GPS", name="GPS Op",
-                 mode="winlink", parse_status=ParseStatus.AUTO,
-                 timing_status=TimingStatus.ON_TIME, is_new_member=False,
-                 latitude=39.7, longitude=-104.9)
+    ci = CheckIn(
+        session_id=session1.id,
+        callsign="W0GPS",
+        name="GPS Op",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=False,
+        latitude=39.7,
+        longitude=-104.9,
+    )
     db.add(ci)
     db.commit()
     log = generate_draft(db, session1.id)
@@ -337,14 +455,16 @@ def test_generate_due_drafts(db, season_and_sessions, default_template):
 
 def test_generate_due_drafts_skips_no_end_date(db, default_template):
     """Sessions without end_date (real events) are skipped by generate_due_drafts."""
-    season = NetSeason(name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-                       day_of_week=0)
+    season = NetSeason(name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=0)
     db.add(season)
     db.flush()
 
     session = NetSession(
-        season_id=season.id, start_date=date(2026, 4, 5), end_date=None,
-        grace_period_hours=24.0, session_type=SessionType.REAL_EVENT,
+        season_id=season.id,
+        start_date=date(2026, 4, 5),
+        end_date=None,
+        grace_period_hours=24.0,
+        session_type=SessionType.REAL_EVENT,
         status=SessionStatus.COMPLETED,
     )
     db.add(session)
@@ -357,13 +477,22 @@ def test_generate_due_drafts_skips_no_end_date(db, default_template):
 
 # --- Assembly ---
 
+
 def test_assemble_roster(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
 
-    ci = CheckIn(session_id=session1.id, callsign="W0TST", name="Test Op",
-                 mode="winlink", parse_status=ParseStatus.AUTO,
-                 timing_status=TimingStatus.ON_TIME, is_new_member=True,
-                 city="Denver", state="CO", comments="Great net!")
+    ci = CheckIn(
+        session_id=session1.id,
+        callsign="W0TST",
+        name="Test Op",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=True,
+        city="Denver",
+        state="CO",
+        comments="Great net!",
+    )
     db.add(ci)
     db.commit()
 
@@ -382,6 +511,7 @@ def test_assemble_roster_not_found(db):
 
 
 # --- Status Transitions ---
+
 
 def test_approve_roster(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
@@ -459,16 +589,30 @@ def test_update_draft_non_draft_fails(db, season_and_sessions, default_template)
 
 # --- GeoJSON ---
 
+
 def test_get_session_geojson(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions
 
-    ci1 = CheckIn(session_id=session1.id, callsign="W0GPS", name="GPS Op",
-                  mode="winlink", parse_status=ParseStatus.AUTO,
-                  timing_status=TimingStatus.ON_TIME, is_new_member=False,
-                  latitude=39.7392, longitude=-104.9903)
-    ci2 = CheckIn(session_id=session1.id, callsign="W0NOG", name="No GPS",
-                  mode="winlink", parse_status=ParseStatus.AUTO,
-                  timing_status=TimingStatus.ON_TIME, is_new_member=False)
+    ci1 = CheckIn(
+        session_id=session1.id,
+        callsign="W0GPS",
+        name="GPS Op",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=False,
+        latitude=39.7392,
+        longitude=-104.9903,
+    )
+    ci2 = CheckIn(
+        session_id=session1.id,
+        callsign="W0NOG",
+        name="No GPS",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=False,
+    )
     db.add_all([ci1, ci2])
     db.commit()
 
@@ -489,6 +633,7 @@ def test_get_session_geojson_empty(db, season_and_sessions):
 
 
 # --- Notify NCS stub ---
+
 
 def test_notify_ncs_is_noop(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions

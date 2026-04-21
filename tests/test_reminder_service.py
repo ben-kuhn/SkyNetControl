@@ -5,12 +5,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
-import backend.modules.schedule.models
-import backend.modules.activities.models
-import backend.modules.reminders.models
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
-from backend.modules.reminders.models import ReminderTemplate, TemplateType, ReminderLog, ReminderStatus
+from backend.modules.reminders.models import ReminderTemplate, TemplateType, ReminderStatus
 from backend.modules.reminders.service import (
     create_template,
     get_template,
@@ -86,6 +83,7 @@ def season_and_sessions(db):
 
 # --- Template CRUD tests ---
 
+
 def test_create_template(db: Session):
     tmpl = create_template(
         db,
@@ -126,12 +124,11 @@ def test_create_default_template_clears_previous(db: Session):
 
 
 def test_list_templates(db: Session):
-    create_template(db, name="Zeta", template_type=TemplateType.ACTIVITY,
-                    subject_template="S", body_template="B")
-    create_template(db, name="Alpha", template_type=TemplateType.REGULAR_CHECKIN,
-                    subject_template="S", body_template="B")
-    create_template(db, name="Mu", template_type=TemplateType.REGULAR_CHECKIN,
-                    subject_template="S", body_template="B")
+    create_template(db, name="Zeta", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B")
+    create_template(
+        db, name="Alpha", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
+    )
+    create_template(db, name="Mu", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B")
 
     templates = list_templates(db)
     names = [t.name for t in templates]
@@ -141,8 +138,7 @@ def test_list_templates(db: Session):
 
 def test_get_template(db: Session):
     tmpl = create_template(
-        db, name="Fetch Me", template_type=TemplateType.ACTIVITY,
-        subject_template="S", body_template="B"
+        db, name="Fetch Me", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B"
     )
     fetched = get_template(db, tmpl.id)
     assert fetched is not None
@@ -154,8 +150,11 @@ def test_get_template(db: Session):
 
 def test_update_template(db: Session):
     tmpl = create_template(
-        db, name="Original Name", template_type=TemplateType.REGULAR_CHECKIN,
-        subject_template="Old Subject", body_template="Old Body"
+        db,
+        name="Original Name",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Old Subject",
+        body_template="Old Body",
     )
     updated = update_template(db, tmpl.id, name="Updated Name", body_template="New Body")
     assert updated is not None
@@ -166,12 +165,10 @@ def test_update_template(db: Session):
 
 def test_update_template_sets_default(db: Session):
     first = create_template(
-        db, name="First", template_type=TemplateType.ACTIVITY,
-        subject_template="S", body_template="B", is_default=True
+        db, name="First", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B", is_default=True
     )
     second = create_template(
-        db, name="Second", template_type=TemplateType.ACTIVITY,
-        subject_template="S", body_template="B"
+        db, name="Second", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B"
     )
     update_template(db, second.id, is_default=True)
     db.refresh(first)
@@ -182,8 +179,7 @@ def test_update_template_sets_default(db: Session):
 
 def test_delete_template(db: Session):
     tmpl = create_template(
-        db, name="To Delete", template_type=TemplateType.REGULAR_CHECKIN,
-        subject_template="S", body_template="B"
+        db, name="To Delete", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
     )
     result = delete_template(db, tmpl.id)
     assert result is True
@@ -192,8 +188,12 @@ def test_delete_template(db: Session):
 
 def test_cannot_delete_default_template(db: Session):
     tmpl = create_template(
-        db, name="Default Template", template_type=TemplateType.REGULAR_CHECKIN,
-        subject_template="S", body_template="B", is_default=True
+        db,
+        name="Default Template",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="S",
+        body_template="B",
+        is_default=True,
     )
     result = delete_template(db, tmpl.id)
     assert result is False
@@ -201,6 +201,7 @@ def test_cannot_delete_default_template(db: Session):
 
 
 # --- Context building tests ---
+
 
 def test_build_template_context_regular(db: Session, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
@@ -233,6 +234,7 @@ def test_build_template_context_no_next_session(db: Session, season_and_sessions
 
 
 # --- Rendering tests ---
+
 
 def test_render_reminder(db: Session):
     template = ReminderTemplate(
@@ -287,6 +289,7 @@ def test_render_reminder_bad_syntax(db: Session):
 
 
 # --- Draft generation and status transition tests ---
+
 
 def test_generate_draft(db: Session, season_and_sessions):
     season, session1, session2, activity = season_and_sessions

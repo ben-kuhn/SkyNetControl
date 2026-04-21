@@ -1,6 +1,5 @@
-import os
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime
 
 from backend.modules.checkins.mailbox_reader import read_mailbox, read_message_file
 

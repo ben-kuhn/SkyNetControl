@@ -68,9 +68,7 @@ async def test_client(test_app):
 @pytest.mark.asyncio
 async def test_admin_can_get_config(test_client, test_settings):
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.get(
-        "/api/config/", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/config/", cookies={"access_token": token})
     assert response.status_code == 200
     assert isinstance(response.json(), dict)
 
@@ -85,9 +83,7 @@ async def test_admin_can_set_config(test_client, test_settings):
     )
     assert response.status_code == 200
 
-    response = await test_client.get(
-        "/api/config/", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/config/", cookies={"access_token": token})
     assert response.json()["net_address"] == "w0ne@winlink.org"
 
 

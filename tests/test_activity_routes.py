@@ -24,7 +24,8 @@ def test_settings():
 @pytest.fixture
 def db_setup():
     engine = create_engine(
-        "sqlite://", poolclass=StaticPool,
+        "sqlite://",
+        poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
@@ -96,9 +97,7 @@ async def test_list_activities(test_client, test_settings):
         cookies={"access_token": token},
     )
 
-    response = await test_client.get(
-        "/api/activities/", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/activities/", cookies={"access_token": token})
     assert response.status_code == 200
     assert len(response.json()) == 1
 
@@ -113,9 +112,7 @@ async def test_get_activity(test_client, test_settings):
     )
     activity_id = create_resp.json()["id"]
 
-    response = await test_client.get(
-        f"/api/activities/{activity_id}", cookies={"access_token": token}
-    )
+    response = await test_client.get(f"/api/activities/{activity_id}", cookies={"access_token": token})
     assert response.status_code == 200
     assert response.json()["title"] == "Find Me"
 
@@ -150,9 +147,7 @@ async def test_delete_activity(test_client, test_settings):
     )
     activity_id = create_resp.json()["id"]
 
-    response = await test_client.delete(
-        f"/api/activities/{activity_id}", cookies={"access_token": token}
-    )
+    response = await test_client.delete(f"/api/activities/{activity_id}", cookies={"access_token": token})
     assert response.status_code == 204
 
 
@@ -160,6 +155,7 @@ async def test_delete_activity(test_client, test_settings):
 async def test_cannot_delete_default_activity(test_client, test_settings, db_setup):
     # Seed a default activity directly
     from backend.modules.activities.models import Activity
+
     with db_setup() as session:
         activity = Activity(
             title="Default",
@@ -172,9 +168,7 @@ async def test_cannot_delete_default_activity(test_client, test_settings, db_set
         activity_id = activity.id
 
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.delete(
-        f"/api/activities/{activity_id}", cookies={"access_token": token}
-    )
+    response = await test_client.delete(f"/api/activities/{activity_id}", cookies={"access_token": token})
     assert response.status_code == 403
 
 
@@ -191,9 +185,7 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
     )
 
     # Viewer can list
-    response = await test_client.get(
-        "/api/activities/", cookies={"access_token": viewer_token}
-    )
+    response = await test_client.get("/api/activities/", cookies={"access_token": viewer_token})
     assert response.status_code == 200
 
     # Viewer cannot create
@@ -219,9 +211,7 @@ async def test_list_tags(test_client, test_settings):
         cookies={"access_token": token},
     )
 
-    response = await test_client.get(
-        "/api/activities/tags", cookies={"access_token": token}
-    )
+    response = await test_client.get("/api/activities/tags", cookies={"access_token": token})
     assert response.status_code == 200
     tags = response.json()
     assert len(tags) == 2

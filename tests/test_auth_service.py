@@ -1,5 +1,4 @@
 import pytest
-from datetime import datetime, timezone
 
 from backend.auth.service import create_access_token, decode_access_token
 from backend.config import Settings

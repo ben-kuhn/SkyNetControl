@@ -14,13 +14,9 @@ from backend.modules.checkins.message_parser import parse_message
 from backend.modules.schedule.models import NetSession, SessionStatus
 
 
-def classify_timing(
-    net_session: NetSession, received_at: datetime
-) -> TimingStatus:
+def classify_timing(net_session: NetSession, received_at: datetime) -> TimingStatus:
     """Classify a message's timing relative to the session window + grace period."""
-    session_start = datetime.combine(
-        net_session.start_date, datetime.min.time(), tzinfo=timezone.utc
-    )
+    session_start = datetime.combine(net_session.start_date, datetime.min.time(), tzinfo=timezone.utc)
 
     # Ensure received_at is timezone-aware (SQLite may strip tzinfo on round-trip)
     if received_at.tzinfo is None:
@@ -36,9 +32,7 @@ def classify_timing(
             return TimingStatus.EARLY
         return TimingStatus.EARLY
 
-    session_end = datetime.combine(
-        net_session.end_date, datetime.max.time(), tzinfo=timezone.utc
-    )
+    session_end = datetime.combine(net_session.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
     if session_start <= received_at <= session_end:
         return TimingStatus.ON_TIME
@@ -57,9 +51,7 @@ def is_new_member(db: Session, callsign: str) -> bool:
     return db.get(Member, callsign) is None
 
 
-def process_raw_message(
-    db: Session, raw: RawMessage, net_session: NetSession
-) -> CheckIn:
+def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -> CheckIn:
     """Parse a RawMessage and create a CheckIn record."""
     msg_type, fields = parse_message(raw.body)
     raw.message_type = msg_type
@@ -110,10 +102,7 @@ def scan_and_import_messages(
     """Import raw message dicts, deduplicate by callsign (keep latest), skip existing."""
     all_msg_ids = [msg["message_id"] for msg in raw_messages]
     existing_ids = set(
-        row[0]
-        for row in db.query(RawMessage.message_id)
-        .filter(RawMessage.message_id.in_(all_msg_ids))
-        .all()
+        row[0] for row in db.query(RawMessage.message_id).filter(RawMessage.message_id.in_(all_msg_ids)).all()
     )
 
     new_messages = [m for m in raw_messages if m["message_id"] not in existing_ids]
@@ -148,15 +137,8 @@ def scan_and_import_messages(
     return list(parsed_checkins.values())
 
 
-def get_checkins_for_session(
-    db: Session, session_id: int
-) -> list[CheckIn]:
-    return (
-        db.query(CheckIn)
-        .filter(CheckIn.session_id == session_id)
-        .order_by(CheckIn.callsign)
-        .all()
-    )
+def get_checkins_for_session(db: Session, session_id: int) -> list[CheckIn]:
+    return db.query(CheckIn).filter(CheckIn.session_id == session_id).order_by(CheckIn.callsign).all()
 
 
 def create_manual_checkin(
