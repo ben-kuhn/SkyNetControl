@@ -55,16 +55,19 @@ async def test_client(test_app):
 
 # --- Registration tests ---
 
+
 @pytest.mark.asyncio
 async def test_register_valid_callsign(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(
-            callsign="PENDING-google12",
-            oidc_subject="google:123",
-            name="New User",
-            role=UserRole.PENDING,
-        ))
+        session.add(
+            User(
+                callsign="PENDING-google12",
+                oidc_subject="google:123",
+                name="New User",
+                role=UserRole.PENDING,
+            )
+        )
         session.commit()
 
     token = create_access_token("PENDING-google12", "pending", test_settings)
@@ -83,12 +86,14 @@ async def test_register_valid_callsign(test_client, test_settings, db_setup):
 async def test_register_invalid_callsign_format(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(
-            callsign="PENDING-google12",
-            oidc_subject="google:123",
-            name="New User",
-            role=UserRole.PENDING,
-        ))
+        session.add(
+            User(
+                callsign="PENDING-google12",
+                oidc_subject="google:123",
+                name="New User",
+                role=UserRole.PENDING,
+            )
+        )
         session.commit()
 
     token = create_access_token("PENDING-google12", "pending", test_settings)
@@ -105,7 +110,9 @@ async def test_register_duplicate_callsign(test_client, test_settings, db_setup)
     _, factory = db_setup
     with factory() as session:
         session.add(User(callsign="W0NE", oidc_subject="google:existing", name="Existing", role=UserRole.ADMIN))
-        session.add(User(callsign="PENDING-google12", oidc_subject="google:new", name="New User", role=UserRole.PENDING))
+        session.add(
+            User(callsign="PENDING-google12", oidc_subject="google:new", name="New User", role=UserRole.PENDING)
+        )
         session.commit()
 
     token = create_access_token("PENDING-google12", "pending", test_settings)
@@ -140,6 +147,7 @@ async def test_register_unauthenticated(test_client):
 
 
 # --- Callsign change request tests ---
+
 
 @pytest.mark.asyncio
 async def test_request_callsign_change(test_client, test_settings, db_setup):
@@ -191,12 +199,21 @@ async def test_request_callsign_change_taken(test_client, test_settings, db_setu
 
 # --- Callsign approval tests ---
 
+
 @pytest.mark.asyncio
 async def test_approve_callsign_change(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
         session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="W0OLD", oidc_subject="google:user1", name="User", role=UserRole.VIEWER, pending_callsign="W0NEW"))
+        session.add(
+            User(
+                callsign="W0OLD",
+                oidc_subject="google:user1",
+                name="User",
+                role=UserRole.VIEWER,
+                pending_callsign="W0NEW",
+            )
+        )
         session.commit()
 
     token = create_access_token("W0NE", "admin", test_settings)
@@ -225,7 +242,15 @@ async def test_reject_callsign_change(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
         session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="W0OLD", oidc_subject="google:u1", name="User", role=UserRole.VIEWER, pending_callsign="W0NEW"))
+        session.add(
+            User(
+                callsign="W0OLD",
+                oidc_subject="google:u1",
+                name="User",
+                role=UserRole.VIEWER,
+                pending_callsign="W0NEW",
+            )
+        )
         session.commit()
 
     token = create_access_token("W0NE", "admin", test_settings)
@@ -242,7 +267,15 @@ async def test_viewer_cannot_approve_callsign(test_client, test_settings, db_set
     _, factory = db_setup
     with factory() as session:
         session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="KD0TST", oidc_subject="google:viewer", name="Viewer", role=UserRole.VIEWER, pending_callsign="W0NEW"))
+        session.add(
+            User(
+                callsign="KD0TST",
+                oidc_subject="google:viewer",
+                name="Viewer",
+                role=UserRole.VIEWER,
+                pending_callsign="W0NEW",
+            )
+        )
         session.commit()
 
     token = create_access_token("KD0TST", "viewer", test_settings)

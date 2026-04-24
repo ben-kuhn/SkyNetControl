@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from backend.auth.service import fetch_oidc_discovery, init_providers
-from backend.auth.providers import PROVIDERS
 from backend.config import Settings, ProviderSettings, OIDCProviderSettings
 
 

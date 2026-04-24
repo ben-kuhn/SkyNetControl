@@ -1,6 +1,4 @@
-import pytest
-
-from backend.auth.providers import PROVIDERS, ProviderConfig, get_enabled_providers
+from backend.auth.providers import PROVIDERS, get_enabled_providers
 from backend.config import Settings, ProviderSettings, OIDCProviderSettings
 
 

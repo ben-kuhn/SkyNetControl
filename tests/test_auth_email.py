@@ -1,7 +1,13 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from backend.auth.email import send_email, notify_admins_new_registration, notify_admins_callsign_change, notify_user_approved, notify_user_callsign_approved
+from backend.auth.email import (
+    notify_admins_callsign_change,
+    notify_admins_new_registration,
+    notify_user_approved,
+    notify_user_callsign_approved,
+    send_email,
+)
 from backend.auth.models import User, UserRole
 from backend.config import Settings, ProviderSettings, SmtpSettings
 

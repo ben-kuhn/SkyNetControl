@@ -50,9 +50,7 @@ async def notify_admins_new_registration(admins: list[User], new_user: User, set
             )
 
 
-async def notify_admins_callsign_change(
-    admins: list[User], user: User, new_callsign: str, settings: Settings
-) -> None:
+async def notify_admins_callsign_change(admins: list[User], user: User, new_callsign: str, settings: Settings) -> None:
     """Notify admins that a user has requested a callsign change."""
     for admin in admins:
         if admin.email:

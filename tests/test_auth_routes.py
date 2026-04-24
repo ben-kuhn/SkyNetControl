@@ -126,6 +126,7 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
 
         location = login_resp.headers.get("location", "")
         import urllib.parse
+
         parsed = urllib.parse.urlparse(location)
         params = urllib.parse.parse_qs(parsed.query)
         state = params.get("state", [""])[0]
@@ -176,6 +177,7 @@ async def test_callback_existing_user_not_changed(test_client, test_app, db_setu
         cookies = login_resp.cookies
         location = login_resp.headers.get("location", "")
         import urllib.parse
+
         parsed = urllib.parse.urlparse(location)
         params = urllib.parse.parse_qs(parsed.query)
         state = params.get("state", [""])[0]
@@ -198,7 +200,15 @@ async def test_callback_existing_user_not_changed(test_client, test_app, db_setu
 async def test_me_returns_user(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN, email="admin@example.com"))
+        session.add(
+            User(
+                callsign="W0NE",
+                oidc_subject="auth0|admin",
+                name="Admin",
+                role=UserRole.ADMIN,
+                email="admin@example.com",
+            )
+        )
         session.commit()
 
     token = create_access_token("W0NE", "admin", test_settings)
@@ -248,7 +258,9 @@ async def test_admin_can_update_user_role(test_client, test_settings, db_setup):
         session.commit()
 
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.patch("/api/auth/users/KD0TST", json={"role": "net_control"}, cookies={"access_token": token})
+    response = await test_client.patch(
+        "/api/auth/users/KD0TST", json={"role": "net_control"}, cookies={"access_token": token}
+    )
     assert response.status_code == 200
     assert response.json()["role"] == "net_control"
 
