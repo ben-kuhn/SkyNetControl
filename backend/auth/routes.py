@@ -1,7 +1,9 @@
+import re
 import secrets
 import urllib.parse
 
 import httpx
+import sqlalchemy as sa
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -13,6 +15,8 @@ from backend.auth.service import create_access_token
 from backend.config import Settings
 
 auth_router = APIRouter(tags=["auth"])
+
+CALLSIGN_PATTERN = re.compile(r"^[A-Z]{1,2}\d[A-Z]{1,4}$")
 
 
 def _get_provider_config(request: Request, provider: str) -> dict:
@@ -154,6 +158,75 @@ async def logout():
     return response
 
 
+class RegisterRequest(BaseModel):
+    callsign: str
+
+
+@auth_router.post("/register")
+async def register(
+    body: RegisterRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    if user.role != UserRole.PENDING:
+        raise HTTPException(status_code=409, detail="User already registered")
+
+    callsign = body.callsign.upper()
+    if not CALLSIGN_PATTERN.match(callsign):
+        raise HTTPException(status_code=400, detail="Invalid callsign format")
+
+    existing = db.get(User, callsign)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Callsign already taken")
+
+    old_callsign = user.callsign
+    db.execute(
+        sa.text("UPDATE users SET callsign = :new WHERE callsign = :old"),
+        {"new": callsign, "old": old_callsign},
+    )
+    db.commit()
+
+    user = db.get(User, callsign)
+    return {
+        "callsign": user.callsign,
+        "name": user.name,
+        "role": user.role.value,
+        "email": user.email,
+        "pending_callsign": user.pending_callsign,
+    }
+
+
+class CallsignChangeRequest(BaseModel):
+    callsign: str
+
+
+@auth_router.patch("/me")
+async def update_me(
+    body: CallsignChangeRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    callsign = body.callsign.upper()
+    if not CALLSIGN_PATTERN.match(callsign):
+        raise HTTPException(status_code=400, detail="Invalid callsign format")
+
+    existing = db.get(User, callsign)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Callsign already taken")
+
+    user.pending_callsign = callsign
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "callsign": user.callsign,
+        "name": user.name,
+        "role": user.role.value,
+        "email": user.email,
+        "pending_callsign": user.pending_callsign,
+    }
+
+
 class UserRoleUpdate(BaseModel):
     role: UserRole
 
@@ -196,3 +269,52 @@ async def update_user_role(
         "email": target_user.email,
         "pending_callsign": target_user.pending_callsign,
     }
+
+
+@auth_router.post("/users/{callsign}/approve-callsign")
+async def approve_callsign(
+    callsign: str,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    target_user = db.get(User, callsign)
+    if target_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not target_user.pending_callsign:
+        raise HTTPException(status_code=400, detail="No pending callsign change")
+
+    new_callsign = target_user.pending_callsign
+
+    existing = db.get(User, new_callsign)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Callsign already taken")
+
+    db.execute(
+        sa.text("UPDATE users SET callsign = :new, pending_callsign = NULL WHERE callsign = :old"),
+        {"new": new_callsign, "old": callsign},
+    )
+    db.commit()
+
+    updated_user = db.get(User, new_callsign)
+    return {
+        "callsign": updated_user.callsign,
+        "name": updated_user.name,
+        "role": updated_user.role.value,
+        "email": updated_user.email,
+        "pending_callsign": updated_user.pending_callsign,
+    }
+
+
+@auth_router.delete("/users/{callsign}/pending-callsign")
+async def reject_callsign(
+    callsign: str,
+    user: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db_session),
+):
+    target_user = db.get(User, callsign)
+    if target_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    target_user.pending_callsign = None
+    db.commit()
+    return {"message": "Pending callsign change rejected"}
