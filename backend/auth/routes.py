@@ -1,9 +1,10 @@
 import secrets
+import urllib.parse
 
-from authlib.integrations.httpx_client import AsyncOAuth2Client
+import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session, get_settings, require_role
@@ -14,35 +15,47 @@ from backend.config import Settings
 auth_router = APIRouter(tags=["auth"])
 
 
-async def _get_oidc_client(settings: Settings) -> AsyncOAuth2Client:
-    client = AsyncOAuth2Client(
-        client_id=settings.oidc_client_id,
-        client_secret=settings.oidc_client_secret,
-        redirect_uri=settings.oidc_redirect_uri,
-    )
-    return client
+def _get_provider_config(request: Request, provider: str) -> dict:
+    providers = request.app.state.providers
+    if provider not in providers:
+        raise HTTPException(status_code=404, detail=f"Unknown auth provider: {provider}")
+    return providers[provider]
 
 
-@auth_router.get("/login")
-async def login(request: Request, app_settings: Settings = Depends(get_settings)):
-    client = await _get_oidc_client(app_settings)
+@auth_router.get("/providers")
+async def list_providers(request: Request):
+    providers = request.app.state.providers
+    return [{"name": name, "label": config["label"]} for name, config in providers.items()]
+
+
+@auth_router.get("/login/{provider}")
+async def login(provider: str, request: Request, app_settings: Settings = Depends(get_settings)):
+    config = _get_provider_config(request, provider)
+
     state = secrets.token_urlsafe(32)
-    authorization_url, _ = await client.create_authorization_url(
-        f"{app_settings.oidc_issuer_url}/authorize", state=state
-    )
+    params = {
+        "client_id": config["client_id"],
+        "redirect_uri": f"{app_settings.app_base_url}/api/auth/callback/{provider}",
+        "response_type": "code",
+        "scope": config["scopes"],
+        "state": state,
+    }
+    authorization_url = f"{config['authorize_url']}?{urllib.parse.urlencode(params)}"
+
     response = RedirectResponse(url=authorization_url)
     response.set_cookie(
         key="oauth_state",
-        value=state,
+        value=f"{provider}:{state}",
         httponly=True,
         samesite="lax",
-        max_age=600,  # 10 minutes
+        max_age=600,
     )
     return response
 
 
-@auth_router.get("/callback")
+@auth_router.get("/callback/{provider}")
 async def callback(
+    provider: str,
     request: Request,
     code: str,
     state: str = "",
@@ -50,52 +63,71 @@ async def callback(
     db: Session = Depends(get_db_session),
     app_settings: Settings = Depends(get_settings),
 ):
-    if not oauth_state or not secrets.compare_digest(oauth_state, state):
+    expected_state = f"{provider}:{state}"
+    if not oauth_state or not secrets.compare_digest(oauth_state, expected_state):
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
-    client = await _get_oidc_client(app_settings)
-    await client.fetch_token(
-        f"{app_settings.oidc_issuer_url}/token",
-        code=code,
-        grant_type="authorization_code",
-    )
+    config = _get_provider_config(request, provider)
+    redirect_uri = f"{app_settings.app_base_url}/api/auth/callback/{provider}"
 
-    userinfo = await client.get(f"{app_settings.oidc_issuer_url}/userinfo")
-    userinfo_data = userinfo.json()
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            config["token_url"],
+            data={
+                "client_id": config["client_id"],
+                "client_secret": config["client_secret"],
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Accept": "application/json"},
+        )
+        token_data = token_response.json()
+        access_token = token_data.get("access_token", "")
 
-    oidc_subject = userinfo_data.get("sub", "")
-    if not oidc_subject:
-        raise HTTPException(status_code=400, detail="OIDC provider did not return a subject")
-    name = userinfo_data.get("name", userinfo_data.get("preferred_username", "Unknown"))
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Failed to obtain access token from provider")
 
-    # Look up existing user by OIDC subject
+        userinfo_response = await client.get(
+            config["userinfo_url"],
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        userinfo = userinfo_response.json()
+
+    raw_subject = config["extract_subject"](userinfo)
+    if not raw_subject:
+        raise HTTPException(status_code=400, detail="Provider did not return a user identifier")
+
+    oidc_subject = f"{provider}:{raw_subject}"
+    name = config["extract_name"](userinfo)
+    email = config["extract_email"](userinfo)
+
     user = db.query(User).filter(User.oidc_subject == oidc_subject).first()
 
     if user is None:
-        # Check if this is the first user (auto-admin)
+        # First user auto-becomes admin
         user_count = db.query(User).count()
-        role = UserRole.ADMIN if user_count == 0 else UserRole.VIEWER
+        role = UserRole.ADMIN if user_count == 0 else UserRole.PENDING
 
-        # Generate a placeholder callsign from the OIDC subject
-        # User can update this later via profile
-        callsign = userinfo_data.get("preferred_username", oidc_subject[:20]).upper()
+        placeholder_callsign = f"PENDING-{oidc_subject[:12]}"
 
         user = User(
-            callsign=callsign,
+            callsign=placeholder_callsign,
             oidc_subject=oidc_subject,
             name=name,
             role=role,
+            email=email or None,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
 
-    access_token = create_access_token(user.callsign, user.role.value, app_settings)
+    jwt_token = create_access_token(user.callsign, user.role.value, app_settings)
     response = RedirectResponse(url=app_settings.app_base_url)
     is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
         key="access_token",
-        value=access_token,
+        value=jwt_token,
         httponly=True,
         secure=is_secure,
         samesite="lax",
@@ -110,6 +142,8 @@ async def me(user: User = Depends(get_current_user)):
         "callsign": user.callsign,
         "name": user.name,
         "role": user.role.value,
+        "email": user.email,
+        "pending_callsign": user.pending_callsign,
     }
 
 
@@ -135,6 +169,8 @@ async def list_users(
             "callsign": u.callsign,
             "name": u.name,
             "role": u.role.value,
+            "email": u.email,
+            "pending_callsign": u.pending_callsign,
         }
         for u in users
     ]
@@ -157,4 +193,6 @@ async def update_user_role(
         "callsign": target_user.callsign,
         "name": target_user.name,
         "role": target_user.role.value,
+        "email": target_user.email,
+        "pending_callsign": target_user.pending_callsign,
     }
