@@ -10,6 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session, get_settings, require_role
+from backend.auth.email import (
+    notify_admins_new_registration,
+    notify_admins_callsign_change,
+    notify_user_approved,
+    notify_user_callsign_approved,
+)
 from backend.auth.models import User, UserRole
 from backend.auth.service import create_access_token
 from backend.config import Settings
@@ -167,6 +173,7 @@ async def register(
     body: RegisterRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
 ):
     if user.role != UserRole.PENDING:
         raise HTTPException(status_code=409, detail="User already registered")
@@ -187,6 +194,11 @@ async def register(
     db.commit()
 
     user = db.get(User, callsign)
+
+    # Notify admins (fire-and-forget)
+    admins = db.query(User).filter(User.role == UserRole.ADMIN).all()
+    await notify_admins_new_registration(admins, user, app_settings)
+
     return {
         "callsign": user.callsign,
         "name": user.name,
@@ -205,6 +217,7 @@ async def update_me(
     body: CallsignChangeRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
 ):
     callsign = body.callsign.upper()
     if not CALLSIGN_PATTERN.match(callsign):
@@ -217,6 +230,10 @@ async def update_me(
     user.pending_callsign = callsign
     db.commit()
     db.refresh(user)
+
+    # Notify admins (fire-and-forget)
+    admins = db.query(User).filter(User.role == UserRole.ADMIN).all()
+    await notify_admins_callsign_change(admins, user, callsign, app_settings)
 
     return {
         "callsign": user.callsign,
@@ -255,13 +272,17 @@ async def update_user_role(
     body: UserRoleUpdate,
     user: User = Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
 ):
     target_user = db.get(User, callsign)
     if target_user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    was_pending = target_user.role == UserRole.PENDING
     target_user.role = body.role
     db.commit()
     db.refresh(target_user)
+    if was_pending and target_user.role != UserRole.PENDING:
+        await notify_user_approved(target_user, app_settings)
     return {
         "callsign": target_user.callsign,
         "name": target_user.name,
@@ -276,6 +297,7 @@ async def approve_callsign(
     callsign: str,
     user: User = Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
 ):
     target_user = db.get(User, callsign)
     if target_user is None:
@@ -296,6 +318,7 @@ async def approve_callsign(
     db.commit()
 
     updated_user = db.get(User, new_callsign)
+    await notify_user_callsign_approved(updated_user, callsign, app_settings)
     return {
         "callsign": updated_user.callsign,
         "name": updated_user.name,
