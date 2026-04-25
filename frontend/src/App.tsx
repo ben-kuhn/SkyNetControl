@@ -1,10 +1,84 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ThemeProvider } from "./context/ThemeContext";
+import { AuthProvider } from "./context/AuthContext";
+import { ToastProvider } from "./context/ToastContext";
+import { ToastContainer } from "./components/Toast";
+import { AppShell } from "./layouts/AppShell";
+import { LoginPage } from "./pages/LoginPage";
+import { RegisterPage } from "./pages/RegisterPage";
+import { PendingPage } from "./pages/PendingPage";
+import { SchedulePage } from "./pages/SchedulePage";
+import { ProfilePage } from "./pages/ProfilePage";
+import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
+import { ProtectedRoute } from "./ProtectedRoute";
+import type { UserRole } from "./types";
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+
+      <Route
+        path="/register"
+        element={
+          <ProtectedRoute allowPending pendingOnly>
+            <RegisterPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/pending"
+        element={
+          <ProtectedRoute allowPending>
+            <PendingPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        element={
+          <ProtectedRoute>
+            <AppShell />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/schedule" element={<SchedulePage />} />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/checkins" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><PlaceholderPage title="Check-ins" /></ProtectedRoute>} />
+        <Route path="/map" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><PlaceholderPage title="Map" /></ProtectedRoute>} />
+        <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Reminders" /></ProtectedRoute>} />
+        <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Roster" /></ProtectedRoute>} />
+        <Route path="/activities" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Activities" /></ProtectedRoute>} />
+        <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Users" /></ProtectedRoute>} />
+        <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Config" /></ProtectedRoute>} />
+      </Route>
+
+      <Route path="/" element={<Navigate to="/schedule" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-text-primary">SkyNetControl</h1>
-        <p className="text-text-muted mt-2">Foundation loading...</p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <AppRoutes />
+            <ToastContainer />
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </BrowserRouter>
   );
 }
