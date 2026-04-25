@@ -66,7 +66,7 @@ export function ProfilePage() {
         <span
           className={`inline-block mt-2 text-xs px-2 py-0.5 rounded border ${roleBadgeClass}`}
         >
-          {user.role.replace("_", " ")}
+          {user.role.replace(/_/g, " ")}
         </span>
       </div>
 

@@ -79,7 +79,7 @@ export function ScheduleList() {
           </div>
 
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
-            <span>Type: {session.session_type.replace("_", " ")}</span>
+            <span>Type: {session.session_type.replace(/_/g, " ")}</span>
             {session.net_control_callsign && (
               <span>
                 NCS:{" "}
