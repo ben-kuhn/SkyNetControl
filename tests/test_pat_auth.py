@@ -236,3 +236,4 @@ async def test_role_intersection_downgraded_admin(test_client, seeded_db):
         headers={"Authorization": f"Bearer {raw}"},
     )
     assert response.status_code == 200
+    assert response.json()["role"] == "viewer"
