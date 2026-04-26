@@ -52,7 +52,7 @@ def test_personal_access_token_model_creation(seeded_db):
             user_callsign="W0NE",
             name="Test token",
             token_hash="a" * 64,
-            token_prefix="skynet_a3",
+            token_prefix="skynet_a",
             scopes="schedule:read,checkins:read",
         )
         session.add(token)
@@ -63,7 +63,7 @@ def test_personal_access_token_model_creation(seeded_db):
         assert token.user_callsign == "W0NE"
         assert token.name == "Test token"
         assert token.token_hash == "a" * 64
-        assert token.token_prefix == "skynet_a3"
+        assert token.token_prefix == "skynet_a"
         assert token.scopes == "schedule:read,checkins:read"
         assert token.created_at is not None
         assert token.expires_at is None
