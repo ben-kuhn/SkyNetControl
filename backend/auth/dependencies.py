@@ -4,6 +4,7 @@ from fastapi import Cookie, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from backend.auth.models import User, UserRole
+from backend.auth.pat_service import authenticate_token
 from backend.auth.service import decode_access_token
 from backend.config import Settings
 
@@ -25,11 +26,10 @@ def get_current_user(
     db: Session = Depends(get_db_session),
     app_settings: Settings = Depends(get_settings),
 ) -> User:
+    request.state.token_scopes = None
     # Try Bearer token first
     if authorization and authorization.startswith("Bearer skynet_"):
         raw_token = authorization[len("Bearer "):]
-        from backend.auth.pat_service import authenticate_token
-
         auth_result = authenticate_token(db, raw_token)
         if auth_result is None:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -57,7 +57,6 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
-    request.state.token_scopes = None  # cookie auth = full access
     return user
 
 
