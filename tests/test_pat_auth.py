@@ -82,6 +82,10 @@ def test_app(test_settings, seeded_db):
     async def multi_scope(user: User = Depends(require_scope("schedule:read", "checkins:read"))):
         return {"callsign": user.callsign}
 
+    @app.get("/api/test/admin-scoped")
+    async def admin_scoped(user: User = Depends(require_scope("users:read"))):
+        return {"callsign": user.callsign}
+
     return app
 
 
@@ -266,6 +270,23 @@ async def test_schedule_endpoint_requires_scope():
             headers={"Authorization": f"Bearer {raw_right}"},
         )
         assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_require_scope_enforces_role_intersection(test_client, seeded_db):
+    """If admin is downgraded to viewer, admin-scoped tokens are rejected."""
+    with seeded_db() as session:
+        result = create_token(session, "W0NE", UserRole.ADMIN, "Admin scope", ["users:read"], None)
+        raw = result["token"]
+        user = session.get(User, "W0NE")
+        user.role = UserRole.VIEWER
+        session.commit()
+    response = await test_client.get(
+        "/api/test/admin-scoped",
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert response.status_code == 403
+    assert "role" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio

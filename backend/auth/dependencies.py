@@ -80,11 +80,20 @@ def require_scope(*scopes: str) -> Callable:
         token_scopes = getattr(request.state, "token_scopes", None)
         if token_scopes is None:
             return user  # cookie auth = full access
+        from backend.auth.scopes import SCOPES, _ROLE_RANK
+        user_rank = _ROLE_RANK[user.role]
         for scope in scopes:
             if scope not in token_scopes:
                 raise HTTPException(
                     status_code=403,
                     detail=f"Token missing required scope: {scope}",
+                )
+            # Role intersection: check user's current role still permits this scope
+            scope_min_rank = _ROLE_RANK[SCOPES[scope]["min_role"]]
+            if user_rank < scope_min_rank:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Your role no longer permits scope: {scope}",
                 )
         return user
 
