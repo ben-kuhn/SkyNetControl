@@ -224,6 +224,51 @@ async def test_require_scope_multi_scope_partial_fails(test_client, seeded_db):
 
 
 @pytest.mark.asyncio
+async def test_schedule_endpoint_requires_scope():
+    """PAT with wrong scope gets 403 on /api/schedule/sessions."""
+    from unittest.mock import patch
+    from sqlalchemy import create_engine as _sa_create_engine
+    from sqlalchemy.pool import StaticPool
+    import backend.db.session as _db_session
+    from backend.app import create_app
+
+    def _static_pool_engine(url, **kwargs):
+        kwargs.setdefault("connect_args", {})["check_same_thread"] = False
+        return _sa_create_engine(url, poolclass=StaticPool, **kwargs)
+
+    settings = Settings(database_url="sqlite:///", jwt_secret_key="test-secret", jwt_expire_minutes=60)
+    with patch.object(_db_session, "create_engine", _static_pool_engine):
+        app = create_app(settings=settings)
+    Base.metadata.create_all(app.state.engine)
+
+    with app.state.session_factory() as session:
+        admin = User(
+            callsign="W0NE", oidc_subject="auth0|admin",
+            name="Admin User", role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        session.commit()
+        result = create_token(session, "W0NE", UserRole.ADMIN, "Wrong scope", ["checkins:read"], None)
+        raw_wrong = result["token"]
+        result2 = create_token(session, "W0NE", UserRole.ADMIN, "Right scope", ["schedule:read"], None)
+        raw_right = result2["token"]
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.get(
+            "/api/schedule/sessions",
+            headers={"Authorization": f"Bearer {raw_wrong}"},
+        )
+        assert resp.status_code == 403
+
+        resp = await c.get(
+            "/api/schedule/sessions",
+            headers={"Authorization": f"Bearer {raw_right}"},
+        )
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_role_intersection_downgraded_admin(test_client, seeded_db):
     with seeded_db() as session:
         result = create_token(session, "W0NE", UserRole.ADMIN, "Admin scope", ["users:read"], None)
