@@ -47,3 +47,8 @@ def test_validate_scopes_rejects_unknown_scope():
 def test_validate_scopes_rejects_empty():
     with pytest.raises(ValueError, match="at least one"):
         validate_scopes_for_role([], UserRole.ADMIN)
+
+
+def test_validate_scopes_pending_role_rejected():
+    with pytest.raises(ValueError, match="schedule:read"):
+        validate_scopes_for_role(["schedule:read"], UserRole.PENDING)

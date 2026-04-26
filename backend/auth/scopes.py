@@ -1,15 +1,23 @@
+from typing import TypedDict
+
 from backend.auth.models import UserRole
+
+
+class ScopeEntry(TypedDict):
+    description: str
+    min_role: UserRole
+
 
 # Scope name → minimum role required to create a token with this scope.
 # Role hierarchy: ADMIN > NET_CONTROL > VIEWER > PENDING
-_ROLE_RANK = {
+_ROLE_RANK: dict[UserRole, int] = {
     UserRole.PENDING: 0,
     UserRole.VIEWER: 1,
     UserRole.NET_CONTROL: 2,
     UserRole.ADMIN: 3,
 }
 
-SCOPES: dict[str, dict] = {
+SCOPES: dict[str, ScopeEntry] = {
     "schedule:read":  {"description": "View sessions",               "min_role": UserRole.VIEWER},
     "schedule:write": {"description": "Create/edit/delete sessions", "min_role": UserRole.NET_CONTROL},
     "checkins:read":  {"description": "View check-in data",          "min_role": UserRole.VIEWER},
