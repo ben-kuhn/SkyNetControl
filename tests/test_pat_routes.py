@@ -259,3 +259,41 @@ async def test_non_owner_non_admin_cannot_revoke(client, test_settings):
         cookies=_viewer_cookie(test_settings),
     )
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_routes_registered_in_real_app():
+    """Smoke test: PAT routes are reachable through the real create_app."""
+    from unittest.mock import patch
+    from sqlalchemy import create_engine as _sa_create_engine
+    from sqlalchemy.pool import StaticPool
+    import backend.db.session as _db_session
+
+    from backend.app import create_app
+    from backend.config import Settings as RealSettings
+
+    def _static_pool_engine(url, **kwargs):
+        kwargs.setdefault("connect_args", {})["check_same_thread"] = False
+        return _sa_create_engine(url, poolclass=StaticPool, **kwargs)
+
+    settings = RealSettings(database_url="sqlite:///", jwt_secret_key="test-secret", jwt_expire_minutes=60)
+    with patch.object(_db_session, "create_engine", _static_pool_engine):
+        real_app = create_app(settings=settings)
+    Base.metadata.create_all(real_app.state.engine)
+
+    with real_app.state.session_factory() as session:
+        admin = User(
+            callsign="W0NE",
+            oidc_subject="auth0|admin",
+            name="Admin User",
+            role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        session.commit()
+
+    transport = ASGITransport(app=real_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        token = create_access_token("W0NE", "admin", settings)
+        resp = await c.get("/api/auth/tokens", cookies={"access_token": token})
+        assert resp.status_code == 200
+        assert resp.json() == []
