@@ -9,6 +9,7 @@ from backend.auth.service import init_providers
 from backend.config import Settings, settings as default_settings
 from backend.db.session import create_engine_from_url, create_session_factory
 from backend.auth.routes import auth_router
+from backend.auth.pat_routes import pat_router
 from backend.config_mgmt.routes import config_router
 from backend.modules.schedule.routes import schedule_router
 from backend.modules.activities.routes import activities_router
@@ -44,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Register API routers
     app.include_router(auth_router, prefix="/api/auth")
+    app.include_router(pat_router, prefix="/api/auth/tokens")
     app.include_router(config_router, prefix="/api/config")
     app.include_router(schedule_router, prefix="/api/schedule")
     app.include_router(activities_router, prefix="/api/activities")
