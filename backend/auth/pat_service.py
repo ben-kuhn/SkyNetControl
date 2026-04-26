@@ -2,6 +2,7 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.auth.models import UserRole
@@ -34,12 +35,19 @@ def create_token(
 
     validate_scopes_for_role(scopes, user_role)
 
-    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+    now = datetime.now(timezone.utc)
+    if expires_at is not None and expires_at <= now:
         raise ValueError("Expiry must be in the future")
 
     active_count = (
         db.query(PersonalAccessToken)
         .filter_by(user_callsign=user_callsign, revoked_at=None)
+        .filter(
+            or_(
+                PersonalAccessToken.expires_at.is_(None),
+                PersonalAccessToken.expires_at > now,
+            )
+        )
         .count()
     )
     if active_count >= MAX_ACTIVE_TOKENS:

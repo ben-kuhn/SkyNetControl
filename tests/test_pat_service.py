@@ -264,6 +264,32 @@ def test_authenticate_invalid_token_fails(seeded_db):
         assert auth is None
 
 
+def test_create_token_max_excludes_expired(seeded_db):
+    """Expired tokens don't count toward the 10-token limit."""
+    with seeded_db() as session:
+        for i in range(10):
+            result = create_token(
+                db=session,
+                user_callsign="W0NE",
+                user_role=UserRole.ADMIN,
+                name=f"Token {i}",
+                scopes=["schedule:read"],
+                expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            )
+        # All 10 are active and not expired — should fail
+        with pytest.raises(ValueError, match="maximum"):
+            create_token(session, "W0NE", UserRole.ADMIN, "Too many", ["schedule:read"], None)
+
+        # Now expire all of them
+        for pat in session.query(PersonalAccessToken).filter_by(user_callsign="W0NE").all():
+            pat.expires_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        session.commit()
+
+        # Should succeed now since all are expired
+        result = create_token(session, "W0NE", UserRole.ADMIN, "New token", ["schedule:read"], None)
+        assert result["id"] is not None
+
+
 def test_authenticate_updates_last_used_at(seeded_db):
     with seeded_db() as session:
         result = create_token(session, "W0NE", UserRole.ADMIN, "Usage test", ["schedule:read"], None)
