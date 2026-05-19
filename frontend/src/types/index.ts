@@ -35,6 +35,15 @@ export class ApiError extends Error {
   }
 }
 
+export interface AuditEntry {
+  id: number;
+  actor_callsign: string;
+  action: string;
+  target_callsign: string | null;
+  details: Record<string, string> | null;
+  created_at: string;
+}
+
 export interface Token {
   id: number;
   name: string;
