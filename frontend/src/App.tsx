@@ -9,6 +9,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { PendingPage } from "./pages/PendingPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { UsersPage } from "./pages/UsersPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProtectedRoute } from "./ProtectedRoute";
@@ -58,7 +59,7 @@ function AppRoutes() {
         <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Reminders" /></ProtectedRoute>} />
         <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Roster" /></ProtectedRoute>} />
         <Route path="/activities" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Activities" /></ProtectedRoute>} />
-        <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Users" /></ProtectedRoute>} />
+        <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><UsersPage /></ProtectedRoute>} />
         <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Config" /></ProtectedRoute>} />
       </Route>
 
