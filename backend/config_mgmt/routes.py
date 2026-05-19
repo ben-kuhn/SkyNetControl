@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from backend.audit.service import log_action
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_db_session, get_current_user, require_role
@@ -29,4 +31,5 @@ async def update_config(
     db: Session = Depends(get_db_session),
 ):
     set_config_value(db, key, body.value)
+    log_action(db, actor=user.callsign, action="config.updated", details={"key": key, "value": body.value})
     return {"key": key, "value": body.value}

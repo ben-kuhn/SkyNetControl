@@ -165,3 +165,108 @@ async def test_audit_log_limit_capped_at_200(test_client, test_settings):
     response = await test_client.get("/api/audit/?limit=500", cookies={"access_token": token})
     # Query validation rejects limit > 200
     assert response.status_code == 422
+
+
+# --- Wiring tests ---
+
+from backend.auth.routes import auth_router
+from backend.config_mgmt.routes import config_router
+
+
+@pytest.fixture
+def wired_app(test_settings, db_setup):
+    app = FastAPI()
+    app.state.session_factory = db_setup
+    app.state.settings = test_settings
+    app.include_router(auth_router, prefix="/api/auth")
+    app.include_router(config_router, prefix="/api/config")
+    app.include_router(audit_router, prefix="/api/audit")
+    return app
+
+
+@pytest.fixture
+async def wired_client(wired_app):
+    transport = ASGITransport(app=wired_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_role_change_creates_audit_entry(wired_client, test_settings, db_setup):
+    token = create_access_token("W0NE", "admin", test_settings)
+    await wired_client.patch(
+        "/api/auth/users/KD0TST",
+        json={"role": "net_control"},
+        cookies={"access_token": token},
+    )
+
+    response = await wired_client.get("/api/audit/", cookies={"access_token": token})
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["action"] == "user.role_changed"
+    assert entries[0]["actor_callsign"] == "W0NE"
+    assert entries[0]["target_callsign"] == "KD0TST"
+    assert entries[0]["details"]["from"] == "viewer"
+    assert entries[0]["details"]["to"] == "net_control"
+
+
+@pytest.mark.asyncio
+async def test_callsign_approve_creates_audit_entry(wired_client, test_settings, db_setup):
+    with db_setup() as db:
+        user = db.get(User, "KD0TST")
+        user.pending_callsign = "KD0NEW"
+        db.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    await wired_client.post(
+        "/api/auth/users/KD0TST/approve-callsign",
+        cookies={"access_token": token},
+    )
+
+    response = await wired_client.get("/api/audit/", cookies={"access_token": token})
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["action"] == "user.callsign_approved"
+    assert entries[0]["target_callsign"] == "KD0NEW"
+    assert entries[0]["details"]["old"] == "KD0TST"
+    assert entries[0]["details"]["new"] == "KD0NEW"
+
+
+@pytest.mark.asyncio
+async def test_callsign_reject_creates_audit_entry(wired_client, test_settings, db_setup):
+    with db_setup() as db:
+        user = db.get(User, "KD0TST")
+        user.pending_callsign = "KD0NEW"
+        db.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    await wired_client.delete(
+        "/api/auth/users/KD0TST/pending-callsign",
+        cookies={"access_token": token},
+    )
+
+    response = await wired_client.get("/api/audit/", cookies={"access_token": token})
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["action"] == "user.callsign_rejected"
+    assert entries[0]["target_callsign"] == "KD0TST"
+    assert entries[0]["details"]["pending"] == "KD0NEW"
+
+
+@pytest.mark.asyncio
+async def test_config_update_creates_audit_entry(wired_client, test_settings, db_setup):
+    token = create_access_token("W0NE", "admin", test_settings)
+    await wired_client.put(
+        "/api/config/net_address",
+        json={"value": "w0ne@winlink.org"},
+        cookies={"access_token": token},
+    )
+
+    response = await wired_client.get("/api/audit/", cookies={"access_token": token})
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["action"] == "config.updated"
+    assert entries[0]["actor_callsign"] == "W0NE"
+    assert entries[0]["target_callsign"] is None
+    assert entries[0]["details"]["key"] == "net_address"
+    assert entries[0]["details"]["value"] == "w0ne@winlink.org"
