@@ -10,6 +10,7 @@ import { PendingPage } from "./pages/PendingPage";
 import { SchedulePage } from "./pages/SchedulePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { UsersPage } from "./pages/UsersPage";
+import { ConfigPage } from "./pages/ConfigPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProtectedRoute } from "./ProtectedRoute";
@@ -60,7 +61,7 @@ function AppRoutes() {
         <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Roster" /></ProtectedRoute>} />
         <Route path="/activities" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Activities" /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><UsersPage /></ProtectedRoute>} />
-        <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Config" /></ProtectedRoute>} />
+        <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><ConfigPage /></ProtectedRoute>} />
       </Route>
 
       <Route path="/" element={<Navigate to="/schedule" replace />} />
