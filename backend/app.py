@@ -17,6 +17,7 @@ from backend.modules.checkins.routes import checkins_router
 from backend.modules.reminders.routes import reminders_router
 from backend.modules.roster.routes import roster_router
 from backend.audit.routes import audit_router
+from backend.integrations.delivery.routes import delivery_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -54,6 +55,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(reminders_router, prefix="/api/reminders")
     app.include_router(roster_router, prefix="/api/roster")
     app.include_router(audit_router, prefix="/api/audit")
+    app.include_router(delivery_router, prefix="/api/delivery")
 
     # Serve frontend static files if the directory exists
     if os.path.isdir(settings.static_dir):
