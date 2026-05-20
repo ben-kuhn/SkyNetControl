@@ -46,9 +46,61 @@ const CONFIG_FIELDS: ConfigField[] = [
     helpText: "API key for Claude-powered activity brainstorming (optional)",
     secret: true,
   },
+  {
+    key: "delivery.backends",
+    label: "Enabled Delivery Backends",
+    group: "Delivery",
+    placeholder: '["email", "groupsio", "winlink"]',
+    helpText:
+      "JSON array of enabled backends for sending reminders and rosters",
+    mono: true,
+  },
+  {
+    key: "delivery.email.to_address",
+    label: "Email Recipient",
+    group: "Delivery",
+    placeholder: "net-list@example.com",
+    helpText: "Email address to send reminders and rosters to",
+  },
+  {
+    key: "delivery.groupsio.api_key",
+    label: "Groups.io API Key",
+    group: "Delivery",
+    placeholder: "your-api-key",
+    helpText: "API key for posting to groups.io",
+    secret: true,
+  },
+  {
+    key: "delivery.groupsio.group_name",
+    label: "Groups.io Group Name",
+    group: "Delivery",
+    placeholder: "w0ne-net",
+    helpText: "Target group name on groups.io",
+  },
+  {
+    key: "delivery.winlink.target_address",
+    label: "Winlink Delivery Address",
+    group: "Delivery",
+    placeholder: "NET@winlink.org",
+    helpText: "Winlink address to send reminders and rosters to",
+  },
+  {
+    key: "scanner.enabled",
+    label: "Auto-Scanner Enabled",
+    group: "Scanner",
+    placeholder: "false",
+    helpText: 'Set to "true" to enable automatic mailbox scanning',
+  },
+  {
+    key: "scanner.interval_minutes",
+    label: "Scan Interval (minutes)",
+    group: "Scanner",
+    placeholder: "5",
+    helpText: "How often to scan the mailbox for new check-ins",
+  },
 ];
 
-const GROUPS = ["Net Operations", "Integrations"];
+const GROUPS = ["Net Operations", "Integrations", "Delivery", "Scanner"];
 
 function ConfigFieldRow({
   field,
