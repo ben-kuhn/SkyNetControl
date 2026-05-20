@@ -46,6 +46,7 @@ class ScannerState:
         self.last_scan_time: datetime | None = None
         self.last_scan_count: int | None = None
         self.active_session_id: int | None = None
+        self.interval_minutes: int = 5
 
 
 scanner_state = ScannerState()
@@ -88,6 +89,7 @@ async def scanner_loop(session_factory, get_interval_minutes):
     try:
         while scanner_state.running:
             interval = get_interval_minutes()
+            scanner_state.interval_minutes = interval
             try:
                 with session_factory() as db:
                     now = datetime.now(tz=timezone.utc)

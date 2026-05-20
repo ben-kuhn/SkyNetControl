@@ -92,6 +92,23 @@ def dispatch_delivery(
     return any_success
 
 
+def _lookup_content(db: Session, content_type: str, content_id: int) -> tuple[str, str]:
+    """Look up the original subject and body from the source log."""
+    if content_type == "reminder":
+        from backend.modules.reminders.models import ReminderLog
+        log = db.get(ReminderLog, content_id)
+        if log:
+            return log.content_subject, log.content_body
+    elif content_type == "roster":
+        from backend.modules.roster.models import RosterLog
+        from backend.modules.roster.service import assemble_roster
+        log = db.get(RosterLog, content_id)
+        if log:
+            body = assemble_roster(db, content_id) or ""
+            return log.content_subject, body
+    return "", ""
+
+
 def retry_failed(db: Session, content_type: str, content_id: int) -> bool:
     """Retry only failed delivery attempts for a piece of content."""
     failed_logs = (
@@ -103,12 +120,14 @@ def retry_failed(db: Session, content_type: str, content_id: int) -> bool:
     if not failed_logs:
         return False
 
+    subject, body = _lookup_content(db, content_type, content_id)
+
     any_success = False
     for log in failed_logs:
         config = _build_config(db, log.backend)
         try:
             backend = get_backend(log.backend)
-            result = backend.send("", "", config)
+            result = backend.send(subject, body, config)
         except KeyError:
             continue
 

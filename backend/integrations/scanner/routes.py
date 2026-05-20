@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -14,9 +14,16 @@ scanner_router = APIRouter()
 def get_scanner_status(
     _user=Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
 ):
+    next_scan_time = None
+    if scanner_state.running and scanner_state.last_scan_time:
+        next_scan_time = (
+            scanner_state.last_scan_time + timedelta(minutes=scanner_state.interval_minutes)
+        ).isoformat()
+
     return {
         "running": scanner_state.running,
         "last_scan_time": scanner_state.last_scan_time.isoformat() if scanner_state.last_scan_time else None,
+        "next_scan_time": next_scan_time,
         "last_scan_count": scanner_state.last_scan_count,
         "active_session_id": scanner_state.active_session_id,
     }
