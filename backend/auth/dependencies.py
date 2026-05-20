@@ -35,7 +35,7 @@ def get_current_user(
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
         user = db.get(User, auth_result["user_callsign"])
-        if user is None or user.role == UserRole.PENDING:
+        if user is None or user.role in (UserRole.PENDING, UserRole.DELETED):
             raise HTTPException(status_code=401, detail="User not found or pending")
 
         request.state.token_scopes = auth_result["scopes"]
@@ -56,6 +56,9 @@ def get_current_user(
     user = db.get(User, callsign)
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+
+    if user.role == UserRole.DELETED:
+        raise HTTPException(status_code=401, detail="Account has been deleted")
 
     return user
 

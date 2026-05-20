@@ -12,6 +12,7 @@ class UserRole(str, enum.Enum):
     NET_CONTROL = "net_control"
     VIEWER = "viewer"
     PENDING = "pending"
+    DELETED = "deleted"
 
 
 class User(Base):
