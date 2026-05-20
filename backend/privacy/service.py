@@ -111,3 +111,107 @@ def anonymize_user(
     )
 
     return {"anonymous_id": anon_id}
+
+
+def export_user_data(db: Session, callsign: str) -> dict:
+    """Export all data associated with a user's callsign as a dict."""
+    user = db.get(User, callsign)
+    if user is None:
+        raise ValueError("User not found")
+
+    user_data = {
+        "callsign": user.callsign,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role.value,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+    checkins = db.query(CheckIn).filter(CheckIn.callsign == callsign).all()
+    checkins_data = [
+        {
+            "session_id": ci.session_id,
+            "callsign": ci.callsign,
+            "name": ci.name,
+            "city": ci.city,
+            "county": ci.county,
+            "state": ci.state,
+            "latitude": ci.latitude,
+            "longitude": ci.longitude,
+            "comments": ci.comments,
+            "timing_status": ci.timing_status.value,
+        }
+        for ci in checkins
+    ]
+
+    raw_message_ids = [ci.raw_message_id for ci in checkins if ci.raw_message_id]
+    raw_messages = []
+    if raw_message_ids:
+        msgs = db.query(RawMessage).filter(RawMessage.id.in_(raw_message_ids)).all()
+        raw_messages = [
+            {
+                "message_id": m.message_id,
+                "from_address": m.from_address,
+                "subject": m.subject,
+                "body": m.body,
+                "received_at": m.received_at.isoformat() if m.received_at else None,
+            }
+            for m in msgs
+        ]
+
+    member = db.get(Member, callsign)
+    member_data = None
+    if member:
+        member_data = {
+            "callsign": member.callsign,
+            "name": member.name,
+            "first_check_in_date": member.first_check_in_date.isoformat() if member.first_check_in_date else None,
+            "last_check_in_date": member.last_check_in_date.isoformat() if member.last_check_in_date else None,
+            "total_check_ins": member.total_check_ins,
+        }
+
+    audit_entries = (
+        db.query(AuditLog)
+        .filter(
+            (AuditLog.actor_callsign == callsign)
+            | (AuditLog.target_callsign == callsign)
+        )
+        .order_by(AuditLog.created_at.desc())
+        .all()
+    )
+    audit_data = [
+        {
+            "action": e.action,
+            "actor_callsign": e.actor_callsign,
+            "target_callsign": e.target_callsign,
+            "details": e.details,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in audit_entries
+    ]
+
+    tokens = (
+        db.query(PersonalAccessToken)
+        .filter(PersonalAccessToken.user_callsign == callsign)
+        .all()
+    )
+    tokens_data = [
+        {
+            "name": t.name,
+            "scopes": t.scopes,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
+            "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+        }
+        for t in tokens
+    ]
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "user": user_data,
+        "check_ins": checkins_data,
+        "raw_messages": raw_messages,
+        "member_record": member_data,
+        "audit_log": audit_data,
+        "tokens": tokens_data,
+    }

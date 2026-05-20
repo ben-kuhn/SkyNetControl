@@ -319,3 +319,73 @@ def test_anonymize_nonexistent_user(rich_db):
     with rich_db() as db:
         with pytest.raises(ValueError, match="User not found"):
             anonymize_user(db, "NOPE", actor_callsign="W0NE")
+
+
+from backend.privacy.service import export_user_data
+
+
+def test_export_user_data_structure(rich_db):
+    with rich_db() as db:
+        data = export_user_data(db, "KD0TST")
+
+    assert "exported_at" in data
+    assert data["user"]["callsign"] == "KD0TST"
+    assert data["user"]["name"] == "Test User"
+    assert data["user"]["email"] == "test@example.com"
+    assert data["user"]["role"] == "viewer"
+    assert "created_at" in data["user"]
+
+
+def test_export_includes_checkins(rich_db):
+    with rich_db() as db:
+        data = export_user_data(db, "KD0TST")
+
+    assert len(data["check_ins"]) == 1
+    ci = data["check_ins"][0]
+    assert ci["callsign"] == "KD0TST"
+    assert ci["city"] == "Denver"
+    assert ci["latitude"] == 39.7392
+
+
+def test_export_includes_raw_messages(rich_db):
+    with rich_db() as db:
+        data = export_user_data(db, "KD0TST")
+
+    assert len(data["raw_messages"]) == 1
+    msg = data["raw_messages"][0]
+    assert msg["from_address"] == "kd0tst@winlink.org"
+    assert "body" in msg
+
+
+def test_export_includes_member_record(rich_db):
+    with rich_db() as db:
+        data = export_user_data(db, "KD0TST")
+
+    assert data["member_record"]["callsign"] == "KD0TST"
+    assert data["member_record"]["total_check_ins"] == 10
+
+
+def test_export_includes_audit_log(rich_db):
+    with rich_db() as db:
+        data = export_user_data(db, "KD0TST")
+
+    assert len(data["audit_log"]) == 1
+    assert data["audit_log"][0]["target_callsign"] == "KD0TST"
+
+
+def test_export_includes_tokens_without_secrets(rich_db):
+    with rich_db() as db:
+        data = export_user_data(db, "KD0TST")
+
+    assert len(data["tokens"]) == 1
+    tok = data["tokens"][0]
+    assert tok["name"] == "Test Token"
+    assert tok["scopes"] == "schedule:read"
+    assert "token_hash" not in tok
+    assert "token_prefix" not in tok
+
+
+def test_export_nonexistent_user(rich_db):
+    with rich_db() as db:
+        with pytest.raises(ValueError, match="User not found"):
+            export_user_data(db, "NOPE")
