@@ -18,9 +18,18 @@ This spec covers the Check-ins page frontend and the callbook lookup backend. Th
 
 ### Session Selector
 
-A dropdown at the top of the page listing all net sessions, most recent first. Each option shows: date, session type, and status. Format: `"Wed, May 21, 2026 - regular checkin (scheduled)"`.
+A dropdown at the top of the page showing a limited set of sessions. The dropdown contains:
 
-Default selection: the most recent session with status `scheduled`. If none, the most recent `completed` session. If no sessions exist, show "No sessions found."
+- The next upcoming `scheduled` session (if one exists)
+- The 7 most recent sessions by start date (any status)
+
+Each option shows: date, session type, and status. Format: `"Wed, May 21, 2026 - regular checkin (scheduled)"`.
+
+Below the dropdown, a **"Show more..."** link navigates to the Schedule page where the user can select any session and navigate back to check-ins via a link.
+
+The page also accepts an optional `?session={id}` query parameter to pre-select a specific session (used when navigating from the Schedule page). If the query param references a session not in the dropdown, it is temporarily added to the dropdown options.
+
+Default selection (no query param): the next upcoming `scheduled` session. If none, the most recent `completed` session. If no sessions exist, show "No sessions found."
 
 Changing the selection reloads the check-ins table for that session.
 
@@ -233,6 +242,7 @@ frontend/src/
 | `backend/modules/checkins/routes.py` | Add `GET /lookup/{callsign}` endpoint |
 | `frontend/src/App.tsx` | Replace CheckIns placeholder with `<CheckInsPage />` |
 | `frontend/src/types/index.ts` | Add `CheckIn`, `CallbookResult` interfaces |
+| `frontend/src/pages/SchedulePage.tsx` | Add "View check-ins" link per session row, linking to `/checkins?session={id}` |
 | `alembic/env.py` | Import `backend.integrations.callbook.models` |
 
 ---
