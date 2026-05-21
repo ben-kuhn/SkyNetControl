@@ -1,4 +1,4 @@
-export type UserRole = "pending" | "viewer" | "net_control" | "admin";
+export type UserRole = "pending" | "viewer" | "net_control" | "admin" | "deleted";
 
 export interface User {
   callsign: string;
