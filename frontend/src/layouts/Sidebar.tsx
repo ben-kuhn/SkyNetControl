@@ -71,6 +71,12 @@ export function Sidebar() {
         >
           Logout
         </button>
+        <NavLink
+          to="/privacy"
+          className="text-xs text-text-muted hover:text-text-secondary transition-colors px-2"
+        >
+          Privacy Policy
+        </NavLink>
       </div>
     </aside>
   );

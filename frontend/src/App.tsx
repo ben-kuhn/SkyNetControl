@@ -12,6 +12,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { UsersPage } from "./pages/UsersPage";
 import { ConfigPage } from "./pages/ConfigPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import type { UserRole } from "./types";
@@ -62,6 +63,7 @@ function AppRoutes() {
         <Route path="/activities" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Activities" /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><UsersPage /></ProtectedRoute>} />
         <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><ConfigPage /></ProtectedRoute>} />
+        <Route path="/privacy" element={<PrivacyPolicyPage />} />
       </Route>
 
       <Route path="/" element={<Navigate to="/schedule" replace />} />

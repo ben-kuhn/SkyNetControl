@@ -87,6 +87,13 @@ export function MobileMenu({ open, onClose }: MobileMenuProps) {
         >
           Logout
         </button>
+        <NavLink
+          to="/privacy"
+          onClick={onClose}
+          className="text-xs text-text-muted hover:text-text-secondary transition-colors px-2"
+        >
+          Privacy Policy
+        </NavLink>
       </div>
     </div>
   );
