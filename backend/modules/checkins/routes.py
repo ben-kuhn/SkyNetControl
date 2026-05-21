@@ -18,6 +18,7 @@ from backend.modules.checkins.service import (
     scan_and_import_messages,
     update_checkin,
 )
+from backend.integrations.callbook.service import lookup_callsign
 from backend.modules.schedule.models import NetSession
 
 checkins_router = APIRouter(tags=["checkins"])
@@ -187,3 +188,15 @@ async def list_members_route(
 ):
     members = db.query(Member).order_by(Member.callsign).all()
     return [_member_to_response(m) for m in members]
+
+
+@checkins_router.get("/lookup/{callsign}")
+async def lookup_callsign_route(
+    callsign: str,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    result = lookup_callsign(db, callsign)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Callsign not found in configured callbooks")
+    return result
