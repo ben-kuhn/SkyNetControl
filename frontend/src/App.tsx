@@ -11,6 +11,7 @@ import { SchedulePage } from "./pages/SchedulePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { UsersPage } from "./pages/UsersPage";
 import { ConfigPage } from "./pages/ConfigPage";
+import { CheckInsPage } from "./pages/CheckInsPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -56,7 +57,7 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        <Route path="/checkins" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><PlaceholderPage title="Check-ins" /></ProtectedRoute>} />
+        <Route path="/checkins" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><CheckInsPage /></ProtectedRoute>} />
         <Route path="/map" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><PlaceholderPage title="Map" /></ProtectedRoute>} />
         <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Reminders" /></ProtectedRoute>} />
         <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Roster" /></ProtectedRoute>} />
