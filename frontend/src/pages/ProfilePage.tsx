@@ -9,10 +9,12 @@ import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Spinner";
 import { ApiError, SCOPES } from "../types";
 import type { Token, UserRole } from "../types";
+import { exportMyData, anonymizeMyAccount } from "../api/privacy";
 
 const CALLSIGN_PATTERN = /^[A-Z]{1,2}\d[A-Z]{1,4}$/;
 
 const ROLE_RANK: Record<UserRole, number> = {
+  deleted: -1,
   pending: 0,
   viewer: 1,
   net_control: 2,
@@ -44,6 +46,11 @@ export function ProfilePage() {
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<Token | null>(null);
   const [revokeLoading, setRevokeLoading] = useState(false);
+
+  // Privacy state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const loadTokens = useCallback(async () => {
     try {
@@ -133,6 +140,27 @@ export function ProfilePage() {
     setSelectedScopes((prev) =>
       prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope],
     );
+  };
+
+  const handleExportData = async () => {
+    try {
+      await exportMyData();
+      addToast("Data export downloaded", "success");
+    } catch {
+      addToast("Failed to export data", "error");
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirm !== "DELETE") return;
+    setDeleting(true);
+    try {
+      await anonymizeMyAccount();
+      window.location.href = "/login";
+    } catch {
+      addToast("Failed to delete account", "error");
+      setDeleting(false);
+    }
   };
 
   const copyToken = async () => {
@@ -350,6 +378,92 @@ export function ProfilePage() {
           </Button>
         </div>
       </Modal>
+
+      {/* Privacy & Data Section */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-text-primary mb-3">
+          Privacy & Data
+        </h2>
+        <div className="bg-bg-surface border border-border rounded-lg p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-text-primary font-medium">
+                Download My Data
+              </p>
+              <p className="text-xs text-text-muted">
+                Export all your data as a JSON file
+              </p>
+            </div>
+            <button
+              onClick={handleExportData}
+              className="text-xs px-3 py-1.5 rounded bg-accent/10 text-accent border border-accent/25 hover:bg-accent/20"
+            >
+              Download
+            </button>
+          </div>
+          <div className="border-t border-border" />
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-text-primary font-medium">
+                Delete My Account
+              </p>
+              <p className="text-xs text-text-muted">
+                Permanently anonymize your account and all personal data
+              </p>
+            </div>
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="text-xs px-3 py-1.5 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
+            >
+              Delete Account
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete confirmation dialog */}
+      {showDeleteDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-bg-surface border border-border rounded-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-bold text-danger mb-2">
+              Delete Account
+            </h3>
+            <p className="text-sm text-text-secondary mb-3">
+              This action is <strong>irreversible</strong>. Your account will be
+              anonymized and all personal data replaced with placeholders. You
+              will be logged out immediately.
+            </p>
+            <p className="text-sm text-text-secondary mb-3">
+              Type <strong>DELETE</strong> to confirm:
+            </p>
+            <input
+              type="text"
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              className="w-full bg-bg-elevated border border-border rounded-md px-3 py-1.5 text-sm text-text-primary font-mono mb-4"
+              placeholder="Type DELETE"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setShowDeleteDialog(false);
+                  setDeleteConfirm("");
+                }}
+                className="text-xs px-3 py-1.5 rounded bg-bg-elevated text-text-muted border border-border hover:bg-bg-base"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleteConfirm !== "DELETE" || deleting}
+                className="text-xs px-3 py-1.5 rounded bg-danger text-white border border-danger hover:bg-danger/90 disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
