@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../context/ToastContext";
 import { fetchUsers, updateUserRole, approveCallsign, rejectCallsign } from "../api/users";
+import { exportUserData, anonymizeUser } from "../api/privacy";
 import { fetchAuditLog } from "../api/audit";
 import { Spinner } from "../components/Spinner";
 import type { User, UserRole, AuditEntry } from "../types";
@@ -18,6 +19,7 @@ const roleBadgeClass: Record<UserRole, string> = {
   net_control: "bg-success/10 text-success border-success/25",
   viewer: "bg-bg-elevated text-text-muted border-border",
   pending: "bg-warning/10 text-warning border-warning/25",
+  deleted: "bg-bg-elevated text-text-muted border-border",
 };
 
 function formatAuditEntry(entry: AuditEntry): string {
@@ -45,6 +47,9 @@ export function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [anonymizeTarget, setAnonymizeTarget] = useState<string | null>(null);
+  const [anonymizeConfirm, setAnonymizeConfirm] = useState("");
+  const [anonymizing, setAnonymizing] = useState(false);
 
   const loadData = () => {
     setLoading(true);
@@ -65,6 +70,7 @@ export function UsersPage() {
   if (!currentUser) return null;
 
   const filteredUsers = users.filter((u) => {
+    if (u.role === "deleted") return false;
     const matchesSearch = u.callsign.toLowerCase().includes(search.toLowerCase());
     const matchesRole = roleFilter === "all" || u.role === roleFilter;
     return matchesSearch && matchesRole;
@@ -100,6 +106,31 @@ export function UsersPage() {
       loadData();
     } catch {
       addToast("Failed to reject callsign", "error");
+    }
+  };
+
+  const handleExportUser = async (callsign: string) => {
+    try {
+      await exportUserData(callsign);
+      addToast(`Data exported for ${callsign}`, "success");
+    } catch {
+      addToast("Failed to export data", "error");
+    }
+  };
+
+  const handleAnonymizeUser = async () => {
+    if (!anonymizeTarget || anonymizeConfirm !== "DELETE") return;
+    setAnonymizing(true);
+    try {
+      await anonymizeUser(anonymizeTarget);
+      addToast(`${anonymizeTarget} has been anonymized`, "success");
+      setAnonymizeTarget(null);
+      setAnonymizeConfirm("");
+      loadData();
+    } catch {
+      addToast("Failed to anonymize user", "error");
+    } finally {
+      setAnonymizing(false);
     }
   };
 
@@ -216,24 +247,45 @@ export function UsersPage() {
                 </td>
                 <td className="px-4 py-3 text-text-muted">{u.email || "—"}</td>
                 <td className="px-4 py-3">
-                  {u.pending_callsign ? (
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => handleApprove(u.callsign)}
-                        className="text-xs px-2 py-1 rounded bg-success/10 text-success border border-success/25 hover:bg-success/20"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleReject(u.callsign)}
-                        className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="text-text-muted">—</span>
-                  )}
+                  <div className="flex gap-1">
+                    {u.pending_callsign && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(u.callsign)}
+                          className="text-xs px-2 py-1 rounded bg-success/10 text-success border border-success/25 hover:bg-success/20"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(u.callsign)}
+                          className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {u.callsign !== currentUser.callsign && (
+                      <>
+                        <button
+                          onClick={() => handleExportUser(u.callsign)}
+                          title="Export data"
+                          className="text-xs px-2 py-1 rounded bg-bg-elevated text-text-muted border border-border hover:bg-bg-base"
+                        >
+                          Export
+                        </button>
+                        <button
+                          onClick={() => setAnonymizeTarget(u.callsign)}
+                          title="Anonymize user"
+                          className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
+                        >
+                          Anonymize
+                        </button>
+                      </>
+                    )}
+                    {!u.pending_callsign && u.callsign === currentUser.callsign && (
+                      <span className="text-text-muted">&mdash;</span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -250,6 +302,50 @@ export function UsersPage() {
       <div className="text-text-muted text-xs mt-2">
         {filteredUsers.length} user{filteredUsers.length !== 1 ? "s" : ""}
       </div>
+
+      {/* Anonymize confirmation dialog */}
+      {anonymizeTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-bg-surface border border-border rounded-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-bold text-danger mb-2">
+              Anonymize {anonymizeTarget}
+            </h3>
+            <p className="text-sm text-text-secondary mb-3">
+              This action is <strong>irreversible</strong>. All personal data for{" "}
+              <span className="font-mono text-accent">{anonymizeTarget}</span>{" "}
+              will be replaced with anonymous placeholders.
+            </p>
+            <p className="text-sm text-text-secondary mb-3">
+              Type <strong>DELETE</strong> to confirm:
+            </p>
+            <input
+              type="text"
+              value={anonymizeConfirm}
+              onChange={(e) => setAnonymizeConfirm(e.target.value)}
+              className="w-full bg-bg-elevated border border-border rounded-md px-3 py-1.5 text-sm text-text-primary font-mono mb-4"
+              placeholder="Type DELETE"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setAnonymizeTarget(null);
+                  setAnonymizeConfirm("");
+                }}
+                className="text-xs px-3 py-1.5 rounded bg-bg-elevated text-text-muted border border-border hover:bg-bg-base"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAnonymizeUser}
+                disabled={anonymizeConfirm !== "DELETE" || anonymizing}
+                className="text-xs px-3 py-1.5 rounded bg-danger text-white border border-danger hover:bg-danger/90 disabled:opacity-50"
+              >
+                {anonymizing ? "Anonymizing..." : "Confirm Anonymize"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Audit Log Section */}
       {auditLog.length > 0 && (
