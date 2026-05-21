@@ -66,6 +66,37 @@ export interface TokenWithSecret extends Token {
   token: string;
 }
 
+export interface CheckIn {
+  id: number;
+  session_id: number;
+  raw_message_id: number | null;
+  callsign: string;
+  name: string;
+  city: string | null;
+  county: string | null;
+  state: string | null;
+  mode: string;
+  comments: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  parse_status: "auto" | "manual_review" | "manually_entered";
+  timing_status: "on_time" | "early" | "late";
+  is_new_member: boolean;
+}
+
+export interface CallbookResult {
+  callsign: string;
+  name: string | null;
+  city: string | null;
+  county: string | null;
+  state: string | null;
+  country: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  source: string;
+  cached: boolean;
+}
+
 export const SCOPES: Record<string, { description: string; minRole: UserRole }> = {
   "schedule:read":  { description: "View sessions",             minRole: "viewer" },
   "schedule:write": { description: "Create/edit/delete sessions", minRole: "net_control" },
