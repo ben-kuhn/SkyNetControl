@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session, require_role
 from backend.auth.models import User, UserRole
-from backend.config_mgmt.service import get_config_value
+from backend.config_mgmt.service import get_config_value, get_checkin_modes
 from backend.modules.checkins.mailbox_reader import read_mailbox
 from backend.modules.checkins.models import (
     CheckIn,
@@ -74,6 +74,14 @@ def _member_to_response(member: Member) -> dict:
         "last_check_in_date": member.last_check_in_date.isoformat(),
         "total_check_ins": member.total_check_ins,
     }
+
+
+@checkins_router.get("/modes")
+async def get_modes_route(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    return get_checkin_modes(db)
 
 
 @checkins_router.post("/scan/{session_id}")

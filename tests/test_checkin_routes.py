@@ -271,3 +271,19 @@ async def test_get_members(test_client, test_settings, db_setup):
     assert len(data) == 1
     assert data[0]["callsign"] == "W0ABC"
     assert data[0]["total_check_ins"] == 12
+
+
+@pytest.mark.asyncio
+async def test_get_modes_returns_default(test_client, test_settings):
+    """Any authenticated user can fetch the modes list."""
+    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    resp = await test_client.get(
+        "/api/checkins/modes",
+        cookies={"access_token": viewer_token},
+    )
+    assert resp.status_code == 200
+    modes = resp.json()
+    assert isinstance(modes, list)
+    assert "Voice" in modes
+    assert "Winlink" in modes
+    assert len(modes) == 12
