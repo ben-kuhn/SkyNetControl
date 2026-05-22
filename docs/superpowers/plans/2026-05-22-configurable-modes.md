@@ -33,7 +33,7 @@
 - Modify: `backend/config_mgmt/service.py`
 - Create: `tests/test_checkin_modes.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_checkin_modes.py`:
 
@@ -93,12 +93,12 @@ def test_get_checkin_modes_invalid_json(db):
     assert len(modes) == 12
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `nix-shell --run "python -m pytest tests/test_checkin_modes.py -v" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: FAIL with `ImportError: cannot import name 'get_checkin_modes'`
 
-- [ ] **Step 3: Implement `get_checkin_modes`**
+- [x] **Step 3: Implement `get_checkin_modes`**
 
 Add to `backend/config_mgmt/service.py`:
 
@@ -125,12 +125,12 @@ def get_checkin_modes(db: Session) -> list[str]:
     return DEFAULT_CHECKIN_MODES
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `nix-shell --run "python -m pytest tests/test_checkin_modes.py -v" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: PASS (all 3 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/config_mgmt/service.py tests/test_checkin_modes.py
@@ -146,7 +146,7 @@ git commit -m "feat: add get_checkin_modes config helper with defaults"
 - Modify: `backend/modules/checkins/service.py`
 - Test: `tests/test_message_parser.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_message_parser.py`:
 
@@ -166,12 +166,12 @@ def test_parse_plain_text_default_modes_still_work():
     assert result["mode"] == "Winlink"
 ```
 
-- [ ] **Step 2: Run tests to verify first test fails**
+- [x] **Step 2: Run tests to verify first test fails**
 
 Run: `nix-shell --run "python -m pytest tests/test_message_parser.py::test_parse_plain_text_custom_modes -v" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: FAIL (TypeError — unexpected keyword argument `known_modes`)
 
-- [ ] **Step 3: Update `parse_plain_text_message` to accept optional `known_modes`**
+- [x] **Step 3: Update `parse_plain_text_message` to accept optional `known_modes`**
 
 In `backend/modules/checkins/message_parser.py`, change the function signature and the hardcoded set:
 
@@ -222,7 +222,7 @@ def parse_message(body: str, known_modes: set[str] | None = None) -> tuple[Messa
         return msg_type, parse_plain_text_message(body, known_modes=known_modes)
 ```
 
-- [ ] **Step 4: Update service.py to pass configured modes to the parser**
+- [x] **Step 4: Update service.py to pass configured modes to the parser**
 
 In `backend/modules/checkins/service.py`, in `process_raw_message`:
 
@@ -243,12 +243,12 @@ With:
     msg_type, fields = parse_message(raw.body, known_modes=modes_set)
 ```
 
-- [ ] **Step 5: Run all parser and checkin tests**
+- [x] **Step 5: Run all parser and checkin tests**
 
 Run: `nix-shell --run "python -m pytest tests/test_message_parser.py tests/test_checkin_routes.py -v" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: All pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/modules/checkins/message_parser.py backend/modules/checkins/service.py tests/test_message_parser.py
@@ -263,7 +263,7 @@ git commit -m "feat: make message parser known_modes configurable"
 - Modify: `backend/modules/checkins/routes.py`
 - Test: `tests/test_checkin_routes.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_checkin_routes.py` (after the last test function):
 
@@ -284,12 +284,12 @@ async def test_get_modes_returns_default(test_client, test_settings):
     assert len(modes) == 12
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `nix-shell --run "python -m pytest tests/test_checkin_routes.py::test_get_modes_returns_default -v" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: FAIL with 404 (route doesn't exist yet)
 
-- [ ] **Step 3: Add the endpoint**
+- [x] **Step 3: Add the endpoint**
 
 In `backend/modules/checkins/routes.py`, add the import and endpoint:
 
@@ -308,12 +308,12 @@ async def get_modes_route(
     return get_checkin_modes(db)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `nix-shell --run "python -m pytest tests/test_checkin_routes.py::test_get_modes_returns_default -v" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/modules/checkins/routes.py tests/test_checkin_routes.py
@@ -328,7 +328,7 @@ git commit -m "feat: add GET /api/checkins/modes endpoint"
 - Modify: `frontend/src/api/checkins.ts`
 - Modify: `frontend/src/pages/CheckInsPage.tsx`
 
-- [ ] **Step 1: Add `fetchModes` to the API client**
+- [x] **Step 1: Add `fetchModes` to the API client**
 
 In `frontend/src/api/checkins.ts`, add:
 
@@ -338,7 +338,7 @@ export async function fetchModes(): Promise<string[]> {
 }
 ```
 
-- [ ] **Step 2: Update AddCheckinModal to use dynamic modes**
+- [x] **Step 2: Update AddCheckinModal to use dynamic modes**
 
 In `frontend/src/pages/CheckInsPage.tsx`, add `fetchModes` to the import from `"../api/checkins"`:
 
@@ -414,12 +414,12 @@ Update the call site to pass `modes`:
         <AddCheckinModal open={showAddModal} onClose={() => setShowAddModal(false)} sessionId={selectedSessionId} onAdded={loadCheckins} modes={modes} />
 ```
 
-- [ ] **Step 3: Verify build compiles**
+- [x] **Step 3: Verify build compiles**
 
 Run: `nix-shell --run "cd frontend && npx tsc --noEmit" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: No errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/api/checkins.ts frontend/src/pages/CheckInsPage.tsx
@@ -430,12 +430,12 @@ git commit -m "feat: fetch modes from API and use dynamic dropdown in Add Check-
 
 ### Task 5: Full Test Suite Verification
 
-- [ ] **Step 1: Run backend tests**
+- [x] **Step 1: Run backend tests**
 
 Run: `nix-shell --run "python -m pytest tests/ -x -q" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: All tests pass
 
-- [ ] **Step 2: Run frontend type check**
+- [x] **Step 2: Run frontend type check**
 
 Run: `nix-shell --run "cd frontend && npx tsc --noEmit" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: No errors

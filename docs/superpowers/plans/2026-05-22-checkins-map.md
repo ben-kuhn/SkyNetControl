@@ -33,7 +33,7 @@
 **Files:**
 - Create: `frontend/src/components/CheckInMap.tsx`
 
-- [ ] **Step 1: Create the CheckInMap component**
+- [x] **Step 1: Create the CheckInMap component**
 
 Create `frontend/src/components/CheckInMap.tsx`:
 
@@ -148,12 +148,12 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
 }
 ```
 
-- [ ] **Step 2: Verify build compiles**
+- [x] **Step 2: Verify build compiles**
 
 Run: `cd frontend && nix-shell --run "npx tsc --noEmit" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: No errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/components/CheckInMap.tsx
@@ -167,7 +167,7 @@ git commit -m "feat: add CheckInMap Leaflet component with pin rendering and sel
 **Files:**
 - Modify: `frontend/src/pages/CheckInsPage.tsx`
 
-- [ ] **Step 1: Add selectedCheckinId state and row selection to CheckinTable**
+- [x] **Step 1: Add selectedCheckinId state and row selection to CheckinTable**
 
 In `frontend/src/pages/CheckInsPage.tsx`, update the `CheckinTable` component signature and add row click handling. Add `useRef` to the existing React import on line 1.
 
@@ -218,11 +218,11 @@ function CheckinTable({
           {checkins.map((c) => {
             const isSelected = c.id === selectedCheckinId;
             return (
+              <React.Fragment key={c.id}>
               <tr
-                key={c.id}
                 ref={(el) => { if (el) rowRefs.current.set(c.id, el); else rowRefs.current.delete(c.id); }}
                 onClick={() => onSelectCheckin(isSelected ? null : c.id)}
-                className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                className={`${c.comments ? "" : "border-b border-border last:border-b-0"} cursor-pointer transition-colors ${
                   isSelected
                     ? "bg-accent/[0.08] border-l-2 border-l-accent"
                     : c.parse_status === "manual_review"
@@ -264,6 +264,24 @@ function CheckinTable({
                   </td>
                 )}
               </tr>
+              {c.comments && (
+                <tr
+                  key={`${c.id}-comments`}
+                  onClick={() => onSelectCheckin(isSelected ? null : c.id)}
+                  className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-accent/[0.08]"
+                      : c.parse_status === "manual_review"
+                        ? "bg-warning/[0.04] hover:bg-bg-elevated/50"
+                        : "hover:bg-bg-elevated/50"
+                  }`}
+                >
+                  <td colSpan={canEditCheckins ? 8 : 7} className="px-3 pb-2.5 -mt-1 text-text-muted text-xs italic">
+                    {c.comments}
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
             );
           })}
           {checkins.length === 0 && (
@@ -286,9 +304,9 @@ Key changes from the original `CheckinTable`:
 - Added `onClick` on `<tr>` for row selection (click to select, click again to deselect)
 - Added `e.stopPropagation()` on the edit button so clicking edit doesn't trigger row selection
 - Selected row gets `bg-accent/[0.08] border-l-2 border-l-accent` styling
-- Removed the Comments column to save horizontal space in the 50/50 layout (8 columns down from 9 → colSpan updated to match)
+- Comments moved from a truncated column to a full-width sub-row beneath each check-in (only shown when comment exists)
 
-- [ ] **Step 2: Add two-pane layout and map to CheckInsPage**
+- [x] **Step 2: Add two-pane layout and map to CheckInsPage**
 
 In `frontend/src/pages/CheckInsPage.tsx`, add the import for `CheckInMap` after the existing imports (after line 8):
 
@@ -349,12 +367,12 @@ Also reset `selectedCheckinId` when the session changes. In the `handleSessionCh
   };
 ```
 
-- [ ] **Step 3: Verify build compiles**
+- [x] **Step 3: Verify build compiles**
 
 Run: `cd frontend && nix-shell --run "npx tsc --noEmit" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: No errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/pages/CheckInsPage.tsx
@@ -369,7 +387,7 @@ git commit -m "feat: integrate CheckInMap into CheckInsPage with two-pane layout
 - Modify: `frontend/src/App.tsx`
 - Modify: `frontend/src/layouts/Sidebar.tsx`
 
-- [ ] **Step 1: Remove the `/map` route from App.tsx**
+- [x] **Step 1: Remove the `/map` route from App.tsx**
 
 In `frontend/src/App.tsx`, delete line 61:
 
@@ -377,7 +395,7 @@ In `frontend/src/App.tsx`, delete line 61:
         <Route path="/map" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><PlaceholderPage title="Map" /></ProtectedRoute>} />
 ```
 
-- [ ] **Step 2: Remove the Map nav entry from Sidebar.tsx**
+- [x] **Step 2: Remove the Map nav entry from Sidebar.tsx**
 
 In `frontend/src/layouts/Sidebar.tsx`, delete line 15:
 
@@ -385,12 +403,12 @@ In `frontend/src/layouts/Sidebar.tsx`, delete line 15:
   { label: "Map", to: "/map", minRole: ["viewer", "net_control", "admin"] },
 ```
 
-- [ ] **Step 3: Verify build compiles**
+- [x] **Step 3: Verify build compiles**
 
 Run: `cd frontend && nix-shell --run "npx tsc --noEmit" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: No errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/App.tsx frontend/src/layouts/Sidebar.tsx
@@ -401,12 +419,12 @@ git commit -m "feat: remove standalone /map route and nav entry"
 
 ### Task 4: Full Test Suite Verification
 
-- [ ] **Step 1: Run backend tests**
+- [x] **Step 1: Run backend tests**
 
 Run: `nix-shell --run "python -m pytest tests/ -x -q" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: All tests pass (no backend changes, but verify nothing is broken)
 
-- [ ] **Step 2: Run frontend type check**
+- [x] **Step 2: Run frontend type check**
 
 Run: `cd frontend && nix-shell --run "npx tsc --noEmit" /home/ku0hn/dev/SkyNetControl/shell.nix`
 Expected: No errors
