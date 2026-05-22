@@ -6,6 +6,7 @@ from datetime import date as date_type, datetime, timezone
 import jinja2
 from sqlalchemy.orm import Session
 
+from backend.config import settings
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn
 from backend.modules.roster.models import RosterTemplate, RosterLog, RosterStatus
@@ -203,7 +204,6 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
 
     checkins = []
     new_members = []
-    has_gps = False
     for ci in checkins_query:
         ci_dict = {
             "name": ci.name,
@@ -218,12 +218,8 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
         checkins.append(ci_dict)
         if ci.is_new_member:
             new_members.append(ci_dict)
-        if ci.latitude is not None and ci.longitude is not None:
-            has_gps = True
 
-    map_url = ""
-    if has_gps:
-        map_url = f"/api/roster/session/{net_session.id}/geojson"
+    session_url = f"{settings.app_base_url}/checkins?session={net_session.id}"
 
     return {
         "date": date_str,
@@ -236,7 +232,7 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
         "checkins": checkins,
         "new_members": new_members,
         "total_count": len(checkins),
-        "map_url": map_url,
+        "session_url": session_url,
     }
 
 
@@ -307,7 +303,7 @@ def generate_draft(
         content_welcome=sections["welcome"],
         content_comments=sections["comments"],
         content_footer=sections["footer"],
-        map_url=context["map_url"] or None,
+        session_url=context["session_url"] or None,
         drafted_at=datetime.now(tz=timezone.utc),
     )
     db.add(log)

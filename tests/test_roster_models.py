@@ -92,7 +92,7 @@ def test_create_roster_log(db):
     assert log.approved_at is None
     assert log.approved_by is None
     assert log.sent_at is None
-    assert log.map_url is None
+    assert log.session_url is None
 
 
 def test_roster_status_values():

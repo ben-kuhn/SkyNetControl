@@ -281,7 +281,7 @@ def test_build_roster_context_activity(db, season_and_sessions):
     assert ctx["new_members"] == []
 
 
-def test_build_roster_context_map_url(db, season_and_sessions):
+def test_build_roster_context_session_url(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions
 
     ci = CheckIn(
@@ -299,7 +299,8 @@ def test_build_roster_context_map_url(db, season_and_sessions):
     db.commit()
 
     ctx = build_roster_context(db, session1)
-    assert ctx["map_url"] != ""
+    assert ctx["session_url"].startswith("http://localhost:8000")
+    assert "/checkins?session=" in ctx["session_url"]
 
 
 @pytest.fixture
@@ -311,7 +312,7 @@ def default_template(db):
         header_template="Session: {{ date }}, NCS: {{ net_control }}, Count: {{ total_count }}",
         welcome_template="{% for m in new_members %}Welcome {{ m.name }} ({{ m.callsign }})!\n{% endfor %}",
         comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",  # noqa: E501
-        footer_template="{% if next_week_preview %}Next: {{ next_week_preview }}{% endif %}\n{% if map_url %}Map: {{ map_url }}{% endif %}\n73 de W0NE",  # noqa: E501
+        footer_template="{% if next_week_preview %}Next: {{ next_week_preview }}{% endif %}\n{% if session_url %}Check-in details: {{ session_url }}{% endif %}\n73 de W0NE",  # noqa: E501
         lead_time_days=1,
         is_default=True,
     )
@@ -329,7 +330,7 @@ def test_render_roster(db, default_template):
         "activity_title": "",
         "activity_instructions": "",
         "next_week_preview": "Standard Winlink Check-in",
-        "map_url": "",
+        "session_url": "",
         "checkins": [
             {
                 "name": "Alice",
@@ -422,23 +423,13 @@ def test_generate_draft_with_specific_template(db, season_and_sessions):
     assert "Custom" in log.content_subject
 
 
-def test_generate_draft_sets_map_url_when_gps(db, season_and_sessions, default_template):
+def test_generate_draft_sets_session_url(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
-    ci = CheckIn(
-        session_id=session1.id,
-        callsign="W0GPS",
-        name="GPS Op",
-        mode="winlink",
-        parse_status=ParseStatus.AUTO,
-        timing_status=TimingStatus.ON_TIME,
-        is_new_member=False,
-        latitude=39.7,
-        longitude=-104.9,
-    )
-    db.add(ci)
-    db.commit()
     log = generate_draft(db, session1.id)
-    assert log.map_url is not None and log.map_url != ""
+    assert log is not None
+    assert log.session_url is not None
+    assert log.session_url != ""
+    assert "/checkins?session=" in log.session_url
 
 
 def test_generate_due_drafts(db, season_and_sessions, default_template):

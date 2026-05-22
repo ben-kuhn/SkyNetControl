@@ -51,7 +51,7 @@ class RosterLog(Base):
     content_welcome: Mapped[str] = mapped_column(Text, nullable=False)
     content_comments: Mapped[str] = mapped_column(Text, nullable=False)
     content_footer: Mapped[str] = mapped_column(Text, nullable=False)
-    map_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    session_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     drafted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

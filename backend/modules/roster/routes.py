@@ -84,7 +84,7 @@ def _roster_to_response(log: RosterLog) -> dict:
         "content_welcome": log.content_welcome,
         "content_comments": log.content_comments,
         "content_footer": log.content_footer,
-        "map_url": log.map_url,
+        "session_url": log.session_url,
         "drafted_at": log.drafted_at.isoformat(),
         "approved_at": log.approved_at.isoformat() if log.approved_at else None,
         "sent_at": log.sent_at.isoformat() if log.sent_at else None,
