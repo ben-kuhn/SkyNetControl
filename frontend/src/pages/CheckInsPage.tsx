@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -6,6 +6,7 @@ import { Spinner } from "../components/Spinner";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
+import { CheckInMap } from "../components/CheckInMap";
 import type { CheckIn, CallbookResult, Session, UserRole } from "../types";
 import {
   fetchSessionCheckins,
@@ -105,14 +106,30 @@ function Stat({ value, label, color }: { value: number; label: string; color?: s
 function CheckinTable({
   checkins,
   canEditCheckins,
+  selectedCheckinId,
+  onSelectCheckin,
   onEdit,
 }: {
   checkins: CheckIn[];
   canEditCheckins: boolean;
+  selectedCheckinId: number | null;
+  onSelectCheckin: (id: number | null) => void;
   onEdit: (c: CheckIn) => void;
 }) {
+  const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
+
+  // Scroll selected row into view (when triggered by map pin click)
+  useEffect(() => {
+    if (selectedCheckinId) {
+      const row = rowRefs.current.get(selectedCheckinId);
+      if (row) {
+        row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
+  }, [selectedCheckinId]);
+
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-auto">
       <table className="w-full text-[0.8125rem] border-collapse">
         <thead className="bg-bg-elevated">
           <tr>
@@ -120,60 +137,85 @@ function CheckinTable({
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Name</th>
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Location</th>
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Mode</th>
-            <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Parse Status</th>
+            <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Status</th>
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Timing</th>
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">New</th>
-            <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Comments</th>
             {canEditCheckins && <th className="border-b border-border w-10"></th>}
           </tr>
         </thead>
         <tbody>
-          {checkins.map((c) => (
-            <tr
-              key={c.id}
-              className={`border-b border-border last:border-b-0 hover:bg-bg-elevated/50 ${c.parse_status === "manual_review" ? "bg-warning/[0.04]" : ""}`}
-            >
-              <td className="px-3 py-2.5 font-mono font-semibold text-text-primary">{c.callsign}</td>
-              <td className="px-3 py-2.5 text-text-secondary">{c.name}</td>
-              <td className="px-3 py-2.5 text-text-secondary">
-                {[c.city, c.state].filter(Boolean).join(", ")}
-              </td>
-              <td className="px-3 py-2.5 text-text-secondary">{c.mode}</td>
-              <td className="px-3 py-2.5">
-                <span className={`inline-block text-[0.6875rem] px-2 py-0.5 rounded-full font-medium ${parseStatusBadge[c.parse_status]?.cls}`}>
-                  {parseStatusBadge[c.parse_status]?.label}
-                </span>
-              </td>
-              <td className="px-3 py-2.5">
-                <span className={`inline-block text-[0.6875rem] px-2 py-0.5 rounded-full font-medium ${timingBadge[c.timing_status]?.cls}`}>
-                  {timingBadge[c.timing_status]?.label}
-                </span>
-              </td>
-              <td className="px-3 py-2.5">
-                {c.is_new_member && <span className="text-warning" title="New member">&#9733;</span>}
-              </td>
-              <td className="px-3 py-2.5 max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap text-text-muted text-xs">
-                {c.comments}
-              </td>
-              {canEditCheckins && (
-                <td className="px-3 py-2.5">
-                  <button
-                    onClick={() => onEdit(c)}
-                    className="text-text-muted hover:text-accent transition-colors p-1 rounded"
-                    aria-label={`Edit check-in for ${c.callsign}`}
-                    title="Edit"
-                  >
-                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
+          {checkins.map((c) => {
+            const isSelected = c.id === selectedCheckinId;
+            return (
+              <React.Fragment key={c.id}>
+              <tr
+                ref={(el) => { if (el) rowRefs.current.set(c.id, el); else rowRefs.current.delete(c.id); }}
+                onClick={() => onSelectCheckin(isSelected ? null : c.id)}
+                className={`${c.comments ? "" : "border-b border-border last:border-b-0"} cursor-pointer transition-colors ${
+                  isSelected
+                    ? "bg-accent/[0.08] border-l-2 border-l-accent"
+                    : c.parse_status === "manual_review"
+                      ? "bg-warning/[0.04] hover:bg-bg-elevated/50"
+                      : "hover:bg-bg-elevated/50"
+                }`}
+              >
+                <td className="px-3 py-2.5 font-mono font-semibold text-text-primary">{c.callsign}</td>
+                <td className="px-3 py-2.5 text-text-secondary">{c.name}</td>
+                <td className="px-3 py-2.5 text-text-secondary">
+                  {[c.city, c.state].filter(Boolean).join(", ")}
                 </td>
+                <td className="px-3 py-2.5 text-text-secondary">{c.mode}</td>
+                <td className="px-3 py-2.5">
+                  <span className={`inline-block text-[0.6875rem] px-2 py-0.5 rounded-full font-medium ${parseStatusBadge[c.parse_status]?.cls}`}>
+                    {parseStatusBadge[c.parse_status]?.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  <span className={`inline-block text-[0.6875rem] px-2 py-0.5 rounded-full font-medium ${timingBadge[c.timing_status]?.cls}`}>
+                    {timingBadge[c.timing_status]?.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5">
+                  {c.is_new_member && <span className="text-warning" title="New member">&#9733;</span>}
+                </td>
+                {canEditCheckins && (
+                  <td className="px-3 py-2.5">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onEdit(c); }}
+                      className="text-text-muted hover:text-accent transition-colors p-1 rounded"
+                      aria-label={`Edit check-in for ${c.callsign}`}
+                      title="Edit"
+                    >
+                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  </td>
+                )}
+              </tr>
+              {c.comments && (
+                <tr
+                  key={`${c.id}-comments`}
+                  onClick={() => onSelectCheckin(isSelected ? null : c.id)}
+                  className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-accent/[0.08]"
+                      : c.parse_status === "manual_review"
+                        ? "bg-warning/[0.04] hover:bg-bg-elevated/50"
+                        : "hover:bg-bg-elevated/50"
+                  }`}
+                >
+                  <td colSpan={canEditCheckins ? 8 : 7} className="px-3 pb-2.5 -mt-1 text-text-muted text-xs italic">
+                    {c.comments}
+                  </td>
+                </tr>
               )}
-            </tr>
-          ))}
+            </React.Fragment>
+            );
+          })}
           {checkins.length === 0 && (
             <tr>
-              <td colSpan={canEditCheckins ? 9 : 8} className="px-3 py-8 text-center text-text-muted text-sm">
+              <td colSpan={canEditCheckins ? 8 : 7} className="px-3 py-8 text-center text-text-muted text-sm">
                 No check-ins for this session yet.
               </td>
             </tr>
@@ -438,6 +480,7 @@ export function CheckInsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCheckin, setEditingCheckin] = useState<CheckIn | null>(null);
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
+  const [selectedCheckinId, setSelectedCheckinId] = useState<number | null>(null);
 
   const userCanEdit = user ? canEdit(user.role) : false;
 
@@ -517,6 +560,7 @@ export function CheckInsPage() {
 
   const handleSessionChange = (id: number) => {
     setSelectedSessionId(id);
+    setSelectedCheckinId(null);
     setSearchParams({ session: String(id) });
   };
 
@@ -602,7 +646,24 @@ export function CheckInsPage() {
           <Spinner />
         </div>
       ) : selectedSessionId ? (
-        <CheckinTable checkins={checkins} canEditCheckins={userCanEdit} onEdit={setEditingCheckin} />
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex-1 min-w-0">
+            <CheckinTable
+              checkins={checkins}
+              canEditCheckins={userCanEdit}
+              selectedCheckinId={selectedCheckinId}
+              onSelectCheckin={setSelectedCheckinId}
+              onEdit={setEditingCheckin}
+            />
+          </div>
+          <div className="flex-1 min-h-[400px]">
+            <CheckInMap
+              checkins={checkins}
+              selectedCheckinId={selectedCheckinId}
+              onSelectCheckin={setSelectedCheckinId}
+            />
+          </div>
+        </div>
       ) : (
         <p className="text-text-muted text-sm py-4">Select a session above to view check-ins.</p>
       )}
