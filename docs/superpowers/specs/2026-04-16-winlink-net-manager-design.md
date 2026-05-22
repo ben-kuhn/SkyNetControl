@@ -380,3 +380,24 @@ Secrets (API keys, OIDC client secret) are stored encrypted or managed via envir
 
 Activity weeks: the assigned activity's instructions are included in the reminder at step 3.
 Summer weeks: same flow, but the schedule pattern is week-long rather than single-day.
+
+## Implementation Status
+
+_As of 2026-05-22._
+
+The backend covers all eight modules end-to-end. The remaining work is mostly on the frontend, where several net-control workflows are still placeholder pages even though their backend APIs are complete.
+
+### Gaps
+
+Ordered roughly easiest to hardest:
+
+1. **Members directory page** (frontend only) — `GET /api/checkins/members` returns the long-term roster, but `/members` has no UI. Spec calls for "browsable in the UI with search and filter."
+2. **Public shareable map page** (frontend + minor backend) — `GET /api/roster/session/{id}/geojson` is already public, but the URL embedded in rosters returns raw JSON. Need an unauthenticated HTML page that renders a Leaflet map from the GeoJSON, and point `map_url` at it.
+3. **Reminders review page** (frontend only) — backend has draft generation, edit, approve, send-via-delivery, and skip. `/reminders` is a placeholder. Net control needs a UI to review, edit, approve, and send drafts.
+4. **Roster review page** (frontend only) — backend has draft assembly, edit, approve, send-via-delivery, and skip. `/roster` is a placeholder. Net control needs a preview/edit/approve UI.
+5. **In-app notification system** (backend + frontend) — `backend/modules/roster/service.py` has a `notify_ncs` stub. Spec calls for in-app notification to net control when a draft is ready for review (reminders, check-ins, rosters).
+6. **Activities page with Claude chat** (frontend only, largest scope) — backend has full CRUD on `Activity`/`ActivityTag` plus a chat-driven brainstorm API (`POST /api/activities/chat/...`). `/activities` is a placeholder. Needs library browse + chat UI.
+
+### Confirmed done
+
+Schedule auto-generation, activities backend (CRUD + Claude chat), reminders backend, check-in mailbox scan/parse/review/approve, roster generation + GeoJSON, long-term member tracking, OIDC auth with first-user-admin, configuration UI, privacy/GDPR features, delivery backends (email, groups.io, Winlink) with reminder/roster wiring, background mailbox scanner, Nix packaging.
