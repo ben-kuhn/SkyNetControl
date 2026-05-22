@@ -14,6 +14,7 @@ from backend.modules.checkins.models import (
 from backend.modules.checkins.service import (
     approve_session_checkins,
     create_manual_checkin,
+    get_checkins_by_callsign,
     get_checkins_for_session,
     scan_and_import_messages,
     update_checkin,
@@ -74,6 +75,12 @@ def _member_to_response(member: Member) -> dict:
         "last_check_in_date": member.last_check_in_date.isoformat(),
         "total_check_ins": member.total_check_ins,
     }
+
+
+def _checkin_to_response_with_session(checkin: CheckIn, session_date) -> dict:
+    base = _checkin_to_response(checkin)
+    base["session_date"] = session_date.isoformat()
+    return base
 
 
 @checkins_router.get("/modes")
@@ -196,6 +203,16 @@ async def list_members_route(
 ):
     members = db.query(Member).order_by(Member.callsign).all()
     return [_member_to_response(m) for m in members]
+
+
+@checkins_router.get("/by-callsign/{callsign}")
+async def get_checkins_by_callsign_route(
+    callsign: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    rows = get_checkins_by_callsign(db, callsign)
+    return [_checkin_to_response_with_session(c, d) for c, d in rows]
 
 
 @checkins_router.get("/lookup/{callsign}")

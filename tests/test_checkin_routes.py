@@ -287,3 +287,55 @@ async def test_get_modes_returns_default(test_client, test_settings):
     assert "Voice" in modes
     assert "Winlink" in modes
     assert len(modes) == 12
+
+
+@pytest.mark.asyncio
+async def test_get_checkins_by_callsign_returns_history(test_client, test_settings, db_setup):
+    """Returns the callsign's check-ins across sessions with embedded session_date."""
+    from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
+
+    with db_setup() as session:
+        # db_setup already provides at least one NetSession; create a check-in on it.
+        net_session = session.query(NetSession).first()
+        checkin = CheckIn(
+            session_id=net_session.id,
+            callsign="W0NE",
+            name="Test",
+            mode="Winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+            is_new_member=False,
+        )
+        session.add(checkin)
+        session.commit()
+
+    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    resp = await test_client.get(
+        "/api/checkins/by-callsign/w0ne",  # case-insensitive
+        cookies={"access_token": viewer_token},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["callsign"] == "W0NE"
+    assert body[0]["mode"] == "Winlink"
+    assert "session_date" in body[0]  # embedded for frontend convenience
+
+
+@pytest.mark.asyncio
+async def test_get_checkins_by_callsign_empty(test_client, test_settings):
+    """Unknown callsign returns 200 with empty list, not 404."""
+    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    resp = await test_client.get(
+        "/api/checkins/by-callsign/NOBODY",
+        cookies={"access_token": viewer_token},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_get_checkins_by_callsign_requires_auth(test_client):
+    """Endpoint requires authentication."""
+    resp = await test_client.get("/api/checkins/by-callsign/W0NE")
+    assert resp.status_code == 401
