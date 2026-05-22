@@ -55,29 +55,38 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-border px-3 py-3 flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <ThemeToggle />
-          <NavLink
-            to="/profile"
-            className="font-mono text-sm text-text-secondary hover:text-accent transition-colors"
+      {user ? (
+        <div className="border-t border-border px-3 py-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <ThemeToggle />
+            <NavLink
+              to="/profile"
+              className="font-mono text-sm text-text-secondary hover:text-accent transition-colors"
+            >
+              {user.callsign}
+            </NavLink>
+          </div>
+          <button
+            onClick={logout}
+            className="w-full text-left px-2 py-1.5 text-sm text-text-muted hover:text-danger transition-colors rounded-md hover:bg-bg-elevated"
           >
-            {user?.callsign}
+            Logout
+          </button>
+          <NavLink
+            to="/privacy"
+            className="text-xs text-text-muted hover:text-text-secondary transition-colors px-2"
+          >
+            Privacy Policy
           </NavLink>
         </div>
-        <button
-          onClick={logout}
-          className="w-full text-left px-2 py-1.5 text-sm text-text-muted hover:text-danger transition-colors rounded-md hover:bg-bg-elevated"
+      ) : (
+        <a
+          href="/login"
+          className="block px-4 py-2 text-sm text-accent hover:underline"
         >
-          Logout
-        </button>
-        <NavLink
-          to="/privacy"
-          className="text-xs text-text-muted hover:text-text-secondary transition-colors px-2"
-        >
-          Privacy Policy
-        </NavLink>
-      </div>
+          Sign in
+        </a>
+      )}
     </aside>
   );
 }

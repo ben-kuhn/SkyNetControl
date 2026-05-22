@@ -71,22 +71,33 @@ export function MobileMenu({ open, onClose }: MobileMenuProps) {
 
       {/* Footer */}
       <div className="absolute bottom-0 left-0 right-0 border-t border-border px-4 py-4">
-        <div className="flex items-center justify-between mb-3">
-          <NavLink
-            to="/profile"
-            onClick={onClose}
-            className="font-mono text-sm text-text-secondary hover:text-accent"
+        {user ? (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <NavLink
+                to="/profile"
+                onClick={onClose}
+                className="font-mono text-sm text-text-secondary hover:text-accent"
+              >
+                {user.callsign}
+              </NavLink>
+              <ThemeToggle />
+            </div>
+            <button
+              onClick={() => { logout(); onClose(); }}
+              className="w-full text-left px-2 py-2 text-sm text-text-muted hover:text-danger transition-colors rounded-md hover:bg-bg-elevated"
+            >
+              Logout
+            </button>
+          </>
+        ) : (
+          <a
+            href="/login"
+            className="block px-2 py-2 text-sm text-accent hover:underline"
           >
-            {user?.callsign}
-          </NavLink>
-          <ThemeToggle />
-        </div>
-        <button
-          onClick={() => { logout(); onClose(); }}
-          className="w-full text-left px-2 py-2 text-sm text-text-muted hover:text-danger transition-colors rounded-md hover:bg-bg-elevated"
-        >
-          Logout
-        </button>
+            Sign in
+          </a>
+        )}
         <NavLink
           to="/privacy"
           onClick={onClose}

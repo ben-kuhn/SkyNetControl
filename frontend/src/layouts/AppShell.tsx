@@ -24,7 +24,11 @@ export function AppShell() {
           </svg>
         </button>
         <span className="font-bold text-accent text-sm">SkyNetControl</span>
-        <span className="font-mono text-xs text-text-muted">{user?.callsign}</span>
+        {user ? (
+          <span className="font-mono text-xs text-text-muted">{user.callsign}</span>
+        ) : (
+          <a href="/login" className="text-xs text-accent hover:underline">Sign in</a>
+        )}
       </div>
 
       {/* Main content */}
