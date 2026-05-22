@@ -1,6 +1,15 @@
+import json
+
 from sqlalchemy.orm import Session
 
 from backend.config_mgmt.models import AppConfig
+
+
+DEFAULT_CHECKIN_MODES = [
+    "Voice", "Winlink", "VARA FM", "VARA HF", "ARDOP",
+    "1200-baud Packet", "9k6 Packet", "Pactor", "Telnet",
+    "AX.25", "CW", "Digital",
+]
 
 
 def get_config_value(db: Session, key: str, default: str | None = None) -> str | None:
@@ -23,3 +32,16 @@ def set_config_value(db: Session, key: str, value: str) -> None:
 def get_all_config(db: Session) -> dict[str, str]:
     configs = db.query(AppConfig).all()
     return {c.key: c.value for c in configs}
+
+
+def get_checkin_modes(db: Session) -> list[str]:
+    raw = get_config_value(db, "checkins.modes")
+    if raw is None:
+        return DEFAULT_CHECKIN_MODES
+    try:
+        modes = json.loads(raw)
+        if isinstance(modes, list) and all(isinstance(m, str) for m in modes):
+            return modes
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return DEFAULT_CHECKIN_MODES
