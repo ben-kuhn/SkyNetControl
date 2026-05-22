@@ -42,6 +42,12 @@ function AppRoutes() {
         }
       />
 
+      {/* Public routes that share the AppShell chrome */}
+      <Route element={<AppShell />}>
+        <Route path="/checkins" element={<CheckInsPage />} />
+      </Route>
+
+      {/* Authenticated routes */}
       <Route
         element={
           <ProtectedRoute>
@@ -58,7 +64,6 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        <Route path="/checkins" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><CheckInsPage /></ProtectedRoute>} />
         <Route path="/members" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><MembersPage /></ProtectedRoute>} />
         <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Reminders" /></ProtectedRoute>} />
         <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Roster" /></ProtectedRoute>} />
