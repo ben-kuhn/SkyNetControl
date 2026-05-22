@@ -46,3 +46,7 @@ export async function lookupCallsign(callsign: string): Promise<CallbookResult> 
 export async function fetchRecentSessions(): Promise<Session[]> {
   return apiFetch<Session[]>("/schedule/sessions");
 }
+
+export async function fetchModes(): Promise<string[]> {
+  return apiFetch<string[]>("/checkins/modes");
+}

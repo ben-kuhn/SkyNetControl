@@ -16,6 +16,7 @@ import {
   approveSession,
   lookupCallsign,
   fetchRecentSessions,
+  fetchModes,
 } from "../api/checkins";
 
 const canEdit = (role: UserRole) => role === "admin" || role === "net_control";
@@ -283,11 +284,13 @@ function AddCheckinModal({
   onClose,
   sessionId,
   onAdded,
+  modes,
 }: {
   open: boolean;
   onClose: () => void;
   sessionId: number;
   onAdded: () => void;
+  modes: string[];
 }) {
   const { addToast } = useToast();
   const emptyForm = { callsign: "", name: "", mode: "Voice", city: "", county: "", state: "", comments: "" };
@@ -346,10 +349,9 @@ function AddCheckinModal({
             value={form.mode}
             onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value }))}
           >
-            <option>Voice</option>
-            <option>Winlink</option>
-            <option>CW</option>
-            <option>Digital</option>
+            {modes.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
           </select>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -481,6 +483,7 @@ export function CheckInsPage() {
   const [editingCheckin, setEditingCheckin] = useState<CheckIn | null>(null);
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
   const [selectedCheckinId, setSelectedCheckinId] = useState<number | null>(null);
+  const [modes, setModes] = useState<string[]>(["Voice", "Winlink", "CW", "Digital"]);
 
   const userCanEdit = user ? canEdit(user.role) : false;
 
@@ -514,6 +517,12 @@ export function CheckInsPage() {
     setSessions(finalSessions);
     return { finalSessions, nextScheduled };
   }, [initialSessionParam]);
+
+  useEffect(() => {
+    fetchModes()
+      .then(setModes)
+      .catch(() => {});
+  }, []);
 
   // Load sessions on mount
   useEffect(() => {
@@ -669,7 +678,7 @@ export function CheckInsPage() {
       )}
 
       {selectedSessionId && (
-        <AddCheckinModal open={showAddModal} onClose={() => setShowAddModal(false)} sessionId={selectedSessionId} onAdded={loadCheckins} />
+        <AddCheckinModal open={showAddModal} onClose={() => setShowAddModal(false)} sessionId={selectedSessionId} onAdded={loadCheckins} modes={modes} />
       )}
 
       <EditCheckinModal open={editingCheckin !== null} onClose={() => setEditingCheckin(null)} checkin={editingCheckin} onSaved={loadCheckins} />
