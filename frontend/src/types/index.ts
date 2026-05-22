@@ -97,6 +97,18 @@ export interface CallbookResult {
   cached: boolean;
 }
 
+export interface Member {
+  callsign: string;
+  name: string;
+  first_check_in_date: string;
+  last_check_in_date: string;
+  total_check_ins: number;
+}
+
+export interface MemberCheckin extends CheckIn {
+  session_date: string;
+}
+
 export const SCOPES: Record<string, { description: string; minRole: UserRole }> = {
   "schedule:read":  { description: "View sessions",             minRole: "viewer" },
   "schedule:write": { description: "Create/edit/delete sessions", minRole: "net_control" },
