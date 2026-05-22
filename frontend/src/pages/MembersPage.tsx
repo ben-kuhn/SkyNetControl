@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchMembers, fetchMemberHistory } from "../api/members";
 import type { Member, MemberCheckin } from "../types";
@@ -158,7 +158,7 @@ function MemberDetailPanel({ member, onClose }: { member: Member; onClose: () =>
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
 
-  useEffect(() => {
+  const loadHistory = useCallback(() => {
     setHistoryLoading(true);
     setHistoryError(null);
     setHistory(null);
@@ -167,6 +167,10 @@ function MemberDetailPanel({ member, onClose }: { member: Member; onClose: () =>
       .catch((e) => setHistoryError(e?.message ?? "Failed to load history"))
       .finally(() => setHistoryLoading(false));
   }, [member.callsign]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   return (
     <div className="border border-border rounded-lg p-4 bg-bg-surface">
@@ -204,7 +208,17 @@ function MemberDetailPanel({ member, onClose }: { member: Member; onClose: () =>
       <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">History</h3>
 
       {historyLoading && <p className="text-text-muted text-sm">Loading…</p>}
-      {historyError && <p className="text-error text-sm">{historyError}</p>}
+      {historyError && (
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-error">{historyError}</span>
+          <button
+            onClick={loadHistory}
+            className="px-2 py-0.5 text-xs border border-border rounded hover:bg-bg-elevated/50 text-text-secondary hover:text-text-primary transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {history && history.length === 0 && (
         <p className="text-text-muted text-sm italic">No check-ins recorded for this callsign.</p>
       )}
