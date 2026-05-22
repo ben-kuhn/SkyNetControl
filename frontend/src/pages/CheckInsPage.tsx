@@ -253,10 +253,10 @@ function AddCheckinModal({
   const handleLookupResult = (result: CallbookResult) => {
     setForm((f) => ({
       ...f,
-      name: result.name || f.name,
-      city: result.city || f.city,
-      county: result.county || f.county,
-      state: result.state || f.state,
+      name: result.name ?? "",
+      city: result.city ?? "",
+      county: result.county ?? "",
+      state: result.state ?? "",
     }));
   };
 
@@ -351,10 +351,10 @@ function EditCheckinModal({
   const handleLookupResult = (result: CallbookResult) => {
     setForm((f) => ({
       ...f,
-      name: result.name || f.name,
-      city: result.city || f.city,
-      county: result.county || f.county,
-      state: result.state || f.state,
+      name: result.name ?? "",
+      city: result.city ?? "",
+      county: result.county ?? "",
+      state: result.state ?? "",
     }));
   };
 
@@ -471,8 +471,9 @@ export function CheckInsPage() {
           defaultId = Number(paramId);
         } else if (nextScheduled) {
           defaultId = nextScheduled.id;
-        } else if (finalSessions.length > 0 && finalSessions[0]) {
-          defaultId = finalSessions[0].id;
+        } else {
+          const recentCompleted = finalSessions.find((s) => s.status === "completed");
+          defaultId = recentCompleted?.id ?? finalSessions[0]?.id ?? null;
         }
         setSelectedSessionId(defaultId);
       })
