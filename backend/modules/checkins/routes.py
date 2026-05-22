@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_role
+from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, require_role
 from backend.auth.models import User, UserRole
 from backend.config_mgmt.service import get_config_value, get_checkin_modes
 from backend.modules.checkins.mailbox_reader import read_mailbox
@@ -20,7 +20,7 @@ from backend.modules.checkins.service import (
     update_checkin,
 )
 from backend.integrations.callbook.service import lookup_callsign
-from backend.modules.schedule.models import NetSession
+from backend.modules.schedule.models import NetSession, SessionStatus
 
 checkins_router = APIRouter(tags=["checkins"])
 
@@ -121,9 +121,16 @@ async def scan_mailbox_route(
 @checkins_router.get("/session/{session_id}")
 async def get_session_checkins_route(
     session_id: int,
-    user: User = Depends(get_current_user),
+    user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db_session),
 ):
+    net_session = db.get(NetSession, session_id)
+    if net_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if user is None and net_session.status != SessionStatus.COMPLETED:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     checkins = get_checkins_for_session(db, session_id)
     return [_checkin_to_response(c) for c in checkins]
 

@@ -339,3 +339,66 @@ async def test_get_checkins_by_callsign_requires_auth(test_client):
     """Endpoint requires authentication."""
     resp = await test_client.get("/api/checkins/by-callsign/W0NE")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_session_checkins_public_completed(test_client, test_settings, db_setup):
+    """Anonymous viewers can fetch check-ins for a COMPLETED session."""
+    from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
+    from backend.modules.schedule.models import SessionStatus
+
+    with db_setup() as session:
+        net_session = session.query(NetSession).first()
+        net_session.status = SessionStatus.COMPLETED
+        checkin = CheckIn(
+            session_id=net_session.id,
+            callsign="W0NE",
+            name="Test",
+            mode="Winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+            is_new_member=False,
+        )
+        session.add(checkin)
+        session.commit()
+        net_session_id = net_session.id
+
+    resp = await test_client.get(f"/api/checkins/session/{net_session_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["callsign"] == "W0NE"
+
+
+@pytest.mark.asyncio
+async def test_get_session_checkins_public_not_completed_returns_404(test_client, db_setup):
+    """Anonymous viewers cannot fetch check-ins for a non-COMPLETED session."""
+    with db_setup() as session:
+        net_session = session.query(NetSession).first()
+        net_session_id = net_session.id
+
+    resp = await test_client.get(f"/api/checkins/session/{net_session_id}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_session_checkins_public_unknown_session_returns_404(test_client):
+    """Anonymous viewers see 404 for unknown sessions (same as not-completed)."""
+    resp = await test_client.get("/api/checkins/session/99999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_session_checkins_authenticated_sees_non_completed(test_client, test_settings, db_setup):
+    """Authenticated callers can fetch check-ins for any session status."""
+    with db_setup() as session:
+        net_session = session.query(NetSession).first()
+        net_session_id = net_session.id
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.get(
+        f"/api/checkins/session/{net_session_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == []
