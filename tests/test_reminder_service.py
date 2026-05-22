@@ -463,7 +463,11 @@ def test_mark_sent(db: Session, season_and_sessions):
     assert log is not None
     approve_reminder(db, log.id, approver_callsign="W0NE")
 
-    sent = mark_sent(db, log.id)
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        sent = mark_sent(db, log.id)
     assert sent is not None
     assert sent.status == ReminderStatus.SENT
     assert sent.sent_at is not None

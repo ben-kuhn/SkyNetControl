@@ -333,10 +333,18 @@ def approve_reminder(
 
 
 def mark_sent(db: Session, reminder_id: int) -> ReminderLog | None:
-    """Transition an APPROVED reminder to SENT."""
+    """Transition an APPROVED reminder to SENT via delivery backends."""
     log = db.get(ReminderLog, reminder_id)
     if log is None or log.status != ReminderStatus.APPROVED:
         return None
+
+    from backend.integrations.delivery.service import dispatch_delivery
+
+    delivered = dispatch_delivery(
+        db, "reminder", log.id, log.content_subject, log.content_body
+    )
+    if not delivered:
+        return None  # stay APPROVED so user can retry
 
     log.status = ReminderStatus.SENT
     log.sent_at = datetime.now(tz=timezone.utc)

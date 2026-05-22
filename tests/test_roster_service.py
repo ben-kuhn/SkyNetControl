@@ -536,7 +536,11 @@ def test_mark_sent(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
     log = generate_draft(db, session1.id)
     approve_roster(db, log.id, "W0NE")
-    result = mark_sent(db, log.id)
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        result = mark_sent(db, log.id)
     assert result is not None
     assert result.status == RosterStatus.SENT
     assert result.sent_at is not None
@@ -568,7 +572,11 @@ def test_skip_sent_roster_fails(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
     log = generate_draft(db, session1.id)
     approve_roster(db, log.id, "W0NE")
-    mark_sent(db, log.id)
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        mark_sent(db, log.id)
     assert skip_roster(db, log.id) is None
 
 

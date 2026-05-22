@@ -347,10 +347,14 @@ async def test_send_reminder(test_client, test_settings, db_setup):
         log_id = log.id
 
     token = create_access_token("W0NE", "admin", test_settings)
-    response = await test_client.post(
-        f"/api/reminders/{log_id}/send",
-        cookies={"access_token": token},
-    )
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        response = await test_client.post(
+            f"/api/reminders/{log_id}/send",
+            cookies={"access_token": token},
+        )
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "sent"

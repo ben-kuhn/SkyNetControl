@@ -306,7 +306,11 @@ async def test_send_roster_route(admin_client, db_setup):
     gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
     rid = gen_resp.json()["id"]
     await admin_client.post(f"/api/roster/{rid}/approve")
-    resp = await admin_client.post(f"/api/roster/{rid}/send")
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        resp = await admin_client.post(f"/api/roster/{rid}/send")
     assert resp.status_code == 200
     assert resp.json()["status"] == "sent"
 

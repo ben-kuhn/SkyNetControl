@@ -416,10 +416,19 @@ def approve_roster(
 
 
 def mark_sent(db: Session, roster_id: int) -> RosterLog | None:
-    """Transition APPROVED → SENT."""
+    """Transition APPROVED → SENT via delivery backends."""
     log = db.get(RosterLog, roster_id)
     if log is None or log.status != RosterStatus.APPROVED:
         return None
+
+    from backend.integrations.delivery.service import dispatch_delivery
+
+    assembled = assemble_roster(db, roster_id)
+    body = assembled if assembled else ""
+
+    delivered = dispatch_delivery(db, "roster", log.id, log.content_subject, body)
+    if not delivered:
+        return None  # stay APPROVED so user can retry
 
     log.status = RosterStatus.SENT
     log.sent_at = datetime.now(tz=timezone.utc)
