@@ -11,6 +11,7 @@ from backend.modules.checkins.models import (
     TimingStatus,
 )
 from backend.modules.checkins.message_parser import parse_message
+from backend.config_mgmt.service import get_checkin_modes
 from backend.modules.schedule.models import NetSession, SessionStatus
 
 
@@ -53,7 +54,9 @@ def is_new_member(db: Session, callsign: str) -> bool:
 
 def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -> CheckIn:
     """Parse a RawMessage and create a CheckIn record."""
-    msg_type, fields = parse_message(raw.body)
+    configured_modes = get_checkin_modes(db)
+    modes_set = {m.lower() for m in configured_modes}
+    msg_type, fields = parse_message(raw.body, known_modes=modes_set)
     raw.message_type = msg_type
     raw.parsed = True
 

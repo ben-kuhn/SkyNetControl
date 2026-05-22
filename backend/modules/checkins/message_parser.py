@@ -74,7 +74,10 @@ def parse_form_message(body: str) -> dict:
     }
 
 
-def parse_plain_text_message(body: str) -> dict:
+DEFAULT_KNOWN_MODES = {"winlink", "vara", "ardop", "packet", "pactor", "telnet", "ax.25"}
+
+
+def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> dict:
     """Parse a plain text check-in message.
 
     Expected order: name, callsign, city, county, state, mode, comments
@@ -111,7 +114,8 @@ def parse_plain_text_message(body: str) -> dict:
     mode = ""
     comments = None
 
-    known_modes = {"winlink", "vara", "ardop", "packet", "pactor", "telnet", "ax.25"}
+    if known_modes is None:
+        known_modes = DEFAULT_KNOWN_MODES
 
     mode_idx = None
     for i, part in enumerate(parts):
@@ -156,14 +160,14 @@ def parse_plain_text_message(body: str) -> dict:
     }
 
 
-def parse_message(body: str) -> tuple[MessageType, dict]:
+def parse_message(body: str, known_modes: set[str] | None = None) -> tuple[MessageType, dict]:
     """Detect message type and parse accordingly."""
     msg_type = detect_message_type(body)
 
     if msg_type == MessageType.FORM:
         return msg_type, parse_form_message(body)
     elif msg_type == MessageType.PLAIN_TEXT:
-        return msg_type, parse_plain_text_message(body)
+        return msg_type, parse_plain_text_message(body, known_modes=known_modes)
     else:
         return msg_type, {
             "name": "",

@@ -107,3 +107,18 @@ def test_parse_message_unknown():
     msg_type, fields = parse_message(body)
     assert msg_type == MessageType.UNKNOWN
     assert fields["confidence"] == "low"
+
+
+def test_parse_plain_text_custom_modes():
+    """Parser uses custom known_modes when provided."""
+    body = "John Smith W0ABC Denver CO VARA-FM Running well"
+    result = parse_plain_text_message(body, known_modes={"vara-fm"})
+    assert result["mode"] == "VARA-FM"
+    assert result["comments"] == "Running well"
+
+
+def test_parse_plain_text_default_modes_still_work():
+    """Without known_modes param, defaults still work."""
+    body = "John Smith W0ABC Denver CO Winlink"
+    result = parse_plain_text_message(body)
+    assert result["mode"] == "Winlink"
