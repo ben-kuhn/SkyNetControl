@@ -160,9 +160,10 @@ function CheckinTable({
                   <button
                     onClick={() => onEdit(c)}
                     className="text-text-muted hover:text-accent transition-colors p-1 rounded"
+                    aria-label={`Edit check-in for ${c.callsign}`}
                     title="Edit"
                   >
-                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
@@ -247,8 +248,14 @@ function AddCheckinModal({
   onAdded: () => void;
 }) {
   const { addToast } = useToast();
-  const [form, setForm] = useState({ callsign: "", name: "", mode: "Voice", city: "", county: "", state: "", comments: "" });
+  const emptyForm = { callsign: "", name: "", mode: "Voice", city: "", county: "", state: "", comments: "" };
+  const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+
+  const handleClose = () => {
+    setForm(emptyForm);
+    onClose();
+  };
 
   const handleLookupResult = (result: CallbookResult) => {
     setForm((f) => ({
@@ -275,9 +282,9 @@ function AddCheckinModal({
         comments: form.comments || undefined,
       });
       addToast("Check-in added", "success");
-      setForm({ callsign: "", name: "", mode: "Voice", city: "", county: "", state: "", comments: "" });
+      setForm(emptyForm);
       onAdded();
-      onClose();
+      handleClose();
     } catch {
       addToast("Failed to add check-in", "error");
     } finally {
@@ -286,7 +293,7 @@ function AddCheckinModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Check-in">
+    <Modal open={open} onClose={handleClose} title="Add Check-in">
       <div className="flex flex-col gap-3">
         <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
         <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
@@ -310,7 +317,7 @@ function AddCheckinModal({
         <Input label="County" value={form.county} onChange={(e) => setForm((f) => ({ ...f, county: e.target.value }))} />
         <Input label="Comments" value={form.comments} onChange={(e) => setForm((f) => ({ ...f, comments: e.target.value }))} />
         <div className="flex justify-end gap-2 mt-2">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={handleClose}>Cancel</Button>
           <Button onClick={handleSave} loading={saving}>Add Check-in</Button>
         </div>
       </div>
@@ -434,41 +441,44 @@ export function CheckInsPage() {
 
   const userCanEdit = user ? canEdit(user.role) : false;
 
-  // Load sessions
+  const initialSessionParam = searchParams.get("session");
+
+  const loadSessions = useCallback(async (extraSessionId?: number) => {
+    const all = await fetchRecentSessions();
+    const sorted = [...all].sort((a, b) => b.start_date.localeCompare(a.start_date));
+
+    // Find the next scheduled session
+    const now = new Date().toISOString().split("T")[0]!;
+    const nextScheduled = sorted
+      .filter((s) => s.status === "scheduled" && s.start_date >= now)
+      .pop(); // earliest future scheduled
+
+    // Take 7 most recent
+    const recent = sorted.slice(0, 7);
+
+    // Merge: include nextScheduled if not already in recent
+    const sessionMap = new Map(recent.map((s) => [s.id, s]));
+    if (nextScheduled) sessionMap.set(nextScheduled.id, nextScheduled);
+
+    // Include extra session (from query param or current selection)
+    const extraId = extraSessionId ?? (initialSessionParam ? Number(initialSessionParam) : null);
+    if (extraId) {
+      const extra = sorted.find((s) => s.id === extraId);
+      if (extra) sessionMap.set(extra.id, extra);
+    }
+
+    const finalSessions = [...sessionMap.values()].sort((a, b) => b.start_date.localeCompare(a.start_date));
+    setSessions(finalSessions);
+    return { finalSessions, nextScheduled };
+  }, [initialSessionParam]);
+
+  // Load sessions on mount
   useEffect(() => {
-    fetchRecentSessions()
-      .then((all) => {
-        // Sort by start_date desc
-        const sorted = [...all].sort((a, b) => b.start_date.localeCompare(a.start_date));
-
-        // Find the next scheduled session
-        const now = new Date().toISOString().split("T")[0]!;
-        const nextScheduled = sorted
-          .filter((s) => s.status === "scheduled" && s.start_date >= now)
-          .pop(); // earliest future scheduled
-
-        // Take 7 most recent
-        const recent = sorted.slice(0, 7);
-
-        // Merge: include nextScheduled if not already in recent
-        const sessionMap = new Map(recent.map((s) => [s.id, s]));
-        if (nextScheduled) sessionMap.set(nextScheduled.id, nextScheduled);
-
-        // Check for ?session= param
-        const paramId = searchParams.get("session");
-        if (paramId) {
-          const paramSession = sorted.find((s) => s.id === Number(paramId));
-          if (paramSession) sessionMap.set(paramSession.id, paramSession);
-        }
-
-        // Sort final list by date desc
-        const finalSessions = [...sessionMap.values()].sort((a, b) => b.start_date.localeCompare(a.start_date));
-        setSessions(finalSessions);
-
-        // Select default
+    loadSessions()
+      .then(({ finalSessions, nextScheduled }) => {
         let defaultId: number | null = null;
-        if (paramId) {
-          defaultId = Number(paramId);
+        if (initialSessionParam) {
+          defaultId = Number(initialSessionParam);
         } else if (nextScheduled) {
           defaultId = nextScheduled.id;
         } else {
@@ -479,7 +489,7 @@ export function CheckInsPage() {
       })
       .catch(() => addToast("Failed to load sessions", "error"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadSessions, addToast, initialSessionParam]);
 
   // Load checkins when session changes
   const loadCheckins = useCallback(async () => {
@@ -516,7 +526,7 @@ export function CheckInsPage() {
     try {
       const result = await scanMailbox(selectedSessionId);
       addToast(`Imported ${result.imported} check-in${result.imported !== 1 ? "s" : ""}`, "success");
-      loadCheckins();
+      await loadCheckins();
     } catch {
       addToast("Scan failed", "error");
     } finally {
@@ -530,14 +540,8 @@ export function CheckInsPage() {
     try {
       const result = await approveSession(selectedSessionId);
       addToast(`Session approved. ${result.members_updated} member records updated.`, "success");
-      // Refresh sessions list to get updated status
-      const all = await fetchRecentSessions();
-      const sorted = [...all].sort((a, b) => b.start_date.localeCompare(a.start_date));
-      const sessionMap = new Map(sorted.slice(0, 7).map((s) => [s.id, s]));
-      const paramSession = sorted.find((s) => s.id === selectedSessionId);
-      if (paramSession) sessionMap.set(paramSession.id, paramSession);
-      setSessions([...sessionMap.values()].sort((a, b) => b.start_date.localeCompare(a.start_date)));
-      loadCheckins();
+      await loadSessions(selectedSessionId);
+      await loadCheckins();
     } catch {
       addToast("Approve failed", "error");
     } finally {
