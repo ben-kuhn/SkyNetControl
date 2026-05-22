@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { fetchSessions } from "../api/schedule";
 import { Spinner } from "../components/Spinner";
 import type { Session } from "../types";
@@ -89,6 +90,12 @@ export function ScheduleList() {
               </span>
             )}
             <span>Grace: {session.grace_period_hours}h</span>
+            <Link
+              to={`/checkins?session=${session.id}`}
+              className="text-accent hover:text-accent-hover text-xs transition-colors"
+            >
+              View check-ins
+            </Link>
           </div>
         </div>
       ))}
