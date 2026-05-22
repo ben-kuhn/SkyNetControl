@@ -478,47 +478,6 @@ def update_draft(
     db.refresh(log)
     return log
 
-
-# ---------------------------------------------------------------------------
-# GeoJSON
-# ---------------------------------------------------------------------------
-
-
-def get_session_geojson(db: Session, session_id: int) -> dict:
-    """Return a GeoJSON FeatureCollection of check-ins with GPS coordinates."""
-    checkins = (
-        db.query(CheckIn)
-        .filter(
-            CheckIn.session_id == session_id,
-            CheckIn.latitude.isnot(None),
-            CheckIn.longitude.isnot(None),
-        )
-        .all()
-    )
-
-    features = []
-    for ci in checkins:
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [ci.longitude, ci.latitude],
-                },
-                "properties": {
-                    "name": ci.name,
-                    "callsign": ci.callsign,
-                    "is_new_member": ci.is_new_member,
-                },
-            }
-        )
-
-    return {
-        "type": "FeatureCollection",
-        "features": features,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Notification Stub
 # ---------------------------------------------------------------------------

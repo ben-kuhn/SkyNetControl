@@ -337,23 +337,3 @@ async def test_approve_non_draft_returns_409(admin_client, db_setup):
 
 # --- GeoJSON route ---
 
-
-@pytest.mark.anyio
-async def test_geojson_route(admin_client, db_setup):
-    sid = db_setup["net_session"].id
-    resp = await admin_client.get(f"/api/roster/session/{sid}/geojson")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["type"] == "FeatureCollection"
-    assert len(data["features"]) == 1
-    assert data["features"][0]["properties"]["callsign"] == "W0TST"
-
-
-@pytest.mark.anyio
-async def test_geojson_no_auth_required(app, db_setup):
-    """GeoJSON endpoint should work without authentication."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        sid = db_setup["net_session"].id
-        resp = await c.get(f"/api/roster/session/{sid}/geojson")
-        assert resp.status_code == 200

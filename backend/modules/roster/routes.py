@@ -12,7 +12,6 @@ from backend.modules.roster.service import (
     delete_template as delete_template_service,
     generate_draft as generate_draft_service,
     generate_due_drafts as generate_due_drafts_service,
-    get_session_geojson as get_session_geojson_service,
     get_template as get_template_service,
     list_templates as list_templates_service,
     mark_sent as mark_sent_service,
@@ -289,14 +288,3 @@ async def skip_roster_route(
     if log is None:
         raise HTTPException(status_code=409, detail="Roster not in skippable status")
     return _roster_to_response(log)
-
-
-# --- GeoJSON route (no auth) ---
-
-
-@roster_router.get("/session/{session_id}/geojson")
-async def geojson_route(
-    session_id: int,
-    db: Session = Depends(get_db_session),
-):
-    return get_session_geojson_service(db, session_id)

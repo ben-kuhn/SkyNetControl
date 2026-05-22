@@ -24,7 +24,6 @@ from backend.modules.roster.service import (
     mark_sent,
     skip_roster,
     update_draft,
-    get_session_geojson,
     notify_ncs,
 )
 
@@ -593,51 +592,6 @@ def test_update_draft_non_draft_fails(db, season_and_sessions, default_template)
     log = generate_draft(db, session1.id)
     approve_roster(db, log.id, "W0NE")
     assert update_draft(db, log.id, content_header="X") is None
-
-
-# --- GeoJSON ---
-
-
-def test_get_session_geojson(db, season_and_sessions):
-    _, session1, _, _ = season_and_sessions
-
-    ci1 = CheckIn(
-        session_id=session1.id,
-        callsign="W0GPS",
-        name="GPS Op",
-        mode="winlink",
-        parse_status=ParseStatus.AUTO,
-        timing_status=TimingStatus.ON_TIME,
-        is_new_member=False,
-        latitude=39.7392,
-        longitude=-104.9903,
-    )
-    ci2 = CheckIn(
-        session_id=session1.id,
-        callsign="W0NOG",
-        name="No GPS",
-        mode="winlink",
-        parse_status=ParseStatus.AUTO,
-        timing_status=TimingStatus.ON_TIME,
-        is_new_member=False,
-    )
-    db.add_all([ci1, ci2])
-    db.commit()
-
-    geojson = get_session_geojson(db, session1.id)
-    assert geojson["type"] == "FeatureCollection"
-    assert len(geojson["features"]) == 1
-    feat = geojson["features"][0]
-    assert feat["geometry"]["type"] == "Point"
-    assert feat["geometry"]["coordinates"] == [-104.9903, 39.7392]
-    assert feat["properties"]["callsign"] == "W0GPS"
-
-
-def test_get_session_geojson_empty(db, season_and_sessions):
-    _, session1, _, _ = season_and_sessions
-    geojson = get_session_geojson(db, session1.id)
-    assert geojson["type"] == "FeatureCollection"
-    assert geojson["features"] == []
 
 
 # --- Notify NCS stub ---
