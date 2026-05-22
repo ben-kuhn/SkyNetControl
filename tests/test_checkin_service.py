@@ -312,3 +312,41 @@ def test_approve_updates_existing_member(db, season_and_session):
 
     db.refresh(member)
     assert member.total_check_ins == 11
+
+
+def test_get_checkins_by_callsign_returns_all_sessions_desc(db):
+    """Returns (CheckIn, session_date) tuples for a callsign across sessions, newest first."""
+    from datetime import date, time
+    from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+    from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
+    from backend.modules.checkins.service import get_checkins_by_callsign
+
+    season = NetSeason(name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
+                       day_of_week=3, time=time(18, 0))
+    db.add(season); db.flush()
+    s1 = NetSession(season_id=season.id, start_date=date(2026, 1, 15),
+                    session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.COMPLETED)
+    s2 = NetSession(season_id=season.id, start_date=date(2026, 2, 15),
+                    session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.COMPLETED)
+    db.add_all([s1, s2]); db.commit()
+
+    db.add_all([
+        CheckIn(session_id=s1.id, callsign="W0NE", name="A", mode="Voice",
+                parse_status=ParseStatus.AUTO, timing_status=TimingStatus.ON_TIME, is_new_member=True),
+        CheckIn(session_id=s2.id, callsign="W0NE", name="A", mode="Winlink",
+                parse_status=ParseStatus.AUTO, timing_status=TimingStatus.ON_TIME, is_new_member=False),
+        CheckIn(session_id=s1.id, callsign="K0XYZ", name="B", mode="Voice",
+                parse_status=ParseStatus.AUTO, timing_status=TimingStatus.ON_TIME, is_new_member=True),
+    ])
+    db.commit()
+
+    rows = get_checkins_by_callsign(db, "W0NE")
+    # Newest first
+    assert [r[0].mode for r in rows] == ["Winlink", "Voice"]
+    assert [r[1] for r in rows] == [date(2026, 2, 15), date(2026, 1, 15)]
+
+    # Case-insensitive
+    rows_lower = get_checkins_by_callsign(db, "w0ne")
+    assert [r[0].id for r in rows_lower] == [r[0].id for r in rows]
+
+    assert get_checkins_by_callsign(db, "NOBODY") == []

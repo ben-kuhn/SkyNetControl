@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -243,3 +243,15 @@ def approve_session_checkins(db: Session, session_id: int) -> None:
         net_session.status = SessionStatus.COMPLETED
 
     db.commit()
+
+
+def get_checkins_by_callsign(db: Session, callsign: str) -> list[tuple[CheckIn, date]]:
+    """All check-ins for a callsign with their session date, newest first."""
+    normalized = callsign.upper()
+    return (
+        db.query(CheckIn, NetSession.start_date)
+        .join(NetSession, CheckIn.session_id == NetSession.id)
+        .filter(CheckIn.callsign == normalized)
+        .order_by(NetSession.start_date.desc(), CheckIn.id.desc())
+        .all()
+    )
