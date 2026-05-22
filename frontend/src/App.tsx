@@ -58,7 +58,6 @@ function AppRoutes() {
           }
         />
         <Route path="/checkins" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><CheckInsPage /></ProtectedRoute>} />
-        <Route path="/map" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><PlaceholderPage title="Map" /></ProtectedRoute>} />
         <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Reminders" /></ProtectedRoute>} />
         <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><PlaceholderPage title="Roster" /></ProtectedRoute>} />
         <Route path="/activities" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Activities" /></ProtectedRoute>} />
