@@ -276,3 +276,91 @@ async def test_viewer_cannot_update_roles(test_client, test_settings, db_setup):
     token = create_access_token("KD0TST", "viewer", test_settings)
     response = await test_client.patch("/api/auth/users/W0NE", json={"role": "viewer"}, cookies={"access_token": token})
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_optional_user_returns_none_without_cookie(test_app):
+    """get_optional_user returns None when no auth cookie is sent."""
+    from backend.auth.dependencies import get_optional_user
+
+    from fastapi import Request
+
+    async def receive():
+        return {"type": "http.request"}
+
+    scope = {
+        "type": "http",
+        "headers": [],
+        "app": test_app,
+        "state": {},
+    }
+    req = Request(scope, receive)
+
+    with test_app.state.session_factory() as session:
+        result = get_optional_user(
+            request=req,
+            access_token=None,
+            authorization=None,
+            db=session,
+            app_settings=test_app.state.settings,
+        )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_optional_user_returns_user_with_valid_cookie(test_app, test_settings):
+    """get_optional_user returns the user when a valid cookie is present."""
+    from backend.auth.dependencies import get_optional_user
+    from backend.auth.service import create_access_token
+    from fastapi import Request
+
+    with test_app.state.session_factory() as session:
+        user = User(
+            callsign="W0OPT",
+            oidc_subject="opt|sub",
+            name="Opt",
+            role=UserRole.VIEWER,
+        )
+        session.add(user)
+        session.commit()
+
+    token = create_access_token("W0OPT", "viewer", test_settings)
+    scope = {"type": "http", "headers": [], "app": test_app, "state": {}}
+
+    async def receive():
+        return {"type": "http.request"}
+
+    req = Request(scope, receive)
+    with test_app.state.session_factory() as session:
+        result = get_optional_user(
+            request=req,
+            access_token=token,
+            authorization=None,
+            db=session,
+            app_settings=test_settings,
+        )
+    assert result is not None
+    assert result.callsign == "W0OPT"
+
+
+@pytest.mark.asyncio
+async def test_get_optional_user_returns_none_with_invalid_cookie(test_app, test_settings):
+    """get_optional_user returns None when the cookie is malformed/expired."""
+    from backend.auth.dependencies import get_optional_user
+    from fastapi import Request
+
+    scope = {"type": "http", "headers": [], "app": test_app, "state": {}}
+
+    async def receive():
+        return {"type": "http.request"}
+
+    req = Request(scope, receive)
+    with test_app.state.session_factory() as session:
+        result = get_optional_user(
+            request=req,
+            access_token="not-a-real-jwt",
+            authorization=None,
+            db=session,
+            app_settings=test_settings,
+        )
+    assert result is None

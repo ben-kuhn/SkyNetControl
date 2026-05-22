@@ -63,6 +63,30 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    request: Request,
+    access_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
+) -> User | None:
+    """Like get_current_user, but returns None instead of raising 401.
+
+    Used by routes that have both authenticated and anonymous behavior.
+    DELETED users are treated as anonymous.
+    """
+    try:
+        return get_current_user(
+            request=request,
+            access_token=access_token,
+            authorization=authorization,
+            db=db,
+            app_settings=app_settings,
+        )
+    except HTTPException:
+        return None
+
+
 def require_role(*roles: UserRole) -> Callable:
     def dependency(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
