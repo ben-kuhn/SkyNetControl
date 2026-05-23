@@ -102,6 +102,44 @@ def require_not_pending(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def optional_user_with_scope(*scopes: str) -> Callable:
+    """Like get_optional_user, but enforces PAT token scopes when a Bearer token is used.
+
+    Cookie auth bypasses scope checks (matching require_scope behavior).
+    Anonymous (no token at all) returns None.
+    """
+    def dependency(
+        request: Request,
+        access_token: str | None = Cookie(default=None),
+        authorization: str | None = Header(default=None),
+        db: Session = Depends(get_db_session),
+        app_settings: Settings = Depends(get_settings),
+    ) -> User | None:
+        try:
+            user = get_current_user(
+                request=request,
+                access_token=access_token,
+                authorization=authorization,
+                db=db,
+                app_settings=app_settings,
+            )
+        except HTTPException:
+            return None
+
+        token_scopes = getattr(request.state, "token_scopes", None)
+        if token_scopes is not None:
+            for scope in scopes:
+                if scope not in token_scopes:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Token missing required scope: {scope}",
+                    )
+
+        return user
+
+    return dependency
+
+
 def require_scope(*scopes: str) -> Callable:
     def dependency(request: Request, user: User = Depends(get_current_user)) -> User:
         token_scopes = getattr(request.state, "token_scopes", None)

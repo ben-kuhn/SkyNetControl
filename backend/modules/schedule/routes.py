@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, require_role, require_scope
+from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, optional_user_with_scope, require_role, require_scope
 from backend.auth.models import User, UserRole
 from backend.config_mgmt.service import get_config_value
 from backend.modules.schedule.models import (
@@ -213,7 +213,7 @@ async def create_session_route(
 async def list_sessions_route(
     season_id: int | None = Query(default=None),
     status: str | None = Query(default=None),
-    user: User | None = Depends(get_optional_user),
+    user: User | None = Depends(optional_user_with_scope("schedule:read")),
     db: Session = Depends(get_db_session),
 ):
     status_enum = None
