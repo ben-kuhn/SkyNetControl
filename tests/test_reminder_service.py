@@ -570,3 +570,96 @@ def test_update_draft_non_draft_returns_none(db: Session, season_and_sessions):
     # Cannot edit an approved reminder
     result = update_draft(db, log.id, content_subject="Should Fail")
     assert result is None
+
+
+# --- Regenerate draft tests ---
+
+
+def test_regenerate_draft_rewrites_subject_and_body(db: Session, season_and_sessions):
+    """regenerate_draft re-renders against the current session and template."""
+    from backend.modules.reminders.service import regenerate_draft
+
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Activity Default",
+        template_type=TemplateType.ACTIVITY,
+        subject_template="{{ activity_title }} — {{ date }}",
+        body_template="Activity: {{ activity_title }}. Notes: {{ activity_instructions }}",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session2.id)
+    assert log is not None
+
+    log.content_subject = "Edited subject"
+    log.content_body = "Edited body"
+    db.commit()
+
+    result = regenerate_draft(db, log.id)
+    assert result is not None
+    assert result.id == log.id
+    assert result.content_subject != "Edited subject"
+    assert "Simplex Exercise" in result.content_subject
+    assert "Tune to 146.520" in result.content_body
+
+
+def test_regenerate_draft_picks_up_activity_change(db: Session, season_and_sessions):
+    """If the session's activity changes after generation, regenerate reflects it."""
+    from backend.modules.reminders.service import regenerate_draft
+
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        name="Activity Default",
+        template_type=TemplateType.ACTIVITY,
+        subject_template="{{ activity_title }} — {{ date }}",
+        body_template="Activity: {{ activity_title }}. {{ activity_instructions }}",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session2.id)
+    assert log is not None
+    assert "Simplex Exercise" in log.content_subject
+
+    new_activity = Activity(
+        title="Direction Finding",
+        description="DF drill",
+        instructions="Bring a directional antenna and a portable rig.",
+    )
+    db.add(new_activity)
+    db.flush()
+    session2.activity_id = new_activity.id
+    db.commit()
+
+    result = regenerate_draft(db, log.id)
+    assert result is not None
+    assert "Direction Finding" in result.content_subject
+    assert "Bring a directional antenna" in result.content_body
+
+
+def test_regenerate_draft_returns_none_when_not_draft(db: Session, season_and_sessions):
+    """Approved/sent/skipped reminders can't be regenerated."""
+    from backend.modules.reminders.service import regenerate_draft
+
+    season, session1, _, _ = season_and_sessions
+    create_template(
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net {{ date }}",
+        body_template="Body",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id)
+    approve_reminder(db, log.id, approver_callsign="W0NE")
+
+    result = regenerate_draft(db, log.id)
+    assert result is None
+
+
+def test_regenerate_draft_returns_none_when_missing(db: Session):
+    from backend.modules.reminders.service import regenerate_draft
+
+    assert regenerate_draft(db, 999) is None

@@ -384,3 +384,41 @@ def update_draft(
     db.commit()
     db.refresh(log)
     return log
+
+
+def regenerate_draft(db: Session, reminder_id: int) -> ReminderLog | None:
+    """Re-render a DRAFT reminder against the current session + template.
+
+    Returns the updated log, or None if the reminder is missing or not in DRAFT status.
+    """
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or log.status != ReminderStatus.DRAFT:
+        return None
+
+    net_session = db.get(NetSession, log.session_id)
+    if net_session is None:
+        return None
+
+    template = None
+    if log.template_id is not None:
+        template = db.get(ReminderTemplate, log.template_id)
+    if template is None:
+        tmpl_type = _session_type_to_template_type(net_session.session_type)
+        template = (
+            db.query(ReminderTemplate)
+            .filter(
+                ReminderTemplate.template_type == tmpl_type,
+                ReminderTemplate.is_default.is_(True),
+            )
+            .first()
+        )
+    if template is None:
+        return None
+
+    context = build_template_context(db, net_session)
+    subject, body = render_reminder(template, context)
+    log.content_subject = subject
+    log.content_body = body
+    db.commit()
+    db.refresh(log)
+    return log
