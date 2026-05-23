@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_role, require_scope
+from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, require_role, require_scope
 from backend.auth.models import User, UserRole
 from backend.config_mgmt.service import get_config_value
 from backend.modules.schedule.models import (
@@ -213,7 +213,7 @@ async def create_session_route(
 async def list_sessions_route(
     season_id: int | None = Query(default=None),
     status: str | None = Query(default=None),
-    user: User = Depends(require_scope("schedule:read")),
+    user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db_session),
 ):
     status_enum = None
@@ -222,6 +222,10 @@ async def list_sessions_route(
             status_enum = SessionStatus(status)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+    # Anonymous viewers see only COMPLETED sessions
+    if user is None:
+        status_enum = SessionStatus.COMPLETED
 
     sessions = list_sessions_service(db, season_id=season_id, status=status_enum)
     return [_session_to_response(s) for s in sessions]

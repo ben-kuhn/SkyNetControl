@@ -365,3 +365,72 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
         cookies={"access_token": viewer_token},
     )
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_public_completed_only(test_client, test_settings, db_setup):
+    """Anonymous viewers only see COMPLETED sessions."""
+    from backend.modules.schedule.models import SessionStatus
+
+    admin_token = create_access_token("W0NE", "admin", test_settings)
+
+    # Create a season with multiple sessions
+    season_resp = await test_client.post(
+        "/api/schedule/seasons",
+        json={
+            "name": "Fall 2026",
+            "start_date": "2026-09-03",
+            "end_date": "2026-09-10",
+            "day_of_week": 3,
+            "time": "19:00",
+        },
+        cookies={"access_token": admin_token},
+    )
+    season_id = season_resp.json()["id"]
+
+    # Get the created sessions and mark some as completed
+    with db_setup() as session:
+        from backend.modules.schedule.models import NetSession
+        sessions = session.query(NetSession).filter_by(season_id=season_id).all()
+        if len(sessions) >= 2:
+            sessions[0].status = SessionStatus.COMPLETED
+            sessions[1].status = SessionStatus.SCHEDULED
+            session.commit()
+
+    # Anonymous call should only see COMPLETED
+    resp = await test_client.get("/api/schedule/sessions")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Should see at least one completed session from the season
+    completed = [s for s in body if s["status"] == "completed"]
+    assert len(completed) >= 1
+    # Should not see scheduled sessions
+    scheduled = [s for s in body if s["status"] == "scheduled"]
+    assert len(scheduled) == 0
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_authenticated_sees_all(test_client, test_settings, db_setup):
+    """Authenticated callers see all session statuses."""
+    admin_token = create_access_token("W0NE", "admin", test_settings)
+
+    # Create a season with multiple sessions
+    season_resp = await test_client.post(
+        "/api/schedule/seasons",
+        json={
+            "name": "Fall 2026",
+            "start_date": "2026-09-03",
+            "end_date": "2026-09-10",
+            "day_of_week": 3,
+            "time": "19:00",
+        },
+        cookies={"access_token": admin_token},
+    )
+    season_id = season_resp.json()["id"]
+
+    # Authenticated user should see all
+    resp = await test_client.get("/api/schedule/sessions", cookies={"access_token": admin_token})
+    assert resp.status_code == 200
+    body = resp.json()
+    # Authenticated users are not constrained to completed
+    assert len(body) >= 2  # At least some sessions from the season

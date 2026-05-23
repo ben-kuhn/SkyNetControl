@@ -526,10 +526,11 @@ export function CheckInsPage() {
   }, [initialSessionParam]);
 
   useEffect(() => {
+    if (!user) return;
     fetchModes()
       .then(setModes)
       .catch(() => {});
-  }, []);
+  }, [user]);
 
   // Load sessions on mount
   useEffect(() => {
