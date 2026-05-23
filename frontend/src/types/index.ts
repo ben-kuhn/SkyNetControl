@@ -121,3 +121,29 @@ export const SCOPES: Record<string, { description: string; minRole: UserRole }> 
   "config:read":    { description: "View app configuration",    minRole: "admin" },
   "config:write":   { description: "Modify app configuration",  minRole: "admin" },
 };
+
+export type ReminderStatus = "draft" | "approved" | "sent" | "skipped";
+export type ReminderTemplateType = "regular_checkin" | "activity";
+
+export interface Reminder {
+  id: number;
+  session_id: number;
+  template_id: number | null;
+  status: ReminderStatus;
+  content_subject: string;
+  content_body: string;
+  drafted_at: string;
+  approved_at: string | null;
+  sent_at: string | null;
+  approved_by: string | null;
+}
+
+export interface ReminderTemplate {
+  id: number;
+  name: string;
+  template_type: ReminderTemplateType;
+  subject_template: string;
+  body_template: string;
+  lead_time_days: number;
+  is_default: boolean;
+}
