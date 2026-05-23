@@ -476,3 +476,106 @@ async def test_viewer_can_read_but_not_generate(test_client, test_settings, db_s
         cookies={"access_token": viewer_token},
     )
     assert response.status_code == 403
+
+
+# --- Regeneration tests ---
+
+
+@pytest.mark.asyncio
+async def test_regenerate_reminder_route_rewrites_draft(test_client, test_settings, db_setup):
+    """Net control can regenerate a draft from the current session and template."""
+    with db_setup() as session:
+        tmpl = ReminderTemplate(
+            name="Default Regular",
+            template_type=TemplateType.REGULAR_CHECKIN,
+            subject_template="Net on {{ date }}",
+            body_template="Check in on {{ date }}.",
+            lead_time_days=2,
+            is_default=True,
+        )
+        session.add(tmpl)
+        session.flush()
+
+        log = ReminderLog(
+            session_id=1,
+            template_id=None,
+            status=ReminderStatus.DRAFT,
+            content_subject="Stale subject",
+            content_body="Stale body",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        session.add(log)
+        session.commit()
+        log_id = log.id
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.post(
+        f"/api/reminders/{log_id}/regenerate",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == log_id
+    assert data["status"] == "draft"
+    assert data["content_subject"] != "Stale subject"
+    assert data["content_body"] != "Stale body"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_reminder_route_404_when_missing(test_client, test_settings):
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.post(
+        "/api/reminders/999/regenerate",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_regenerate_reminder_route_409_when_not_draft(test_client, test_settings, db_setup):
+    """Approved reminders can't be regenerated."""
+    with db_setup() as session:
+        log = ReminderLog(
+            session_id=1,
+            template_id=None,
+            status=ReminderStatus.APPROVED,
+            content_subject="Subject",
+            content_body="Body",
+            drafted_at=datetime.now(tz=timezone.utc),
+            approved_at=datetime.now(tz=timezone.utc),
+            approved_by="W0NE",
+        )
+        session.add(log)
+        session.commit()
+        log_id = log.id
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.post(
+        f"/api/reminders/{log_id}/regenerate",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_regenerate_reminder_route_requires_role(test_client, test_settings, db_setup):
+    """Viewer cannot regenerate."""
+    with db_setup() as session:
+        log = ReminderLog(
+            session_id=1,
+            template_id=None,
+            status=ReminderStatus.DRAFT,
+            content_subject="S",
+            content_body="B",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        session.add(log)
+        session.commit()
+        log_id = log.id
+
+    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    resp = await test_client.post(
+        f"/api/reminders/{log_id}/regenerate",
+        cookies={"access_token": viewer_token},
+    )
+    assert resp.status_code == 403

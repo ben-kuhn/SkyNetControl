@@ -13,6 +13,7 @@ from backend.modules.reminders.service import (
     generate_due_drafts,
     list_templates,
     mark_sent,
+    regenerate_draft,
     skip_reminder,
     update_draft,
     update_template,
@@ -258,4 +259,19 @@ async def skip_reminder_route(
     log = skip_reminder(db, reminder_id)
     if log is None:
         raise HTTPException(status_code=409, detail="Reminder not in skippable status")
+    return _reminder_to_response(log)
+
+
+@reminders_router.post("/{reminder_id}/regenerate")
+async def regenerate_reminder_route(
+    reminder_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = regenerate_draft(db, reminder_id)
+    if log is None:
+        existing = db.get(ReminderLog, reminder_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Reminder not found")
+        raise HTTPException(status_code=409, detail="Reminder not in draft status")
     return _reminder_to_response(log)
