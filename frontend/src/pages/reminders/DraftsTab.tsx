@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   approveReminder,
   fetchReminders,
+  generateReminderDraft,
+  regenerateReminderDraft,
   sendReminder,
   skipReminder,
   updateReminderDraft,
@@ -43,6 +45,7 @@ export function DraftsTab() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ReminderStatus>("draft");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
 
   const { addToast } = useToast();
 
@@ -85,6 +88,14 @@ export function DraftsTab() {
 
   return (
     <div>
+      <div className="flex justify-end mb-2">
+        <button
+          onClick={() => setShowGenerateModal(true)}
+          className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90"
+        >
+          + Generate draft
+        </button>
+      </div>
       <div className="flex gap-2 mb-3">
         {STATUSES.map((s) => (
           <button
@@ -181,6 +192,22 @@ export function DraftsTab() {
           )}
         </div>
       )}
+      {showGenerateModal && (
+        <GenerateModal
+          sessions={sessions.filter((s) => s.status === "scheduled")}
+          onClose={() => setShowGenerateModal(false)}
+          onGenerated={(generated) => {
+            setReminders((prev) => {
+              const exists = prev.some((r) => r.id === generated.id);
+              return exists ? prev.map((r) => (r.id === generated.id ? generated : r)) : [generated, ...prev];
+            });
+            setStatusFilter("draft");
+            setSelectedId(generated.id);
+            setShowGenerateModal(false);
+          }}
+          onError={(msg) => addToast(msg, "error")}
+        />
+      )}
     </div>
   );
 }
@@ -259,6 +286,19 @@ function DetailPanel({
     }
   };
 
+  const handleRegenerate = async () => {
+    if (!confirm("Replace the current subject and body with a fresh render? Any unsaved edits will be lost.")) {
+      return;
+    }
+    try {
+      const updated = await regenerateReminderDraft(reminder.id);
+      onChanged(updated);
+      onInfo("Reminder regenerated.");
+    } catch (e: any) {
+      onError(e?.detail ?? e?.message ?? "Regenerate failed");
+    }
+  };
+
   return (
     <div className="border border-border rounded-lg p-4 bg-bg-surface">
       <div className="flex items-start justify-between mb-3 pb-3 border-b border-border">
@@ -314,6 +354,9 @@ function DetailPanel({
             <button onClick={handleSave} className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90">
               Save draft
             </button>
+            <button onClick={handleRegenerate} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
+              Regenerate from template
+            </button>
             <button onClick={handleApprove} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
               Approve
             </button>
@@ -329,6 +372,75 @@ function DetailPanel({
             Skip
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function GenerateModal({
+  sessions,
+  onClose,
+  onGenerated,
+  onError,
+}: {
+  sessions: Session[];
+  onClose: () => void;
+  onGenerated: (r: Reminder) => void;
+  onError: (msg: string) => void;
+}) {
+  const [sessionId, setSessionId] = useState<number | "">("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (sessionId === "") return;
+    setSubmitting(true);
+    try {
+      const generated = await generateReminderDraft(Number(sessionId));
+      onGenerated(generated);
+    } catch (e: any) {
+      onError(e?.detail ?? e?.message ?? "Generate failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold text-text-primary mb-3">Generate reminder draft</h3>
+        <label className="block text-xs uppercase tracking-wider text-text-muted font-semibold mb-1">Session</label>
+        <select
+          value={sessionId}
+          onChange={(e) => setSessionId(e.target.value === "" ? "" : Number(e.target.value))}
+          className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg-elevated text-text-primary mb-4"
+        >
+          <option value="">Select a scheduled session…</option>
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {new Date(s.start_date).toLocaleDateString(undefined, {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+              })}
+            </option>
+          ))}
+        </select>
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={sessionId === "" || submitting}
+            className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            {submitting ? "Generating…" : "Generate"}
+          </button>
+        </div>
       </div>
     </div>
   );
