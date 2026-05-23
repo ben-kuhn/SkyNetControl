@@ -56,6 +56,7 @@ Body when `status === "draft"`:
 - Editable `<input>` for `content_subject`
 - Editable `<textarea>` for `content_body` (large, monospace, plain text editor — no markdown preview in v1)
 - "Save draft" button — calls `PATCH /api/reminders/{id}` with the changed fields, refreshes the list
+- "Regenerate from template" button — re-renders the subject and body against the current session and its assigned activity. Calls `POST /api/reminders/{id}/regenerate`. Shows a confirm dialog ("Replace the current subject and body with a fresh render? Any unsaved edits will be lost.") before sending. On success the panel fields update to the re-rendered content. Useful when an activity is assigned/changed after the draft was originally generated.
 - "Approve" button — calls `POST /api/reminders/{id}/approve`
 - "Skip" button — calls `POST /api/reminders/{id}/skip`
 
@@ -99,8 +100,9 @@ Delete button: calls `DELETE /api/reminders/templates/{id}`. Backend rejects if 
 
 ## Backend
 
-**No backend changes needed.** All endpoints exist:
+Most endpoints already exist. One new endpoint is added to support the regenerate affordance.
 
+**Existing:**
 - `GET /api/reminders/` (list, optional status filter)
 - `GET /api/reminders/session/{session_id}` (single, not strictly needed by this page but available)
 - `PATCH /api/reminders/{id}` (edit draft)
@@ -110,6 +112,13 @@ Delete button: calls `DELETE /api/reminders/templates/{id}`. Backend rejects if 
 - `POST /api/reminders/generate/{session_id}` (manual generation)
 - `GET/POST/PATCH/DELETE /api/reminders/templates` (template CRUD)
 
+**New:**
+- `POST /api/reminders/{id}/regenerate` (admin / net_control). Re-renders the draft from the current session state and template, overwriting `content_subject` and `content_body`. Returns 409 if the reminder is not in `draft` status (you can only regenerate while still editable). Returns 404 if the reminder doesn't exist. Backend implementation: a new service function `regenerate_draft(db, reminder_id)` that:
+  1. Fetches the `ReminderLog`. If missing → return None (route → 404). If status ≠ DRAFT → return None with a sentinel (route → 409).
+  2. Loads the session and the original template (via `log.template_id`; if null, fall back to the default template for the session's type — same logic as `generate_draft`).
+  3. Calls `build_template_context(db, net_session)` and `render_reminder(template, context)` to get the fresh subject/body.
+  4. Writes them onto the existing log, commits, returns the updated log.
+
 The page reuses the existing `fetchRecentSessions` from `frontend/src/api/schedule.ts` for the session picker in the "Generate draft" modal.
 
 ## Frontend file structure
@@ -118,7 +127,7 @@ The page reuses the existing `fetchRecentSessions` from `frontend/src/api/schedu
 
 | File | Responsibility |
 |------|---------------|
-| `frontend/src/api/reminders.ts` | API client: `fetchReminders`, `fetchTemplates`, `updateReminderDraft`, `approveReminder`, `sendReminder`, `skipReminder`, `generateReminderDraft`, `createTemplate`, `updateTemplate`, `deleteTemplate` |
+| `frontend/src/api/reminders.ts` | API client: `fetchReminders`, `fetchTemplates`, `updateReminderDraft`, `approveReminder`, `sendReminder`, `skipReminder`, `regenerateReminderDraft`, `generateReminderDraft`, `createTemplate`, `updateTemplate`, `deleteTemplate` |
 | `frontend/src/pages/RemindersPage.tsx` | Top-level page with tab switcher; thin shell that mounts the two tab components |
 | `frontend/src/pages/reminders/DraftsTab.tsx` | Drafts list + sub-tabs + detail panel + generate modal |
 | `frontend/src/pages/reminders/TemplatesTab.tsx` | Templates table + form modal |
@@ -197,7 +206,9 @@ export interface ReminderTemplate {
 
 ## Testing
 
-Backend: no changes, no new tests required (existing tests cover the API).
+Backend tests for the new regenerate endpoint:
+- `tests/test_reminder_service.py`: tests for `regenerate_draft` — happy path (rewrites subject/body), 409 equivalent for non-draft status (returns sentinel), 404 equivalent for missing log, regenerates against new activity if the session's activity changed between generation and regenerate.
+- `tests/test_reminder_routes.py`: tests for `POST /api/reminders/{id}/regenerate` — 200 on draft, 409 on non-draft, 404 on missing, auth required (admin/net_control).
 
 Frontend:
 - `tsc --noEmit` passes.
