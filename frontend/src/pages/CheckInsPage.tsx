@@ -484,8 +484,15 @@ export function CheckInsPage() {
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
   const [selectedCheckinId, setSelectedCheckinId] = useState<number | null>(null);
   const [modes, setModes] = useState<string[]>(["Voice", "Winlink", "CW", "Digital"]);
+  const [notPublic, setNotPublic] = useState(false);
 
   const userCanEdit = user ? canEdit(user.role) : false;
+
+  // Filter sessions: anonymous users can only see completed sessions
+  const visibleSessions = useMemo(() => {
+    if (user) return sessions;
+    return sessions.filter((s) => s.status === "completed");
+  }, [sessions, user]);
 
   const initialSessionParam = searchParams.get("session");
 
@@ -531,30 +538,44 @@ export function CheckInsPage() {
         let defaultId: number | null = null;
         if (initialSessionParam) {
           defaultId = Number(initialSessionParam);
-        } else if (nextScheduled) {
-          defaultId = nextScheduled.id;
+        } else if (user) {
+          // Authenticated users: prefer next scheduled, then recent
+          if (nextScheduled) {
+            defaultId = nextScheduled.id;
+          } else {
+            const recentCompleted = finalSessions.find((s) => s.status === "completed");
+            defaultId = recentCompleted?.id ?? finalSessions[0]?.id ?? null;
+          }
         } else {
+          // Anonymous users: only show completed sessions
           const recentCompleted = finalSessions.find((s) => s.status === "completed");
-          defaultId = recentCompleted?.id ?? finalSessions[0]?.id ?? null;
+          defaultId = recentCompleted?.id ?? null;
         }
         setSelectedSessionId(defaultId);
       })
       .catch(() => addToast("Failed to load sessions", "error"))
       .finally(() => setLoading(false));
-  }, [loadSessions, addToast, initialSessionParam]);
+  }, [loadSessions, addToast, initialSessionParam, user]);
 
   // Load checkins when session changes
   const loadCheckins = useCallback(async () => {
     if (!selectedSessionId) {
       setCheckins([]);
+      setNotPublic(false);
       return;
     }
     setCheckinsLoading(true);
+    setNotPublic(false);
     try {
       const data = await fetchSessionCheckins(selectedSessionId);
       setCheckins(data);
-    } catch {
-      addToast("Failed to load check-ins", "error");
+    } catch (err: any) {
+      if (err?.status === 404) {
+        setNotPublic(true);
+        setCheckins([]);
+      } else {
+        addToast("Failed to load check-ins", "error");
+      }
     } finally {
       setCheckinsLoading(false);
     }
@@ -618,7 +639,7 @@ export function CheckInsPage() {
     <div>
       <h1 className="text-xl font-bold text-text-primary mb-4">Check-ins</h1>
 
-      <SessionSelector sessions={sessions} selectedId={selectedSessionId} onChange={handleSessionChange} />
+      <SessionSelector sessions={visibleSessions} selectedId={selectedSessionId} onChange={handleSessionChange} />
 
       {userCanEdit && selectedSessionId && (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -648,9 +669,13 @@ export function CheckInsPage() {
         </div>
       )}
 
-      {selectedSessionId && !checkinsLoading && <StatsBar checkins={checkins} />}
+      {selectedSessionId && !checkinsLoading && !notPublic && <StatsBar checkins={checkins} />}
 
-      {checkinsLoading ? (
+      {notPublic ? (
+        <p className="text-text-muted text-sm py-8 text-center">
+          This session is not yet available for public viewing.
+        </p>
+      ) : checkinsLoading ? (
         <div className="flex justify-center py-8">
           <Spinner />
         </div>
