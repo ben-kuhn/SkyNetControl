@@ -24,6 +24,7 @@ from backend.modules.roster.service import (
     mark_sent,
     skip_roster,
     update_draft,
+    regenerate_draft,
     notify_ncs,
 )
 
@@ -583,6 +584,74 @@ def test_update_draft_non_draft_fails(db, season_and_sessions, default_template)
     log = generate_draft(db, session1.id)
     approve_roster(db, log.id, "W0NE")
     assert update_draft(db, log.id, content_header="X") is None
+
+
+# --- Regenerate Draft ---
+
+
+def test_regenerate_roster_draft_rewrites_all_sections(db, season_and_sessions, default_template):
+    """regenerate_draft re-renders all five content fields and session_url."""
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    assert log is not None
+
+    log.content_subject = "Edited subject"
+    log.content_header = "Edited header"
+    log.content_welcome = "Edited welcome"
+    log.content_comments = "Edited comments"
+    log.content_footer = "Edited footer"
+    log.session_url = "https://stale.example/checkins?session=999"
+    db.commit()
+
+    result = regenerate_draft(db, log.id)
+    assert result is not None
+    assert result.id == log.id
+    assert result.content_subject != "Edited subject"
+    assert result.content_header != "Edited header"
+    assert result.content_welcome != "Edited welcome"
+    assert result.content_comments != "Edited comments"
+    assert result.content_footer != "Edited footer"
+    assert result.session_url is not None
+    assert "/checkins?session=" in result.session_url
+
+
+def test_regenerate_roster_draft_picks_up_new_checkins(db, season_and_sessions, default_template):
+    """If check-ins are added after generation, regenerate reflects them."""
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    assert log is not None
+
+    db.add(CheckIn(
+        session_id=session1.id,
+        callsign="W0NEW",
+        name="New Person",
+        mode="winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=True,
+    ))
+    db.commit()
+
+    result = regenerate_draft(db, log.id)
+    assert result is not None
+    combined = (
+        result.content_header + result.content_welcome
+        + result.content_comments + result.content_footer
+    )
+    assert "W0NEW" in combined or "New Person" in combined
+
+
+def test_regenerate_roster_draft_returns_none_when_not_draft(db, season_and_sessions, default_template):
+    """Approved/sent/skipped rosters can't be regenerated."""
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    approve_roster(db, log.id, "W0NE")
+
+    assert regenerate_draft(db, log.id) is None
+
+
+def test_regenerate_roster_draft_returns_none_when_missing(db):
+    assert regenerate_draft(db, 999) is None
 
 
 # --- Notify NCS stub ---

@@ -474,6 +474,40 @@ def update_draft(
     db.refresh(log)
     return log
 
+
+def regenerate_draft(db: Session, roster_id: int) -> RosterLog | None:
+    """Re-render a DRAFT roster against the current session, check-ins, and template.
+
+    Returns the updated log, or None if the roster is missing or not in DRAFT status.
+    """
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status != RosterStatus.DRAFT:
+        return None
+
+    net_session = db.get(NetSession, log.session_id)
+    if net_session is None:
+        return None
+
+    template = None
+    if log.template_id is not None:
+        template = db.get(RosterTemplate, log.template_id)
+    if template is None:
+        template = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True)).first()
+    if template is None:
+        return None
+
+    context = build_roster_context(db, net_session)
+    sections = render_roster(template, context)
+    log.content_subject = sections["subject"]
+    log.content_header = sections["header"]
+    log.content_welcome = sections["welcome"]
+    log.content_comments = sections["comments"]
+    log.content_footer = sections["footer"]
+    log.session_url = context["session_url"] or None
+    db.commit()
+    db.refresh(log)
+    return log
+
 # ---------------------------------------------------------------------------
 # Notification Stub
 # ---------------------------------------------------------------------------
