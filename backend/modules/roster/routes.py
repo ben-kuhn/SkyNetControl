@@ -152,7 +152,7 @@ async def update_template_route(
 @roster_router.delete("/templates/{template_id}", status_code=204)
 async def delete_template_route(
     template_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = get_template_service(db, template_id)
