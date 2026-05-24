@@ -15,6 +15,7 @@ from backend.modules.roster.service import (
     get_template as get_template_service,
     list_templates as list_templates_service,
     mark_sent as mark_sent_service,
+    regenerate_draft as regenerate_draft_service,
     skip_roster as skip_roster_service,
     update_draft as update_draft_service,
     update_template as update_template_service,
@@ -287,4 +288,19 @@ async def skip_roster_route(
     log = skip_roster_service(db, roster_id)
     if log is None:
         raise HTTPException(status_code=409, detail="Roster not in skippable status")
+    return _roster_to_response(log)
+
+
+@roster_router.post("/{roster_id}/regenerate")
+async def regenerate_roster_route(
+    roster_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = regenerate_draft_service(db, roster_id)
+    if log is None:
+        existing = db.get(RosterLog, roster_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Roster not found")
+        raise HTTPException(status_code=409, detail="Roster not in draft status")
     return _roster_to_response(log)

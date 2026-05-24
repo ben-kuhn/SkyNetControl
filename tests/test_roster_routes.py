@@ -335,5 +335,55 @@ async def test_approve_non_draft_returns_409(admin_client, db_setup):
     assert resp.status_code == 409
 
 
+@pytest.mark.anyio
+async def test_regenerate_roster_route_rewrites_draft(admin_client, db_setup):
+    """Net control / admin can regenerate a draft from the current state."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    rid = gen_resp.json()["id"]
+
+    with db_setup["factory"]() as session:
+        from backend.modules.roster.models import RosterLog
+        log = session.get(RosterLog, rid)
+        log.content_subject = "Stale subject"
+        session.commit()
+
+    resp = await admin_client.post(f"/api/roster/{rid}/regenerate")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == rid
+    assert data["status"] == "draft"
+    assert data["content_subject"] != "Stale subject"
+
+
+@pytest.mark.anyio
+async def test_regenerate_roster_route_404_when_missing(admin_client):
+    resp = await admin_client.post("/api/roster/9999/regenerate")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_regenerate_roster_route_409_when_not_draft(admin_client, db_setup):
+    """Approved rosters can't be regenerated."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    await admin_client.post(f"/api/roster/{rid}/approve")
+
+    resp = await admin_client.post(f"/api/roster/{rid}/regenerate")
+    assert resp.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_regenerate_roster_route_requires_role(viewer_client, admin_client, db_setup):
+    """Viewer cannot regenerate."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    rid = gen_resp.json()["id"]
+
+    resp = await viewer_client.post(f"/api/roster/{rid}/regenerate")
+    assert resp.status_code == 403
+
+
 # --- GeoJSON route ---
 
