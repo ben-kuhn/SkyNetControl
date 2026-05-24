@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   approveRoster,
   fetchRosters,
+  generateRosterDraft,
   previewRoster,
+  regenerateRosterDraft,
   sendRoster,
   skipRoster,
   updateRosterDraft,
@@ -45,6 +47,7 @@ export function DraftsTab() {
   const [statusFilter, setStatusFilter] = useState<RosterStatus>("draft");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
 
   const { addToast } = useToast();
 
@@ -96,6 +99,15 @@ export function DraftsTab() {
 
   return (
     <div>
+      <div className="flex justify-end mb-2">
+        <button
+          onClick={() => setShowGenerateModal(true)}
+          className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90"
+        >
+          + Generate draft
+        </button>
+      </div>
+
       <div className="flex gap-2 mb-3">
         {STATUSES.map((s) => (
           <button
@@ -197,6 +209,23 @@ export function DraftsTab() {
       {previewText !== null && (
         <PreviewModal text={previewText} onClose={() => setPreviewText(null)} />
       )}
+
+      {showGenerateModal && (
+        <GenerateModal
+          sessions={sessions.filter((s) => s.status === "completed")}
+          onClose={() => setShowGenerateModal(false)}
+          onGenerated={(generated) => {
+            setRosters((prev) => {
+              const exists = prev.some((r) => r.id === generated.id);
+              return exists ? prev.map((r) => (r.id === generated.id ? generated : r)) : [generated, ...prev];
+            });
+            setStatusFilter("draft");
+            setSelectedId(generated.id);
+            setShowGenerateModal(false);
+          }}
+          onError={(msg) => addToast(msg, "error")}
+        />
+      )}
     </div>
   );
 }
@@ -293,6 +322,19 @@ function DetailPanel({
     }
   };
 
+  const handleRegenerate = async () => {
+    if (!confirm("Replace all sections with a fresh render from current check-ins? Any unsaved edits will be lost.")) {
+      return;
+    }
+    try {
+      const updated = await regenerateRosterDraft(roster.id);
+      onChanged(updated);
+      onInfo("Roster regenerated.");
+    } catch (e: any) {
+      onError(e?.detail ?? e?.message ?? "Regenerate failed");
+    }
+  };
+
   return (
     <div className="border border-border rounded-lg p-4 bg-bg-surface">
       <div className="flex items-start justify-between mb-3 pb-3 border-b border-border">
@@ -342,6 +384,11 @@ function DetailPanel({
         <button onClick={onPreview} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
           Preview
         </button>
+        {isDraft && (
+          <button onClick={handleRegenerate} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
+            Regenerate from check-ins
+          </button>
+        )}
         {isDraft && (
           <button onClick={handleApprove} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
             Approve
@@ -436,6 +483,80 @@ function PreviewModal({ text, onClose }: { text: string; onClose: () => void }) 
         <pre className="flex-1 overflow-auto text-[0.8125rem] font-mono text-text-primary whitespace-pre-wrap">
           {text}
         </pre>
+      </div>
+    </div>
+  );
+}
+
+function GenerateModal({
+  sessions,
+  onClose,
+  onGenerated,
+  onError,
+}: {
+  sessions: Session[];
+  onClose: () => void;
+  onGenerated: (r: Roster) => void;
+  onError: (msg: string) => void;
+}) {
+  const [sessionId, setSessionId] = useState<number | "">("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const ordered = useMemo(
+    () => [...sessions].sort((a, b) => b.start_date.localeCompare(a.start_date)),
+    [sessions],
+  );
+
+  const handleSubmit = async () => {
+    if (sessionId === "") return;
+    setSubmitting(true);
+    try {
+      const generated = await generateRosterDraft(Number(sessionId));
+      onGenerated(generated);
+    } catch (e: any) {
+      onError(e?.detail ?? e?.message ?? "Generate failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold text-text-primary mb-3">Generate roster draft</h3>
+        <label className="block text-xs uppercase tracking-wider text-text-muted font-semibold mb-1">Session</label>
+        <select
+          value={sessionId}
+          onChange={(e) => setSessionId(e.target.value === "" ? "" : Number(e.target.value))}
+          className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg-elevated text-text-primary mb-4"
+        >
+          <option value="">Select a completed session…</option>
+          {ordered.map((s) => (
+            <option key={s.id} value={s.id}>
+              {new Date(s.start_date).toLocaleDateString(undefined, {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+              })}
+            </option>
+          ))}
+        </select>
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={sessionId === "" || submitting}
+            className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            {submitting ? "Generating…" : "Generate"}
+          </button>
+        </div>
       </div>
     </div>
   );
