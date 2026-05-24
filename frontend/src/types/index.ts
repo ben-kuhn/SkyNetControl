@@ -147,3 +147,34 @@ export interface ReminderTemplate {
   lead_time_days: number;
   is_default: boolean;
 }
+
+export type RosterStatus = "draft" | "approved" | "sent" | "skipped";
+
+export interface Roster {
+  id: number;
+  session_id: number;
+  template_id: number | null;
+  status: RosterStatus;
+  content_subject: string;
+  content_header: string;
+  content_welcome: string;
+  content_comments: string;
+  content_footer: string;
+  session_url: string | null;
+  drafted_at: string;
+  approved_at: string | null;
+  sent_at: string | null;
+  approved_by: string | null;
+}
+
+export interface RosterTemplate {
+  id: number;
+  name: string;
+  subject_template: string;
+  header_template: string;
+  welcome_template: string;
+  comments_template: string;
+  footer_template: string;
+  lead_time_days: number;
+  is_default: boolean;
+}
