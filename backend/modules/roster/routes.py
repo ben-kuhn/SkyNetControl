@@ -99,7 +99,7 @@ def _roster_to_response(log: RosterLog) -> dict:
 @roster_router.post("/templates", status_code=201)
 async def create_template_route(
     body: TemplateCreate,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = create_template_service(
@@ -129,7 +129,7 @@ async def list_templates_route(
 async def update_template_route(
     template_id: int,
     body: TemplateUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = update_template_service(
