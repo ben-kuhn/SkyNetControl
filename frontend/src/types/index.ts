@@ -194,3 +194,35 @@ export interface Notification {
   created_at: string;
   read_at: string | null;
 }
+
+export interface ActivityTag {
+  id: number;
+  name: string;
+}
+
+export interface Activity {
+  id: number;
+  title: string;
+  description: string;
+  instructions: string;
+  is_default: boolean;
+  created_at: string;
+  last_used_at: string | null;
+  tags: ActivityTag[];
+}
+
+export type ChatMessageRole = "user" | "assistant";
+
+export interface ChatMessage {
+  id: number;
+  role: ChatMessageRole;
+  content: string;
+  created_at: string;
+}
+
+export interface ChatSession {
+  id: number;
+  activity_id: number | null;
+  created_at: string;
+  messages: ChatMessage[];
+}
