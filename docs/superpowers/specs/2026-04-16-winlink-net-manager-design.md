@@ -383,21 +383,26 @@ Summer weeks: same flow, but the schedule pattern is week-long rather than singl
 
 ## Implementation Status
 
-_As of 2026-05-22._
+_As of 2026-05-26._
 
-The backend covers all eight modules end-to-end. The remaining work is mostly on the frontend, where several net-control workflows are still placeholder pages even though their backend APIs are complete.
+All eight modules are now built end-to-end. The six originally-identified gaps have all been closed.
 
-### Gaps
+### Recently completed
 
-Ordered roughly easiest to hardest:
+In rough order of completion:
 
-1. **Members directory page** (frontend only) — `GET /api/checkins/members` returns the long-term roster, but `/members` has no UI. Spec calls for "browsable in the UI with search and filter."
-2. **Public shareable map page** (frontend + minor backend) — `GET /api/roster/session/{id}/geojson` is already public, but the URL embedded in rosters returns raw JSON. Need an unauthenticated HTML page that renders a Leaflet map from the GeoJSON, and point `map_url` at it.
-3. **Reminders review page** (frontend only) — backend has draft generation, edit, approve, send-via-delivery, and skip. `/reminders` is a placeholder. Net control needs a UI to review, edit, approve, and send drafts.
-4. **Roster review page** (frontend only) — backend has draft assembly, edit, approve, send-via-delivery, and skip. `/roster` is a placeholder. Net control needs a preview/edit/approve UI.
-5. **In-app notification system** (backend + frontend) — `backend/modules/roster/service.py` has a `notify_ncs` stub. Spec calls for in-app notification to net control when a draft is ready for review (reminders, check-ins, rosters).
-6. **Activities page with Claude chat** (frontend only, largest scope) — backend has full CRUD on `Activity`/`ActivityTag` plus a chat-driven brainstorm API (`POST /api/activities/chat/...`). `/activities` is a placeholder. Needs library browse + chat UI.
+1. **Members directory page** — `/members` shows a sortable, searchable table of the long-term roster with a slide-in detail panel showing each member's check-in history. Backed by `GET /api/checkins/by-callsign/{callsign}`.
+2. **Public check-ins** — `/checkins` is now viewable without auth for `completed` sessions; the geojson-only endpoint was removed and the roster's embedded link (renamed `session_url`) now points to the full check-ins page (with map).
+3. **Reminders review page** — `/reminders` has top-level tabs (Drafts / Templates), status sub-tabs with counts, slide-in detail panel for editing drafts, Generate-draft modal, Regenerate-from-template button (backed by new `POST /api/reminders/{id}/regenerate`), and Send/Approve/Skip actions.
+4. **Roster review page** — `/roster` mirrors the reminders page, with four stacked section editors (Header / Welcome / Comments / Footer) plus subject, an on-demand Preview modal, Generate + Regenerate flows (`POST /api/roster/{id}/regenerate`), and full template CRUD.
+5. **In-app notifications** — new `notifications` table + service + three API endpoints (`GET /api/notifications/`, `POST /{id}/read`, `POST /read-all`). Bell icon in Sidebar/MobileMenu polls every 60s. Notifications fire for reminder drafts, check-ins imported, roster drafts, and delivery failures; recipients resolve to the session's `net_control_callsign` (or first admin fallback). The `notify_ncs` stub has been removed.
+6. **Activities page with Claude chat** — `/activities` has a library table with view/edit/create panel and a Claude-chat brainstorm panel that creates a chat session, takes messages back and forth via the existing chat API, and approves the conversation into a new activity. Chat panel is responsive (right-pane on desktop, fullscreen modal on smaller viewports). Access widened to net_control + admin.
 
-### Confirmed done
+### Caveats
 
-Schedule auto-generation, activities backend (CRUD + Claude chat), reminders backend, check-in mailbox scan/parse/review/approve, roster generation + GeoJSON, long-term member tracking, OIDC auth with first-user-admin, configuration UI, privacy/GDPR features, delivery backends (email, groups.io, Winlink) with reminder/roster wiring, background mailbox scanner, Nix packaging.
+- Manual browser-based UI verification across all six features hasn't been done from the implementation tools used to build them. Worth spot-checking each before declaring full operational readiness.
+- `frontend/src/pages/PlaceholderPage.tsx` is now orphaned (no route uses it) but left in place; safe to delete in a follow-up cleanup if desired.
+
+### Confirmed done (everything)
+
+Schedule auto-generation, activities (backend CRUD + chat, frontend library + brainstorm), reminders (backend + frontend with regenerate), check-ins (mailbox scan/parse/review/approve, public viewing for completed sessions), members directory, roster (generation + preview + frontend with regenerate), long-term member tracking, OIDC auth with first-user-admin, configuration UI, privacy/GDPR features, delivery backends (email, groups.io, Winlink) wired through reminders and roster `mark_sent`, background mailbox scanner, in-app notifications, Nix packaging.
