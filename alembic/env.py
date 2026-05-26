@@ -12,6 +12,7 @@ import backend.modules.activities.models  # noqa: F401
 import backend.modules.checkins.models  # noqa: F401
 import backend.modules.reminders.models  # noqa: F401
 import backend.modules.roster.models  # noqa: F401
+from backend.modules.notifications import models as notifications_models  # noqa: F401
 import backend.auth.pat_models  # noqa: F401
 import backend.audit.models  # noqa: F401
 import backend.integrations.delivery.models  # noqa: F401
