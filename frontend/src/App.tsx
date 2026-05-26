@@ -15,8 +15,8 @@ import { CheckInsPage } from "./pages/CheckInsPage";
 import { MembersPage } from "./pages/MembersPage";
 import { RemindersPage } from "./pages/RemindersPage";
 import { RosterPage } from "./pages/RosterPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
+import { ActivitiesPage } from "./pages/ActivitiesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import type { UserRole } from "./types";
@@ -69,7 +69,7 @@ function AppRoutes() {
         <Route path="/members" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><MembersPage /></ProtectedRoute>} />
         <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><RemindersPage /></ProtectedRoute>} />
         <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><RosterPage /></ProtectedRoute>} />
-        <Route path="/activities" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><PlaceholderPage title="Activities" /></ProtectedRoute>} />
+        <Route path="/activities" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><ActivitiesPage /></ProtectedRoute>} />
         <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><UsersPage /></ProtectedRoute>} />
         <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><ConfigPage /></ProtectedRoute>} />
         <Route path="/privacy" element={<PrivacyPolicyPage />} />
