@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn
+from backend.modules.notifications.models import NotificationKind
+from backend.modules.notifications.service import (
+    _format_session_date,
+    create_notification,
+    resolve_session_recipient,
+)
 from backend.modules.roster.models import RosterTemplate, RosterLog, RosterStatus
 from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
 
@@ -336,7 +342,16 @@ def generate_due_drafts(db: Session) -> list[RosterLog]:
         if days_since >= default_template.lead_time_days:
             log = generate_draft(db, session.id, template_id=default_template.id)
             if log is not None:
-                notify_ncs(db, session)
+                recipient = resolve_session_recipient(db, session)
+                if recipient is not None:
+                    create_notification(
+                        db,
+                        recipient_callsign=recipient,
+                        kind=NotificationKind.ROSTER_DRAFT,
+                        message=f"Roster draft ready for {_format_session_date(session)}",
+                        link_url="/roster",
+                        session_id=session.id,
+                    )
                 drafts.append(log)
 
     return drafts
@@ -508,11 +523,3 @@ def regenerate_draft(db: Session, roster_id: int) -> RosterLog | None:
     db.refresh(log)
     return log
 
-# ---------------------------------------------------------------------------
-# Notification Stub
-# ---------------------------------------------------------------------------
-
-
-def notify_ncs(db: Session, net_session: NetSession) -> None:
-    """No-op stub. Hook point for future notification system."""
-    pass

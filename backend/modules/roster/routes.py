@@ -175,6 +175,27 @@ async def generate_draft_route(
     log = generate_draft_service(db, session_id)
     if log is None:
         raise HTTPException(status_code=404, detail="Session not found or no default template")
+
+    from backend.modules.notifications.models import NotificationKind
+    from backend.modules.notifications.service import (
+        _format_session_date,
+        create_notification,
+        resolve_session_recipient,
+    )
+    from backend.modules.schedule.models import NetSession
+    net_session = db.get(NetSession, session_id)
+    if net_session is not None:
+        recipient = resolve_session_recipient(db, net_session)
+        if recipient is not None:
+            create_notification(
+                db,
+                recipient_callsign=recipient,
+                kind=NotificationKind.ROSTER_DRAFT,
+                message=f"Roster draft ready for {_format_session_date(net_session)}",
+                link_url="/roster",
+                session_id=net_session.id,
+            )
+
     return _roster_to_response(log)
 
 

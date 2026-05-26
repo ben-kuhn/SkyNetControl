@@ -25,7 +25,6 @@ from backend.modules.roster.service import (
     skip_roster,
     update_draft,
     regenerate_draft,
-    notify_ncs,
 )
 
 
@@ -654,9 +653,30 @@ def test_regenerate_roster_draft_returns_none_when_missing(db):
     assert regenerate_draft(db, 999) is None
 
 
-# --- Notify NCS stub ---
+def test_generate_due_drafts_creates_notification(db, season_and_sessions, default_template):
+    """When generate_due_drafts creates a roster, the session's NCS gets a notification."""
+    from datetime import date
+    from unittest.mock import patch
+    from backend.auth.models import User, UserRole
+    from backend.modules.notifications.models import Notification, NotificationKind
+    from backend.modules.roster.service import generate_due_drafts
+    from backend.modules.schedule.models import SessionStatus
 
-
-def test_notify_ncs_is_noop(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions
-    notify_ncs(db, session1)
+    session1.status = SessionStatus.COMPLETED
+    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", role=UserRole.NET_CONTROL))
+    db.commit()
+
+    with patch("backend.modules.roster.service._today", return_value=date(2026, 4, 11)):
+        generate_due_drafts(db)
+
+    rows = (
+        db.query(Notification)
+        .filter(
+            Notification.recipient_callsign == "W0NE",
+            Notification.kind == NotificationKind.ROSTER_DRAFT,
+        )
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].link_url == "/roster"
