@@ -178,3 +178,19 @@ export interface RosterTemplate {
   lead_time_days: number;
   is_default: boolean;
 }
+
+export type NotificationKind =
+  | "reminder_draft"
+  | "checkins_ready"
+  | "roster_draft"
+  | "delivery_failure";
+
+export interface Notification {
+  id: number;
+  kind: NotificationKind;
+  session_id: number | null;
+  message: string;
+  link_url: string | null;
+  created_at: string;
+  read_at: string | null;
+}
