@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { NotificationBell } from "../components/NotificationBell";
 import type { UserRole } from "../types";
 
 interface NavItem {
@@ -74,13 +75,16 @@ export function MobileMenu({ open, onClose }: MobileMenuProps) {
         {user ? (
           <>
             <div className="flex items-center justify-between mb-3">
-              <NavLink
-                to="/profile"
-                onClick={onClose}
-                className="font-mono text-sm text-text-secondary hover:text-accent"
-              >
-                {user.callsign}
-              </NavLink>
+              <div className="flex items-center gap-1">
+                <NotificationBell />
+                <NavLink
+                  to="/profile"
+                  onClick={onClose}
+                  className="font-mono text-sm text-text-secondary hover:text-accent"
+                >
+                  {user.callsign}
+                </NavLink>
+              </div>
               <ThemeToggle />
             </div>
             <button

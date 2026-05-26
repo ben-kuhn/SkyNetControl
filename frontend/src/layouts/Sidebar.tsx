@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { NotificationBell } from "../components/NotificationBell";
 import type { UserRole } from "../types";
 
 interface NavItem {
@@ -59,12 +60,15 @@ export function Sidebar() {
         <div className="border-t border-border px-3 py-3 flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <ThemeToggle />
-            <NavLink
-              to="/profile"
-              className="font-mono text-sm text-text-secondary hover:text-accent transition-colors"
-            >
-              {user.callsign}
-            </NavLink>
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <NavLink
+                to="/profile"
+                className="font-mono text-sm text-text-secondary hover:text-accent transition-colors"
+              >
+                {user.callsign}
+              </NavLink>
+            </div>
           </div>
           <button
             onClick={logout}
