@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session
 from backend.modules.activities.models import Activity
 from backend.modules.reminders.models import ReminderTemplate, ReminderLog, ReminderStatus, TemplateType
 from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
+from backend.modules.notifications.models import NotificationKind
+from backend.modules.notifications.service import (
+    _format_session_date,
+    create_notification,
+    resolve_session_recipient,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +311,16 @@ def generate_due_drafts(db: Session) -> list[ReminderLog]:
             log = generate_draft(db, session.id, template_id=template.id)
             if log is not None:
                 drafts.append(log)
+                recipient = resolve_session_recipient(db, session)
+                if recipient is not None:
+                    create_notification(
+                        db,
+                        recipient_callsign=recipient,
+                        kind=NotificationKind.REMINDER_DRAFT,
+                        message=f"Reminder draft ready for {_format_session_date(session)}",
+                        link_url="/reminders",
+                        session_id=session.id,
+                    )
 
     return drafts
 
