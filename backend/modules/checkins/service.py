@@ -137,7 +137,28 @@ def scan_and_import_messages(
             parsed_checkins[checkin.callsign] = checkin
 
     db.commit()
-    return list(parsed_checkins.values())
+    result = list(parsed_checkins.values())
+
+    if result:
+        from backend.modules.notifications.models import NotificationKind
+        from backend.modules.notifications.service import (
+            _format_session_date,
+            create_notification,
+            resolve_session_recipient,
+        )
+        recipient = resolve_session_recipient(db, net_session)
+        if recipient is not None:
+            n = len(result)
+            create_notification(
+                db,
+                recipient_callsign=recipient,
+                kind=NotificationKind.CHECKINS_READY,
+                message=f"{n} check-in(s) imported for {_format_session_date(net_session)}",
+                link_url=f"/checkins?session={net_session.id}",
+                session_id=net_session.id,
+            )
+
+    return result
 
 
 def get_checkins_for_session(db: Session, session_id: int) -> list[CheckIn]:

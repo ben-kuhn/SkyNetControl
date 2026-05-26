@@ -350,3 +350,49 @@ def test_get_checkins_by_callsign_returns_all_sessions_desc(db):
     assert [r[0].id for r in rows_lower] == [r[0].id for r in rows]
 
     assert get_checkins_by_callsign(db, "NOBODY") == []
+
+
+def test_scan_creates_notification_when_checkins_imported(db, season_and_session):
+    """After importing at least one check-in, the session's NCS gets a notification."""
+    from datetime import datetime, timezone
+    from backend.auth.models import User, UserRole
+    from backend.modules.notifications.models import Notification, NotificationKind
+
+    season, session = season_and_session
+    session.net_control_callsign = "W0NE"
+    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", role=UserRole.NET_CONTROL))
+    db.commit()
+
+    raw_messages = [{
+        "message_id": "MSG-NOTIFY-1",
+        "from_address": "ka0xyz@winlink.org",
+        "received_at": datetime.now(tz=timezone.utc),
+        "subject": "Check-in",
+        "body": "John Doe KA0XYZ Denver CO Winlink",
+    }]
+
+    from backend.modules.checkins.service import scan_and_import_messages
+    imported = scan_and_import_messages(db, raw_messages, session)
+    assert len(imported) >= 1
+
+    rows = (
+        db.query(Notification)
+        .filter(
+            Notification.recipient_callsign == "W0NE",
+            Notification.kind == NotificationKind.CHECKINS_READY,
+        )
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].link_url == f"/checkins?session={session.id}"
+
+
+def test_scan_creates_no_notification_when_no_imports(db, season_and_session):
+    """No new check-ins → no notification."""
+    from backend.modules.notifications.models import Notification
+
+    season, session = season_and_session
+    from backend.modules.checkins.service import scan_and_import_messages
+    result = scan_and_import_messages(db, [], session)
+    assert result == []
+    assert db.query(Notification).count() == 0
