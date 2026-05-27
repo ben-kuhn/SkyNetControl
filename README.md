@@ -41,6 +41,7 @@ For the full walkthrough — including how to register an OAuth app, run migrati
 | Doc | Audience |
 |-----|----------|
 | [docs/development.md](docs/development.md) | Local development setup |
+| [docs/deployment/nix.md](docs/deployment/nix.md) | Production deployment via Nix (NixOS module, OCI image, overlay) |
 | [docs/deployment/secrets.md](docs/deployment/secrets.md) | Environment variables and secret management |
 | [docs/deployment/app-config-keys.md](docs/deployment/app-config-keys.md) | DB-stored runtime configuration |
 | [docs/superpowers/specs/2026-04-16-winlink-net-manager-design.md](docs/superpowers/specs/2026-04-16-winlink-net-manager-design.md) | Product design spec (architecture, modules, data flow) |

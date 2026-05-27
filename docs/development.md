@@ -186,4 +186,4 @@ The dev shell installs the package in editable mode (`pip install -e`). If new d
 
 ## Production deployment
 
-See [docs/deployment/secrets.md](deployment/secrets.md) for env var management patterns (sops-nix, agenix, systemd EnvironmentFile, Docker env-file). The NixOS module in `module.nix` handles `ExecStartPre` migrations automatically.
+See [docs/deployment/nix.md](deployment/nix.md) for the full Nix-based production path — NixOS module (recommended), OCI image, or overlay use in your own Nix projects. [docs/deployment/secrets.md](deployment/secrets.md) covers env-var and secret management patterns (sops-nix, agenix, systemd EnvironmentFile, Docker env-file).
