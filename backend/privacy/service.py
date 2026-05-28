@@ -93,7 +93,9 @@ def anonymize_user(
 
     anon_user = User(
         callsign=anon_id,
-        oidc_subject="deleted",
+        # oidc_subject is unique=True; use the unique anon_id so multiple
+        # anonymizations don't collide on a shared "deleted" sentinel.
+        oidc_subject=f"deleted:{anon_id}",
         name="Deleted User",
         role=UserRole.DELETED,
         email=None,

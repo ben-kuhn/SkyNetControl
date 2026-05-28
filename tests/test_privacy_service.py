@@ -233,7 +233,7 @@ def test_anonymize_user_replaces_user_fields(rich_db):
         assert anon_user is not None
         assert anon_user.name == "Deleted User"
         assert anon_user.email is None
-        assert anon_user.oidc_subject == "deleted"
+        assert anon_user.oidc_subject == f"deleted:{anon_id}"
         assert anon_user.pending_callsign is None
         assert anon_user.role == UserRole.DELETED
 
@@ -307,6 +307,38 @@ def test_anonymize_admin_by_admin_blocked(rich_db):
     with rich_db() as db:
         with pytest.raises(ValueError, match="Cannot anonymize"):
             anonymize_user(db, "W0NE", actor_callsign="W0NE")
+
+
+def test_anonymize_two_users_does_not_collide(rich_db):
+    """Audit H2 regression: anonymizing a second user must not hit the
+    users.oidc_subject unique constraint on a shared 'deleted' value."""
+    # Seed an additional admin-promoted-to-admin so we can anonymize a viewer
+    # and then a net_control without losing the sole admin.
+    with rich_db() as db:
+        db.add(User(
+            callsign="W0SECOND",
+            oidc_subject="auth0|second",
+            name="Second User",
+            role=UserRole.NET_CONTROL,
+        ))
+        db.commit()
+
+    with rich_db() as db:
+        first = anonymize_user(db, "KD0TST", actor_callsign="W0NE")
+
+    with rich_db() as db:
+        # Second anonymization used to fail with IntegrityError on the
+        # shared oidc_subject="deleted" before the fix.
+        second = anonymize_user(db, "W0SECOND", actor_callsign="W0NE")
+
+    with rich_db() as db:
+        a = db.get(User, first["anonymous_id"])
+        b = db.get(User, second["anonymous_id"])
+        assert a is not None
+        assert b is not None
+        assert a.oidc_subject != b.oidc_subject
+        assert a.oidc_subject.startswith("deleted:")
+        assert b.oidc_subject.startswith("deleted:")
 
 
 def test_anonymize_sole_admin_self_blocked(rich_db):
