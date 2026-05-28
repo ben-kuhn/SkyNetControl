@@ -25,8 +25,18 @@ from backend.integrations.scanner.routes import scanner_router
 from backend.privacy.routes import privacy_router
 
 
+_DEFAULT_JWT_SECRET = "change-me-in-production"
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or default_settings
+
+    if settings.jwt_secret_key == _DEFAULT_JWT_SECRET:
+        raise RuntimeError(
+            "SKYNET_JWT_SECRET_KEY is still the default placeholder value. "
+            "Generate one with `openssl rand -hex 32` and set it via the "
+            "SKYNET_JWT_SECRET_KEY env var before starting the server."
+        )
 
     engine = create_engine_from_url(settings.database_url)
     session_factory = create_session_factory(engine)

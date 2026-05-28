@@ -8,7 +8,7 @@ from backend.db.base import Base
 
 @pytest.fixture
 def test_settings():
-    return Settings(database_url="sqlite:///", debug=True)
+    return Settings(database_url="sqlite:///", debug=True, jwt_secret_key="test-secret")
 
 
 @pytest.fixture
