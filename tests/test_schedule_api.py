@@ -434,3 +434,50 @@ async def test_list_sessions_authenticated_sees_all(test_client, test_settings, 
     body = resp.json()
     # Authenticated users are not constrained to completed
     assert len(body) >= 2  # At least some sessions from the season
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_pending_user_sees_only_completed(test_client, test_settings, db_setup):
+    """Audit M3: PENDING users are treated like anonymous viewers."""
+    from backend.auth.models import User, UserRole
+    from backend.modules.schedule.models import NetSession, SessionStatus
+
+    admin_token = create_access_token("W0NE", "admin", test_settings)
+
+    # Create a season with sessions, mark statuses to differentiate
+    season_resp = await test_client.post(
+        "/api/schedule/seasons",
+        json={
+            "name": "Fall 2026",
+            "start_date": "2026-09-03",
+            "end_date": "2026-09-10",
+            "day_of_week": 3,
+            "time": "19:00",
+        },
+        cookies={"access_token": admin_token},
+    )
+    season_id = season_resp.json()["id"]
+
+    with db_setup() as session:
+        sessions = session.query(NetSession).filter_by(season_id=season_id).all()
+        if len(sessions) >= 2:
+            sessions[0].status = SessionStatus.COMPLETED
+            sessions[1].status = SessionStatus.SCHEDULED
+        # Seed a PENDING user
+        session.add(User(
+            callsign="PENDING-y",
+            oidc_subject="auth0|pendingy",
+            name="Pending",
+            role=UserRole.PENDING,
+        ))
+        session.commit()
+
+    pending_token = create_access_token("PENDING-y", "pending", test_settings)
+    resp = await test_client.get(
+        "/api/schedule/sessions",
+        cookies={"access_token": pending_token},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    scheduled = [s for s in body if s["status"] == "scheduled"]
+    assert len(scheduled) == 0

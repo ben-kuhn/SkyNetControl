@@ -128,7 +128,10 @@ async def get_session_checkins_route(
     if net_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if user is None and net_session.status != SessionStatus.COMPLETED:
+    # PENDING users are treated like anonymous for this public endpoint —
+    # they shouldn't see in-progress sessions before admin approval.
+    is_public_viewer = user is None or user.role == UserRole.PENDING
+    if is_public_viewer and net_session.status != SessionStatus.COMPLETED:
         raise HTTPException(status_code=404, detail="Session not found")
 
     checkins = get_checkins_for_session(db, session_id)

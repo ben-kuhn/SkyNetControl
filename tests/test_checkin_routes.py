@@ -402,3 +402,27 @@ async def test_get_session_checkins_authenticated_sees_non_completed(test_client
     )
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_get_session_checkins_pending_user_sees_only_completed(test_client, test_settings, db_setup):
+    """Audit M3: PENDING users are treated like anonymous viewers."""
+    # Seed a PENDING user and try to read a non-COMPLETED session.
+    with db_setup() as session:
+        pending = User(
+            callsign="PENDING-x",
+            oidc_subject="auth0|pending",
+            name="Pending",
+            role=UserRole.PENDING,
+        )
+        session.add(pending)
+        session.commit()
+        net_session = session.query(NetSession).first()
+        net_session_id = net_session.id
+
+    token = create_access_token("PENDING-x", "pending", test_settings)
+    resp = await test_client.get(
+        f"/api/checkins/session/{net_session_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404

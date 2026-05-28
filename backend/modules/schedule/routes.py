@@ -223,8 +223,9 @@ async def list_sessions_route(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
-    # Anonymous viewers see only COMPLETED sessions
-    if user is None:
+    # Anonymous and PENDING (unapproved) viewers see only COMPLETED sessions.
+    is_public_viewer = user is None or user.role == UserRole.PENDING
+    if is_public_viewer:
         status_enum = SessionStatus.COMPLETED
 
     sessions = list_sessions_service(db, season_id=season_id, status=status_enum)
