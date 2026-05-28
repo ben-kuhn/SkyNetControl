@@ -18,16 +18,16 @@ _ROLE_RANK: dict[UserRole, int] = {
 }
 
 SCOPES: dict[str, ScopeEntry] = {
-    "schedule:read":  {"description": "View sessions",               "min_role": UserRole.VIEWER},
+    "schedule:read": {"description": "View sessions", "min_role": UserRole.VIEWER},
     "schedule:write": {"description": "Create/edit/delete sessions", "min_role": UserRole.NET_CONTROL},
-    "checkins:read":  {"description": "View check-in data",          "min_role": UserRole.VIEWER},
-    "checkins:write": {"description": "Submit/manage check-ins",     "min_role": UserRole.NET_CONTROL},
-    "roster:read":    {"description": "View roster data",            "min_role": UserRole.NET_CONTROL},
-    "map:read":       {"description": "View map/GeoJSON data",       "min_role": UserRole.VIEWER},
-    "users:read":     {"description": "List users",                  "min_role": UserRole.ADMIN},
-    "users:write":    {"description": "Manage users/roles",          "min_role": UserRole.ADMIN},
-    "config:read":    {"description": "View app configuration",      "min_role": UserRole.ADMIN},
-    "config:write":   {"description": "Modify app configuration",    "min_role": UserRole.ADMIN},
+    "checkins:read": {"description": "View check-in data", "min_role": UserRole.VIEWER},
+    "checkins:write": {"description": "Submit/manage check-ins", "min_role": UserRole.NET_CONTROL},
+    "roster:read": {"description": "View roster data", "min_role": UserRole.NET_CONTROL},
+    "map:read": {"description": "View map/GeoJSON data", "min_role": UserRole.VIEWER},
+    "users:read": {"description": "List users", "min_role": UserRole.ADMIN},
+    "users:write": {"description": "Manage users/roles", "min_role": UserRole.ADMIN},
+    "config:read": {"description": "View app configuration", "min_role": UserRole.ADMIN},
+    "config:write": {"description": "Modify app configuration", "min_role": UserRole.ADMIN},
 }
 
 SCOPE_NAMES: set[str] = set(SCOPES.keys())
@@ -43,6 +43,4 @@ def validate_scopes_for_role(scopes: list[str], role: UserRole) -> None:
             raise ValueError(f"Unknown scope: {scope}")
         required_rank = _ROLE_RANK[SCOPES[scope]["min_role"]]
         if user_rank < required_rank:
-            raise ValueError(
-                f"Your role cannot use scope: {scope}"
-            )
+            raise ValueError(f"Your role cannot use scope: {scope}")

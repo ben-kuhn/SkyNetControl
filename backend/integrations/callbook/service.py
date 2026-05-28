@@ -87,18 +87,20 @@ def _update_cache(db: Session, result: CallbookResult) -> None:
         existing.source = result.source
         existing.fetched_at = datetime.now(timezone.utc)
     else:
-        db.add(CallbookCache(
-            callsign=result.callsign,
-            name=result.name,
-            city=result.city,
-            county=result.county,
-            state=result.state,
-            country=result.country,
-            latitude=result.latitude,
-            longitude=result.longitude,
-            source=result.source,
-            fetched_at=datetime.now(timezone.utc),
-        ))
+        db.add(
+            CallbookCache(
+                callsign=result.callsign,
+                name=result.name,
+                city=result.city,
+                county=result.county,
+                state=result.state,
+                country=result.country,
+                latitude=result.latitude,
+                longitude=result.longitude,
+                source=result.source,
+                fetched_at=datetime.now(timezone.utc),
+            )
+        )
     db.commit()
 
 

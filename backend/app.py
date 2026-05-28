@@ -49,6 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             with session_factory() as db:
                 from backend.config_mgmt.service import get_config_value
+
                 enabled = get_config_value(db, "scanner.enabled", "false")
             if enabled == "true":
                 from backend.integrations.scanner.service import scanner_loop
@@ -56,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 def get_interval():
                     with session_factory() as db:
                         from backend.config_mgmt.service import get_config_value as gcv
+
                         return int(gcv(db, "scanner.interval_minutes", "5"))
 
                 scanner_task = asyncio.create_task(scanner_loop(session_factory, get_interval))
@@ -66,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         if scanner_task is not None:
             from backend.integrations.scanner.service import scanner_state
+
             scanner_state.running = False
             scanner_task.cancel()
             try:

@@ -391,6 +391,7 @@ async def test_list_sessions_public_completed_only(test_client, test_settings, d
     # Get the created sessions and mark some as completed
     with db_setup() as session:
         from backend.modules.schedule.models import NetSession
+
         sessions = session.query(NetSession).filter_by(season_id=season_id).all()
         if len(sessions) >= 2:
             sessions[0].status = SessionStatus.COMPLETED
@@ -464,12 +465,14 @@ async def test_list_sessions_pending_user_sees_only_completed(test_client, test_
             sessions[0].status = SessionStatus.COMPLETED
             sessions[1].status = SessionStatus.SCHEDULED
         # Seed a PENDING user
-        session.add(User(
-            callsign="PENDING-y",
-            oidc_subject="auth0|pendingy",
-            name="Pending",
-            role=UserRole.PENDING,
-        ))
+        session.add(
+            User(
+                callsign="PENDING-y",
+                oidc_subject="auth0|pendingy",
+                name="Pending",
+                role=UserRole.PENDING,
+            )
+        )
         session.commit()
 
     pending_token = create_access_token("PENDING-y", "pending", test_settings)

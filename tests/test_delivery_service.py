@@ -104,16 +104,26 @@ def test_dispatch_multiple_backends_partial_success(db_session):
 def test_retry_failed_only_retries_failed(db_session):
     _set_config(db_session, "delivery.email.to_address", "net@example.com")
 
-    db_session.add(DeliveryLog(
-        content_type="reminder", content_id=1, backend="email",
-        status=DeliveryStatus.SENT, created_at=datetime.now(tz=timezone.utc),
-        sent_at=datetime.now(tz=timezone.utc),
-    ))
-    db_session.add(DeliveryLog(
-        content_type="reminder", content_id=1, backend="groupsio",
-        status=DeliveryStatus.FAILED, error_message="API error",
-        created_at=datetime.now(tz=timezone.utc),
-    ))
+    db_session.add(
+        DeliveryLog(
+            content_type="reminder",
+            content_id=1,
+            backend="email",
+            status=DeliveryStatus.SENT,
+            created_at=datetime.now(tz=timezone.utc),
+            sent_at=datetime.now(tz=timezone.utc),
+        )
+    )
+    db_session.add(
+        DeliveryLog(
+            content_type="reminder",
+            content_id=1,
+            backend="groupsio",
+            status=DeliveryStatus.FAILED,
+            error_message="API error",
+            created_at=datetime.now(tz=timezone.utc),
+        )
+    )
     db_session.commit()
 
     _set_config(db_session, "delivery.groupsio.api_key", "key-123")
@@ -131,11 +141,16 @@ def test_retry_failed_only_retries_failed(db_session):
 
 
 def test_get_delivery_status(db_session):
-    db_session.add(DeliveryLog(
-        content_type="reminder", content_id=1, backend="email",
-        status=DeliveryStatus.SENT, created_at=datetime.now(tz=timezone.utc),
-        sent_at=datetime.now(tz=timezone.utc),
-    ))
+    db_session.add(
+        DeliveryLog(
+            content_type="reminder",
+            content_id=1,
+            backend="email",
+            status=DeliveryStatus.SENT,
+            created_at=datetime.now(tz=timezone.utc),
+            sent_at=datetime.now(tz=timezone.utc),
+        )
+    )
     db_session.commit()
 
     logs = get_delivery_status(db_session, "reminder", 1)

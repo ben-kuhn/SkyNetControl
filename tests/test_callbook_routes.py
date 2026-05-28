@@ -104,9 +104,16 @@ async def test_lookup_viewer_denied(client, test_settings):
 async def test_lookup_admin_allowed(client, test_settings):
     token = create_access_token("W0NE", "admin", test_settings)
     mock_result = {
-        "callsign": "W0ABC", "name": "John", "city": "Denver",
-        "county": None, "state": "CO", "country": "US",
-        "latitude": None, "longitude": None, "source": "qrz", "cached": True,
+        "callsign": "W0ABC",
+        "name": "John",
+        "city": "Denver",
+        "county": None,
+        "state": "CO",
+        "country": "US",
+        "latitude": None,
+        "longitude": None,
+        "source": "qrz",
+        "cached": True,
     }
 
     with patch("backend.modules.checkins.routes.lookup_callsign", return_value=mock_result):

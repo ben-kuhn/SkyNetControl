@@ -117,6 +117,7 @@ async def test_sensitive_config_value_redacted_in_audit_log(test_client, test_se
     """Audit M1: secret values must not appear in audit log details."""
     import json
     from backend.audit.models import AuditLog
+
     token = create_access_token("W0NE", "admin", test_settings)
 
     response = await test_client.put(
@@ -127,12 +128,7 @@ async def test_sensitive_config_value_redacted_in_audit_log(test_client, test_se
     assert response.status_code == 200
 
     with db_setup() as session:
-        entry = (
-            session.query(AuditLog)
-            .filter(AuditLog.action == "config.updated")
-            .order_by(AuditLog.id.desc())
-            .first()
-        )
+        entry = session.query(AuditLog).filter(AuditLog.action == "config.updated").order_by(AuditLog.id.desc()).first()
     assert entry is not None
     details = json.loads(entry.details)
     assert details["key"] == "claude_api_key"
@@ -145,6 +141,7 @@ async def test_non_sensitive_config_value_logged_verbatim(test_client, test_sett
     """Non-secret keys still log the actual value for traceability."""
     import json
     from backend.audit.models import AuditLog
+
     token = create_access_token("W0NE", "admin", test_settings)
 
     response = await test_client.put(
@@ -155,11 +152,6 @@ async def test_non_sensitive_config_value_logged_verbatim(test_client, test_sett
     assert response.status_code == 200
 
     with db_setup() as session:
-        entry = (
-            session.query(AuditLog)
-            .filter(AuditLog.action == "config.updated")
-            .order_by(AuditLog.id.desc())
-            .first()
-        )
+        entry = session.query(AuditLog).filter(AuditLog.action == "config.updated").order_by(AuditLog.id.desc()).first()
     details = json.loads(entry.details)
     assert details["value"] == "w0ne@winlink.org"

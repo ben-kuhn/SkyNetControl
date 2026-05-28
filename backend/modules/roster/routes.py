@@ -183,6 +183,7 @@ async def generate_draft_route(
         resolve_session_recipient,
     )
     from backend.modules.schedule.models import NetSession
+
     net_session = db.get(NetSession, session_id)
     if net_session is not None:
         recipient = resolve_session_recipient(db, net_session)

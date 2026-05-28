@@ -121,6 +121,7 @@ async def test_bearer_invalid_token_returns_401(test_client):
 @pytest.mark.asyncio
 async def test_bearer_revoked_token_returns_401(test_client, seeded_db):
     from backend.auth.pat_service import revoke_token
+
     with seeded_db() as session:
         result = create_token(session, "W0NE", UserRole.ADMIN, "Revoke me", ["schedule:read"], None)
         raw = result["token"]
@@ -137,6 +138,7 @@ async def test_bearer_pending_user_returns_401(test_client, seeded_db):
     with seeded_db() as session:
         from backend.auth.pat_models import PersonalAccessToken
         import hashlib, secrets
+
         raw = "skynet_" + secrets.token_hex(32)
         pat = PersonalAccessToken(
             user_callsign="PENDING-abc",
@@ -200,10 +202,7 @@ async def test_require_scope_cookie_auth_bypasses(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_require_scope_multi_scope_all_needed(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(
-            session, "W0NE", UserRole.ADMIN, "Multi",
-            ["schedule:read", "checkins:read"], None
-        )
+        result = create_token(session, "W0NE", UserRole.ADMIN, "Multi", ["schedule:read", "checkins:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/multi-scope",
@@ -215,10 +214,7 @@ async def test_require_scope_multi_scope_all_needed(test_client, seeded_db):
 @pytest.mark.asyncio
 async def test_require_scope_multi_scope_partial_fails(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(
-            session, "W0NE", UserRole.ADMIN, "Partial",
-            ["schedule:read"], None
-        )
+        result = create_token(session, "W0NE", UserRole.ADMIN, "Partial", ["schedule:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/multi-scope",
@@ -247,8 +243,10 @@ async def test_schedule_endpoint_requires_scope():
 
     with app.state.session_factory() as session:
         admin = User(
-            callsign="W0NE", oidc_subject="auth0|admin",
-            name="Admin User", role=UserRole.ADMIN,
+            callsign="W0NE",
+            oidc_subject="auth0|admin",
+            name="Admin User",
+            role=UserRole.ADMIN,
         )
         session.add(admin)
         session.commit()

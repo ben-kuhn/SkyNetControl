@@ -16,12 +16,7 @@ async def list_audit_log(
     user=Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db_session),
 ):
-    entries = (
-        db.query(AuditLog)
-        .order_by(AuditLog.id.desc())
-        .limit(limit)
-        .all()
-    )
+    entries = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(limit).all()
     return [
         {
             "id": e.id,

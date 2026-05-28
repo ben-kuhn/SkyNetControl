@@ -1,6 +1,6 @@
 import httpx
 
-from backend.integrations.delivery.backends.base import DeliveryBackend, DeliveryResult
+from backend.integrations.delivery.backends.base import DeliveryResult
 
 BASE_URL = "https://groups.io/api/v1"
 

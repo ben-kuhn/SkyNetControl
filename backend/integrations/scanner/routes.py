@@ -16,9 +16,7 @@ def get_scanner_status(
 ):
     next_scan_time = None
     if scanner_state.running and scanner_state.last_scan_time:
-        next_scan_time = (
-            scanner_state.last_scan_time + timedelta(minutes=scanner_state.interval_minutes)
-        ).isoformat()
+        next_scan_time = (scanner_state.last_scan_time + timedelta(minutes=scanner_state.interval_minutes)).isoformat()
 
     return {
         "running": scanner_state.running,

@@ -20,18 +20,12 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    recipient_callsign: Mapped[str] = mapped_column(
-        String(20), ForeignKey("users.callsign"), nullable=False
-    )
+    recipient_callsign: Mapped[str] = mapped_column(String(20), ForeignKey("users.callsign"), nullable=False)
     kind: Mapped[NotificationKind] = mapped_column(Enum(NotificationKind), nullable=False)
-    session_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("net_sessions.id"), nullable=True
-    )
+    session_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("net_sessions.id"), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     link_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        Index("ix_notifications_recipient_read", "recipient_callsign", "read_at"),
-    )
+    __table_args__ = (Index("ix_notifications_recipient_read", "recipient_callsign", "read_at"),)

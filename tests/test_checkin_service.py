@@ -321,23 +321,57 @@ def test_get_checkins_by_callsign_returns_all_sessions_desc(db):
     from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
     from backend.modules.checkins.service import get_checkins_by_callsign
 
-    season = NetSeason(name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-                       day_of_week=3, time=time(18, 0))
-    db.add(season); db.flush()
-    s1 = NetSession(season_id=season.id, start_date=date(2026, 1, 15),
-                    session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.COMPLETED)
-    s2 = NetSession(season_id=season.id, start_date=date(2026, 2, 15),
-                    session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.COMPLETED)
-    db.add_all([s1, s2]); db.commit()
+    season = NetSeason(
+        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
+    )
+    db.add(season)
+    db.flush()
+    s1 = NetSession(
+        season_id=season.id,
+        start_date=date(2026, 1, 15),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.COMPLETED,
+    )
+    s2 = NetSession(
+        season_id=season.id,
+        start_date=date(2026, 2, 15),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.COMPLETED,
+    )
+    db.add_all([s1, s2])
+    db.commit()
 
-    db.add_all([
-        CheckIn(session_id=s1.id, callsign="W0NE", name="A", mode="Voice",
-                parse_status=ParseStatus.AUTO, timing_status=TimingStatus.ON_TIME, is_new_member=True),
-        CheckIn(session_id=s2.id, callsign="W0NE", name="A", mode="Winlink",
-                parse_status=ParseStatus.AUTO, timing_status=TimingStatus.ON_TIME, is_new_member=False),
-        CheckIn(session_id=s1.id, callsign="K0XYZ", name="B", mode="Voice",
-                parse_status=ParseStatus.AUTO, timing_status=TimingStatus.ON_TIME, is_new_member=True),
-    ])
+    db.add_all(
+        [
+            CheckIn(
+                session_id=s1.id,
+                callsign="W0NE",
+                name="A",
+                mode="Voice",
+                parse_status=ParseStatus.AUTO,
+                timing_status=TimingStatus.ON_TIME,
+                is_new_member=True,
+            ),
+            CheckIn(
+                session_id=s2.id,
+                callsign="W0NE",
+                name="A",
+                mode="Winlink",
+                parse_status=ParseStatus.AUTO,
+                timing_status=TimingStatus.ON_TIME,
+                is_new_member=False,
+            ),
+            CheckIn(
+                session_id=s1.id,
+                callsign="K0XYZ",
+                name="B",
+                mode="Voice",
+                parse_status=ParseStatus.AUTO,
+                timing_status=TimingStatus.ON_TIME,
+                is_new_member=True,
+            ),
+        ]
+    )
     db.commit()
 
     rows = get_checkins_by_callsign(db, "W0NE")
@@ -363,15 +397,18 @@ def test_scan_creates_notification_when_checkins_imported(db, season_and_session
     db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", role=UserRole.NET_CONTROL))
     db.commit()
 
-    raw_messages = [{
-        "message_id": "MSG-NOTIFY-1",
-        "from_address": "ka0xyz@winlink.org",
-        "received_at": datetime.now(tz=timezone.utc),
-        "subject": "Check-in",
-        "body": "John Doe KA0XYZ Denver CO Winlink",
-    }]
+    raw_messages = [
+        {
+            "message_id": "MSG-NOTIFY-1",
+            "from_address": "ka0xyz@winlink.org",
+            "received_at": datetime.now(tz=timezone.utc),
+            "subject": "Check-in",
+            "body": "John Doe KA0XYZ Denver CO Winlink",
+        }
+    ]
 
     from backend.modules.checkins.service import scan_and_import_messages
+
     imported = scan_and_import_messages(db, raw_messages, session)
     assert len(imported) >= 1
 
@@ -393,6 +430,7 @@ def test_scan_creates_no_notification_when_no_imports(db, season_and_session):
 
     season, session = season_and_session
     from backend.modules.checkins.service import scan_and_import_messages
+
     result = scan_and_import_messages(db, [], session)
     assert result == []
     assert db.query(Notification).count() == 0

@@ -94,6 +94,7 @@ async def test_deleted_user_cannot_authenticate(auth_client, privacy_settings):
 async def test_deleted_user_pat_bearer_returns_401(auth_client, privacy_db):
     from backend.auth.pat_models import PersonalAccessToken
     import hashlib, secrets
+
     raw = "skynet_" + secrets.token_hex(32)
     with privacy_db() as session:
         pat = PersonalAccessToken(
@@ -150,6 +151,7 @@ def rich_db():
         session.flush()
 
         from backend.modules.schedule.models import NetSession
+
         net_session = NetSession(
             id=1,
             start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -315,12 +317,14 @@ def test_anonymize_two_users_does_not_collide(rich_db):
     # Seed an additional admin-promoted-to-admin so we can anonymize a viewer
     # and then a net_control without losing the sole admin.
     with rich_db() as db:
-        db.add(User(
-            callsign="W0SECOND",
-            oidc_subject="auth0|second",
-            name="Second User",
-            role=UserRole.NET_CONTROL,
-        ))
+        db.add(
+            User(
+                callsign="W0SECOND",
+                oidc_subject="auth0|second",
+                name="Second User",
+                role=UserRole.NET_CONTROL,
+            )
+        )
         db.commit()
 
     with rich_db() as db:

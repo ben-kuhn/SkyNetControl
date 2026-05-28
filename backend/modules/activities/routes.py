@@ -4,8 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
-
 from backend.auth.dependencies import get_current_user, get_db_session, require_role
 from backend.auth.models import User, UserRole
 from backend.config_mgmt.service import get_config_value
@@ -24,6 +22,8 @@ from backend.modules.activities.service import (
     list_activities,
     update_activity,
 )
+
+logger = logging.getLogger(__name__)
 
 activities_router = APIRouter(tags=["activities"])
 

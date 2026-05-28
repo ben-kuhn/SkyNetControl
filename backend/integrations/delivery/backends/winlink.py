@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.integrations.delivery.backends.base import DeliveryBackend, DeliveryResult
+from backend.integrations.delivery.backends.base import DeliveryResult
 
 
 class WinlinkBackend:

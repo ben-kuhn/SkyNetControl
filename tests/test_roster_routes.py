@@ -344,6 +344,7 @@ async def test_regenerate_roster_route_rewrites_draft(admin_client, db_setup):
 
     with db_setup["factory"]() as session:
         from backend.modules.roster.models import RosterLog
+
         log = session.get(RosterLog, rid)
         log.content_subject = "Stale subject"
         session.commit()
@@ -386,4 +387,3 @@ async def test_regenerate_roster_route_requires_role(viewer_client, admin_client
 
 
 # --- GeoJSON route ---
-

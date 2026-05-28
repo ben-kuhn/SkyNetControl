@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, optional_user_with_scope, require_role, require_scope
+from backend.auth.dependencies import get_current_user, get_db_session, optional_user_with_scope, require_role
 from backend.auth.models import User, UserRole
 from backend.config_mgmt.service import get_config_value
 from backend.modules.schedule.models import (

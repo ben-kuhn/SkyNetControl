@@ -2,7 +2,7 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 
-from backend.integrations.delivery.backends.base import DeliveryBackend, DeliveryResult
+from backend.integrations.delivery.backends.base import DeliveryResult
 
 
 class EmailBackend:

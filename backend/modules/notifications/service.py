@@ -49,7 +49,9 @@ def create_notification(
 
 
 def list_for_user(
-    db: Session, callsign: str, include_read: bool = False,
+    db: Session,
+    callsign: str,
+    include_read: bool = False,
 ) -> list[Notification]:
     query = db.query(Notification).filter(Notification.recipient_callsign == callsign)
     if not include_read:
@@ -58,7 +60,9 @@ def list_for_user(
 
 
 def mark_read(
-    db: Session, notification_id: int, callsign: str,
+    db: Session,
+    notification_id: int,
+    callsign: str,
 ) -> Notification | None:
     n = db.get(Notification, notification_id)
     if n is None or n.recipient_callsign != callsign:
@@ -89,12 +93,7 @@ def resolve_session_recipient(db: Session, net_session: NetSession) -> str | Non
     if net_session.net_control_callsign:
         return net_session.net_control_callsign
 
-    admin = (
-        db.query(User)
-        .filter(User.role == UserRole.ADMIN)
-        .order_by(User.callsign)
-        .first()
-    )
+    admin = db.query(User).filter(User.role == UserRole.ADMIN).order_by(User.callsign).first()
     return admin.callsign if admin else None
 
 

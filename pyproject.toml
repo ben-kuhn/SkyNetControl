@@ -40,3 +40,8 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use inline imports (for fixture-local scoping), one-line
+# semicolon-compact setup, and the occasional unused name for clarity.
+"tests/**" = ["E401", "E402", "E501", "E702", "E741", "F401", "F811", "F841"]

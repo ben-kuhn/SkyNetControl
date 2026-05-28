@@ -17,8 +17,11 @@ def _create_session(db_session, start_date, end_date=None, grace_hours=24.0, sta
     db_session.add(season)
     db_session.flush()
     net_session = NetSession(
-        season_id=season.id, start_date=start_date, end_date=end_date,
-        grace_period_hours=grace_hours, session_type=SessionType.REGULAR_CHECKIN,
+        season_id=season.id,
+        start_date=start_date,
+        end_date=end_date,
+        grace_period_hours=grace_hours,
+        session_type=SessionType.REGULAR_CHECKIN,
         status=status,
     )
     db_session.add(net_session)

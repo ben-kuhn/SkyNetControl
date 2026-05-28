@@ -620,23 +620,22 @@ def test_regenerate_roster_draft_picks_up_new_checkins(db, season_and_sessions, 
     log = generate_draft(db, session1.id)
     assert log is not None
 
-    db.add(CheckIn(
-        session_id=session1.id,
-        callsign="W0NEW",
-        name="New Person",
-        mode="winlink",
-        parse_status=ParseStatus.AUTO,
-        timing_status=TimingStatus.ON_TIME,
-        is_new_member=True,
-    ))
+    db.add(
+        CheckIn(
+            session_id=session1.id,
+            callsign="W0NEW",
+            name="New Person",
+            mode="winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+            is_new_member=True,
+        )
+    )
     db.commit()
 
     result = regenerate_draft(db, log.id)
     assert result is not None
-    combined = (
-        result.content_header + result.content_welcome
-        + result.content_comments + result.content_footer
-    )
+    combined = result.content_header + result.content_welcome + result.content_comments + result.content_footer
     assert "W0NEW" in combined or "New Person" in combined
 
 

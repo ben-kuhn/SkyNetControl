@@ -36,13 +36,15 @@ def db_setup():
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
-        session.add(User(
-            callsign="ADMIN",
-            oidc_subject="local|admin",
-            name="Admin User",
-            email="admin@test.com",
-            role=UserRole.ADMIN,
-        ))
+        session.add(
+            User(
+                callsign="ADMIN",
+                oidc_subject="local|admin",
+                name="Admin User",
+                email="admin@test.com",
+                role=UserRole.ADMIN,
+            )
+        )
         session.commit()
     return factory
 
@@ -71,11 +73,16 @@ def _auth_headers(test_settings, callsign="ADMIN", role="admin"):
 @pytest.mark.anyio
 async def test_get_delivery_status(client, test_settings, db_setup):
     with db_setup() as session:
-        session.add(DeliveryLog(
-            content_type="reminder", content_id=1, backend="email",
-            status=DeliveryStatus.SENT, created_at=datetime.now(tz=timezone.utc),
-            sent_at=datetime.now(tz=timezone.utc),
-        ))
+        session.add(
+            DeliveryLog(
+                content_type="reminder",
+                content_id=1,
+                backend="email",
+                status=DeliveryStatus.SENT,
+                created_at=datetime.now(tz=timezone.utc),
+                sent_at=datetime.now(tz=timezone.utc),
+            )
+        )
         session.commit()
 
     resp = await client.get(
@@ -102,17 +109,25 @@ async def test_get_delivery_status_empty(client, test_settings):
 @pytest.mark.anyio
 async def test_retry_delivery(client, test_settings, db_setup):
     with db_setup() as session:
-        session.add(DeliveryLog(
-            content_type="reminder", content_id=1, backend="email",
-            status=DeliveryStatus.FAILED, error_message="SMTP down",
-            created_at=datetime.now(tz=timezone.utc),
-        ))
+        session.add(
+            DeliveryLog(
+                content_type="reminder",
+                content_id=1,
+                backend="email",
+                status=DeliveryStatus.FAILED,
+                error_message="SMTP down",
+                created_at=datetime.now(tz=timezone.utc),
+            )
+        )
         session.add(AppConfig(key="delivery.email.to_address", value="net@test.com"))
         session.commit()
 
     with patch("backend.integrations.delivery.service.get_backend") as mock_get:
         from backend.integrations.delivery.backends.base import DeliveryResult
-        mock_backend = type("MockBackend", (), {"send": lambda self, s, b, c: DeliveryResult(success=True, error=None)})()
+
+        mock_backend = type(
+            "MockBackend", (), {"send": lambda self, s, b, c: DeliveryResult(success=True, error=None)}
+        )()
         mock_get.return_value = mock_backend
 
         resp = await client.post(

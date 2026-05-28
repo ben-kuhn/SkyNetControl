@@ -87,15 +87,12 @@ def test_reminder_mark_sent_dispatches_delivery(db):
         return_value=_StubBackend(DeliveryResult(success=True, error=None)),
     ):
         from backend.modules.reminders.service import mark_sent
+
         result = mark_sent(db, log.id)
 
     assert result is not None
     assert result.status == ReminderStatus.SENT
-    delivery_logs = (
-        db.query(DeliveryLog)
-        .filter_by(content_type="reminder", content_id=log.id)
-        .all()
-    )
+    delivery_logs = db.query(DeliveryLog).filter_by(content_type="reminder", content_id=log.id).all()
     assert len(delivery_logs) == 1
     assert delivery_logs[0].status == DeliveryStatus.SENT
 
@@ -120,6 +117,7 @@ def test_reminder_mark_sent_stays_approved_on_all_fail(db):
         return_value=_StubBackend(DeliveryResult(success=False, error="SMTP down")),
     ):
         from backend.modules.reminders.service import mark_sent
+
         result = mark_sent(db, log.id)
 
     assert result is None
@@ -150,15 +148,12 @@ def test_roster_mark_sent_dispatches_delivery(db):
         return_value=_StubBackend(DeliveryResult(success=True, error=None)),
     ):
         from backend.modules.roster.service import mark_sent
+
         result = mark_sent(db, log.id)
 
     assert result is not None
     assert result.status == RosterStatus.SENT
-    delivery_logs = (
-        db.query(DeliveryLog)
-        .filter_by(content_type="roster", content_id=log.id)
-        .all()
-    )
+    delivery_logs = db.query(DeliveryLog).filter_by(content_type="roster", content_id=log.id).all()
     assert len(delivery_logs) == 1
     assert delivery_logs[0].status == DeliveryStatus.SENT
 
@@ -169,35 +164,42 @@ def test_reminder_send_failure_creates_delivery_failure_notification(db):
     from backend.modules.reminders.models import ReminderLog, ReminderStatus
     from backend.modules.notifications.models import Notification, NotificationKind
 
-    season = NetSeason(name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-                       day_of_week=3, time=time(18, 0))
-    db.add(season); db.flush()
-    sess = NetSession(season_id=season.id, start_date=date(2026, 5, 28),
-                      session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.SCHEDULED,
-                      net_control_callsign="W0NE")
+    season = NetSeason(
+        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
+    )
+    db.add(season)
+    db.flush()
+    sess = NetSession(
+        season_id=season.id,
+        start_date=date(2026, 5, 28),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
+        net_control_callsign="W0NE",
+    )
     db.add(sess)
     db.add(User(callsign="W0NE", oidc_subject="x", name="N", role=UserRole.NET_CONTROL))
     db.flush()
 
     log = ReminderLog(
-        session_id=sess.id, status=ReminderStatus.APPROVED,
-        content_subject="S", content_body="B",
+        session_id=sess.id,
+        status=ReminderStatus.APPROVED,
+        content_subject="S",
+        content_body="B",
         drafted_at=datetime.now(tz=timezone.utc),
-        approved_at=datetime.now(tz=timezone.utc), approved_by="W0NE",
+        approved_at=datetime.now(tz=timezone.utc),
+        approved_by="W0NE",
     )
-    db.add(log); db.commit()
+    db.add(log)
+    db.commit()
 
     with patch(
-        "backend.integrations.delivery.service.dispatch_delivery", return_value=False,
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=False,
     ):
         result = reminder_mark_sent(db, log.id)
 
     assert result is None
-    rows = (
-        db.query(Notification)
-        .filter(Notification.kind == NotificationKind.DELIVERY_FAILURE)
-        .all()
-    )
+    rows = db.query(Notification).filter(Notification.kind == NotificationKind.DELIVERY_FAILURE).all()
     assert len(rows) == 1
     assert "verify delivery backends" in rows[0].message.lower()
     assert rows[0].link_url == "/config"
@@ -209,35 +211,44 @@ def test_roster_send_failure_creates_delivery_failure_notification(db):
     from backend.modules.roster.models import RosterLog, RosterStatus
     from backend.modules.notifications.models import Notification, NotificationKind
 
-    season = NetSeason(name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-                       day_of_week=3, time=time(18, 0))
-    db.add(season); db.flush()
-    sess = NetSession(season_id=season.id, start_date=date(2026, 5, 28),
-                      session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.SCHEDULED,
-                      net_control_callsign="W0NE")
+    season = NetSeason(
+        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
+    )
+    db.add(season)
+    db.flush()
+    sess = NetSession(
+        season_id=season.id,
+        start_date=date(2026, 5, 28),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
+        net_control_callsign="W0NE",
+    )
     db.add(sess)
     db.add(User(callsign="W0NE", oidc_subject="x", name="N", role=UserRole.NET_CONTROL))
     db.flush()
 
     log = RosterLog(
-        session_id=sess.id, status=RosterStatus.APPROVED,
-        content_subject="S", content_header="H", content_welcome="W",
-        content_comments="C", content_footer="F",
+        session_id=sess.id,
+        status=RosterStatus.APPROVED,
+        content_subject="S",
+        content_header="H",
+        content_welcome="W",
+        content_comments="C",
+        content_footer="F",
         drafted_at=datetime.now(tz=timezone.utc),
-        approved_at=datetime.now(tz=timezone.utc), approved_by="W0NE",
+        approved_at=datetime.now(tz=timezone.utc),
+        approved_by="W0NE",
     )
-    db.add(log); db.commit()
+    db.add(log)
+    db.commit()
 
     with patch(
-        "backend.integrations.delivery.service.dispatch_delivery", return_value=False,
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=False,
     ):
         result = roster_mark_sent(db, log.id)
 
     assert result is None
-    rows = (
-        db.query(Notification)
-        .filter(Notification.kind == NotificationKind.DELIVERY_FAILURE)
-        .all()
-    )
+    rows = db.query(Notification).filter(Notification.kind == NotificationKind.DELIVERY_FAILURE).all()
     assert len(rows) == 1
     assert rows[0].link_url == "/config"

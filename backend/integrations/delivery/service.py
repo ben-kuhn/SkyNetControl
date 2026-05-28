@@ -18,6 +18,7 @@ def _build_config(db: Session, backend_name: str) -> dict:
     if backend_name == "email":
         config["to_address"] = get_config_value(db, "delivery.email.to_address", "")
         from backend.config import settings
+
         config["smtp_host"] = settings.smtp.host
         config["smtp_port"] = settings.smtp.port
         config["smtp_username"] = settings.smtp.username
@@ -96,12 +97,14 @@ def _lookup_content(db: Session, content_type: str, content_id: int) -> tuple[st
     """Look up the original subject and body from the source log."""
     if content_type == "reminder":
         from backend.modules.reminders.models import ReminderLog
+
         log = db.get(ReminderLog, content_id)
         if log:
             return log.content_subject, log.content_body
     elif content_type == "roster":
         from backend.modules.roster.models import RosterLog
         from backend.modules.roster.service import assemble_roster
+
         log = db.get(RosterLog, content_id)
         if log:
             body = assemble_roster(db, content_id) or ""

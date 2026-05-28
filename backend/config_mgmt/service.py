@@ -6,9 +6,18 @@ from backend.config_mgmt.models import AppConfig
 
 
 DEFAULT_CHECKIN_MODES = [
-    "Voice", "Winlink", "VARA FM", "VARA HF", "ARDOP",
-    "1200-baud Packet", "9k6 Packet", "Pactor", "Telnet",
-    "AX.25", "CW", "Digital",
+    "Voice",
+    "Winlink",
+    "VARA FM",
+    "VARA HF",
+    "ARDOP",
+    "1200-baud Packet",
+    "9k6 Packet",
+    "Pactor",
+    "Telnet",
+    "AX.25",
+    "CW",
+    "Digital",
 ]
 
 

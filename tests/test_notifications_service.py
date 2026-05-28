@@ -18,11 +18,13 @@ def db():
 
 def test_notification_model_loads(db):
     from backend.auth.models import User, UserRole
+
     user = User(callsign="W0NE", oidc_subject="x", name="X", role=UserRole.ADMIN)
     db.add(user)
     db.flush()
 
     from datetime import datetime, timezone
+
     n = Notification(
         recipient_callsign="W0NE",
         kind=NotificationKind.REMINDER_DRAFT,
@@ -39,6 +41,7 @@ def test_notification_model_loads(db):
 
 def _seed_user(db, callsign="W0NE", role=None):
     from backend.auth.models import User, UserRole
+
     user = User(
         callsign=callsign,
         oidc_subject=f"sub|{callsign}",
@@ -53,15 +56,21 @@ def _seed_user(db, callsign="W0NE", role=None):
 def _seed_session(db, ncs="W0NE"):
     from datetime import date, time
     from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+
     season = NetSeason(
-        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-        day_of_week=3, time=time(18, 0),
+        name="S",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        day_of_week=3,
+        time=time(18, 0),
     )
     db.add(season)
     db.flush()
     sess = NetSession(
-        season_id=season.id, start_date=date(2026, 5, 28),
-        session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.SCHEDULED,
+        season_id=season.id,
+        start_date=date(2026, 5, 28),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
         net_control_callsign=ncs,
     )
     db.add(sess)
@@ -72,12 +81,17 @@ def _seed_session(db, ncs="W0NE"):
 def test_create_notification_inserts_row(db):
     from backend.modules.notifications.service import create_notification
     from backend.modules.notifications.models import NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
     n = create_notification(
-        db, "W0NE", NotificationKind.REMINDER_DRAFT,
-        message="Reminder draft ready", link_url="/reminders", session_id=sess.id,
+        db,
+        "W0NE",
+        NotificationKind.REMINDER_DRAFT,
+        message="Reminder draft ready",
+        link_url="/reminders",
+        session_id=sess.id,
     )
     assert n.id is not None
     assert n.recipient_callsign == "W0NE"
@@ -87,16 +101,25 @@ def test_create_notification_inserts_row(db):
 def test_create_notification_dedupes_unread(db):
     from backend.modules.notifications.service import create_notification
     from backend.modules.notifications.models import Notification, NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
     a = create_notification(
-        db, "W0NE", NotificationKind.REMINDER_DRAFT,
-        message="A", link_url="/reminders", session_id=sess.id,
+        db,
+        "W0NE",
+        NotificationKind.REMINDER_DRAFT,
+        message="A",
+        link_url="/reminders",
+        session_id=sess.id,
     )
     b = create_notification(
-        db, "W0NE", NotificationKind.REMINDER_DRAFT,
-        message="B", link_url="/reminders", session_id=sess.id,
+        db,
+        "W0NE",
+        NotificationKind.REMINDER_DRAFT,
+        message="B",
+        link_url="/reminders",
+        session_id=sess.id,
     )
     assert a.id == b.id
     assert db.query(Notification).count() == 1
@@ -106,19 +129,26 @@ def test_create_notification_no_dedupe_after_read(db):
     from datetime import datetime, timezone
     from backend.modules.notifications.service import create_notification
     from backend.modules.notifications.models import Notification, NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
     a = create_notification(
-        db, "W0NE", NotificationKind.REMINDER_DRAFT,
-        message="A", session_id=sess.id,
+        db,
+        "W0NE",
+        NotificationKind.REMINDER_DRAFT,
+        message="A",
+        session_id=sess.id,
     )
     a.read_at = datetime.now(tz=timezone.utc)
     db.commit()
 
     b = create_notification(
-        db, "W0NE", NotificationKind.REMINDER_DRAFT,
-        message="B", session_id=sess.id,
+        db,
+        "W0NE",
+        NotificationKind.REMINDER_DRAFT,
+        message="B",
+        session_id=sess.id,
     )
     assert b.id != a.id
     assert db.query(Notification).count() == 2
@@ -127,16 +157,25 @@ def test_create_notification_no_dedupe_after_read(db):
 def test_create_notification_dedupe_off_always_inserts(db):
     from backend.modules.notifications.service import create_notification
     from backend.modules.notifications.models import Notification, NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
     create_notification(
-        db, "W0NE", NotificationKind.DELIVERY_FAILURE,
-        message="X", session_id=sess.id, dedupe=False,
+        db,
+        "W0NE",
+        NotificationKind.DELIVERY_FAILURE,
+        message="X",
+        session_id=sess.id,
+        dedupe=False,
     )
     create_notification(
-        db, "W0NE", NotificationKind.DELIVERY_FAILURE,
-        message="Y", session_id=sess.id, dedupe=False,
+        db,
+        "W0NE",
+        NotificationKind.DELIVERY_FAILURE,
+        message="Y",
+        session_id=sess.id,
+        dedupe=False,
     )
     assert db.query(Notification).count() == 2
 
@@ -145,6 +184,7 @@ def test_list_for_user_unread_only_by_default(db):
     from datetime import datetime, timezone
     from backend.modules.notifications.service import create_notification, list_for_user
     from backend.modules.notifications.models import NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
@@ -163,6 +203,7 @@ def test_list_for_user_unread_only_by_default(db):
 def test_mark_read_owned(db):
     from backend.modules.notifications.service import create_notification, mark_read
     from backend.modules.notifications.models import NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
@@ -175,6 +216,7 @@ def test_mark_read_owned(db):
 def test_mark_read_not_owned_returns_none(db):
     from backend.modules.notifications.service import create_notification, mark_read
     from backend.modules.notifications.models import NotificationKind
+
     _seed_user(db, callsign="W0NE")
     _seed_user(db, callsign="KD0OTH")
     sess = _seed_session(db)
@@ -186,6 +228,7 @@ def test_mark_read_not_owned_returns_none(db):
 def test_mark_all_read_returns_count(db):
     from backend.modules.notifications.service import create_notification, mark_all_read
     from backend.modules.notifications.models import NotificationKind
+
     _seed_user(db)
     sess = _seed_session(db)
 
@@ -197,6 +240,7 @@ def test_mark_all_read_returns_count(db):
 
 def test_resolve_session_recipient_prefers_ncs(db):
     from backend.modules.notifications.service import resolve_session_recipient
+
     _seed_user(db, callsign="W0NE")
     _seed_user(db, callsign="W0ADM")
     sess = _seed_session(db, ncs="W0NE")
@@ -206,20 +250,29 @@ def test_resolve_session_recipient_prefers_ncs(db):
 def test_resolve_session_recipient_falls_back_to_admin(db):
     from backend.auth.models import UserRole
     from backend.modules.notifications.service import resolve_session_recipient
+
     _seed_user(db, callsign="W0ADM", role=UserRole.ADMIN)
     from datetime import date, time
     from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+
     season = NetSeason(
-        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-        day_of_week=3, time=time(18, 0),
+        name="S",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        day_of_week=3,
+        time=time(18, 0),
     )
-    db.add(season); db.flush()
+    db.add(season)
+    db.flush()
     sess = NetSession(
-        season_id=season.id, start_date=date(2026, 5, 28),
-        session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.SCHEDULED,
+        season_id=season.id,
+        start_date=date(2026, 5, 28),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
         net_control_callsign=None,
     )
-    db.add(sess); db.commit()
+    db.add(sess)
+    db.commit()
 
     assert resolve_session_recipient(db, sess) == "W0ADM"
 
@@ -228,15 +281,23 @@ def test_resolve_session_recipient_returns_none_when_no_one(db):
     from backend.modules.notifications.service import resolve_session_recipient
     from datetime import date, time
     from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+
     season = NetSeason(
-        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
-        day_of_week=3, time=time(18, 0),
+        name="S",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        day_of_week=3,
+        time=time(18, 0),
     )
-    db.add(season); db.flush()
+    db.add(season)
+    db.flush()
     sess = NetSession(
-        season_id=season.id, start_date=date(2026, 5, 28),
-        session_type=SessionType.REGULAR_CHECKIN, status=SessionStatus.SCHEDULED,
+        season_id=season.id,
+        start_date=date(2026, 5, 28),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
         net_control_callsign=None,
     )
-    db.add(sess); db.commit()
+    db.add(sess)
+    db.commit()
     assert resolve_session_recipient(db, sess) is None

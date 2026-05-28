@@ -14,11 +14,7 @@ logger = logging.getLogger(__name__)
 
 def find_active_session(db: Session, now: datetime) -> NetSession | None:
     """Find a SCHEDULED session whose window (start - grace through end + grace) contains `now`."""
-    sessions = (
-        db.query(NetSession)
-        .filter(NetSession.status == SessionStatus.SCHEDULED)
-        .all()
-    )
+    sessions = db.query(NetSession).filter(NetSession.status == SessionStatus.SCHEDULED).all()
 
     for session in sessions:
         session_start = datetime.combine(session.start_date, datetime.min.time(), tzinfo=timezone.utc)

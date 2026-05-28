@@ -288,7 +288,13 @@ async def update_user_role(
     target_user.role = body.role
     db.commit()
     db.refresh(target_user)
-    log_action(db, actor=user.callsign, action="user.role_changed", target=callsign, details={"from": old_role, "to": body.role.value})
+    log_action(
+        db,
+        actor=user.callsign,
+        action="user.role_changed",
+        target=callsign,
+        details={"from": old_role, "to": body.role.value},
+    )
     if was_pending and target_user.role != UserRole.PENDING:
         await notify_user_approved(target_user, app_settings)
     return {
@@ -324,7 +330,13 @@ async def approve_callsign(
         {"new": new_callsign, "old": callsign},
     )
     db.commit()
-    log_action(db, actor=user.callsign, action="user.callsign_approved", target=new_callsign, details={"old": callsign, "new": new_callsign})
+    log_action(
+        db,
+        actor=user.callsign,
+        action="user.callsign_approved",
+        target=new_callsign,
+        details={"old": callsign, "new": new_callsign},
+    )
 
     updated_user = db.get(User, new_callsign)
     await notify_user_callsign_approved(updated_user, callsign, app_settings)

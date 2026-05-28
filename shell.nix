@@ -8,8 +8,9 @@ pkgs.mkShell {
     python
     python.pkgs.pip
     python.pkgs.virtualenv
+    # nodejs_22 already bundles npm; pkgs.nodePackages.npm was removed in
+    # newer nixpkgs and broke CI.
     pkgs.nodejs_22
-    pkgs.nodePackages.npm
     pkgs.ruff
   ];
 

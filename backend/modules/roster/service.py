@@ -535,4 +535,3 @@ def regenerate_draft(db: Session, roster_id: int) -> RosterLog | None:
     db.commit()
     db.refresh(log)
     return log
-

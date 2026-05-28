@@ -10,9 +10,7 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    actor_callsign: Mapped[str] = mapped_column(
-        String(20), ForeignKey("users.callsign"), nullable=False
-    )
+    actor_callsign: Mapped[str] = mapped_column(String(20), ForeignKey("users.callsign"), nullable=False)
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     target_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)

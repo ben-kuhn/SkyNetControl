@@ -73,7 +73,9 @@ async def test_client(test_app):
 
 def test_log_action_creates_entry(db_setup):
     with db_setup() as db:
-        log_action(db, actor="W0NE", action="user.role_changed", target="KD0TST", details={"from": "pending", "to": "viewer"})
+        log_action(
+            db, actor="W0NE", action="user.role_changed", target="KD0TST", details={"from": "pending", "to": "viewer"}
+        )
         entries = db.query(AuditLog).all()
         assert len(entries) == 1
         entry = entries[0]
@@ -108,7 +110,9 @@ def test_log_action_multiple_entries_ordered(db_setup):
 @pytest.mark.asyncio
 async def test_admin_can_list_audit_log(test_client, test_settings, db_setup):
     with db_setup() as db:
-        log_action(db, actor="W0NE", action="user.role_changed", target="KD0TST", details={"from": "pending", "to": "viewer"})
+        log_action(
+            db, actor="W0NE", action="user.role_changed", target="KD0TST", details={"from": "pending", "to": "viewer"}
+        )
 
     token = create_access_token("W0NE", "admin", test_settings)
     response = await test_client.get("/api/audit/", cookies={"access_token": token})

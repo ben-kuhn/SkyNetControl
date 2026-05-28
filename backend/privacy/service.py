@@ -38,39 +38,37 @@ def anonymize_user(
     anon_id = _generate_anon_id(db)
 
     # 1. Delete PATs first (FK to users.callsign)
-    db.query(PersonalAccessToken).filter(
-        PersonalAccessToken.user_callsign == callsign
-    ).delete()
+    db.query(PersonalAccessToken).filter(PersonalAccessToken.user_callsign == callsign).delete()
 
     # 2. Update audit log references
-    db.query(AuditLog).filter(AuditLog.actor_callsign == callsign).update(
-        {AuditLog.actor_callsign: anon_id}
-    )
-    db.query(AuditLog).filter(AuditLog.target_callsign == callsign).update(
-        {AuditLog.target_callsign: anon_id}
-    )
+    db.query(AuditLog).filter(AuditLog.actor_callsign == callsign).update({AuditLog.actor_callsign: anon_id})
+    db.query(AuditLog).filter(AuditLog.target_callsign == callsign).update({AuditLog.target_callsign: anon_id})
 
     # 3. Anonymize check-ins and their raw messages
     checkins = db.query(CheckIn).filter(CheckIn.callsign == callsign).all()
     raw_message_ids = [ci.raw_message_id for ci in checkins if ci.raw_message_id]
 
-    db.query(CheckIn).filter(CheckIn.callsign == callsign).update({
-        CheckIn.callsign: anon_id,
-        CheckIn.name: "Deleted User",
-        CheckIn.city: None,
-        CheckIn.county: None,
-        CheckIn.state: None,
-        CheckIn.latitude: None,
-        CheckIn.longitude: None,
-        CheckIn.comments: None,
-    })
+    db.query(CheckIn).filter(CheckIn.callsign == callsign).update(
+        {
+            CheckIn.callsign: anon_id,
+            CheckIn.name: "Deleted User",
+            CheckIn.city: None,
+            CheckIn.county: None,
+            CheckIn.state: None,
+            CheckIn.latitude: None,
+            CheckIn.longitude: None,
+            CheckIn.comments: None,
+        }
+    )
 
     if raw_message_ids:
-        db.query(RawMessage).filter(RawMessage.id.in_(raw_message_ids)).update({
-            RawMessage.from_address: "anonymized",
-            RawMessage.subject: "[redacted]",
-            RawMessage.body: "[redacted]",
-        })
+        db.query(RawMessage).filter(RawMessage.id.in_(raw_message_ids)).update(
+            {
+                RawMessage.from_address: "anonymized",
+                RawMessage.subject: "[redacted]",
+                RawMessage.body: "[redacted]",
+            }
+        )
 
     # 4. Anonymize member record (callsign is PK, so delete + re-insert)
     member = db.get(Member, callsign)
@@ -174,10 +172,7 @@ def export_user_data(db: Session, callsign: str) -> dict:
 
     audit_entries = (
         db.query(AuditLog)
-        .filter(
-            (AuditLog.actor_callsign == callsign)
-            | (AuditLog.target_callsign == callsign)
-        )
+        .filter((AuditLog.actor_callsign == callsign) | (AuditLog.target_callsign == callsign))
         .order_by(AuditLog.created_at.desc())
         .all()
     )
@@ -192,11 +187,7 @@ def export_user_data(db: Session, callsign: str) -> dict:
         for e in audit_entries
     ]
 
-    tokens = (
-        db.query(PersonalAccessToken)
-        .filter(PersonalAccessToken.user_callsign == callsign)
-        .all()
-    )
+    tokens = db.query(PersonalAccessToken).filter(PersonalAccessToken.user_callsign == callsign).all()
     tokens_data = [
         {
             "name": t.name,

@@ -15,9 +15,7 @@ class DeliveryStatus(str, enum.Enum):
 
 class DeliveryLog(Base):
     __tablename__ = "delivery_logs"
-    __table_args__ = (
-        UniqueConstraint("content_type", "content_id", "backend", name="uq_delivery_content_backend"),
-    )
+    __table_args__ = (UniqueConstraint("content_type", "content_id", "backend", name="uq_delivery_content_backend"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     content_type: Mapped[str] = mapped_column(String(20), nullable=False)

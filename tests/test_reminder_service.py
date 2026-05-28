@@ -677,9 +677,13 @@ def test_generate_due_drafts_creates_notification(db, season_and_sessions):
     db.commit()
 
     create_template(
-        db, name="Regular Default", template_type=TemplateType.REGULAR_CHECKIN,
-        subject_template="Net {{ date }}", body_template="Body",
-        lead_time_days=3, is_default=True,
+        db,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net {{ date }}",
+        body_template="Body",
+        lead_time_days=3,
+        is_default=True,
     )
 
     # Force _today() such that lead-time is met for session1 (2026-04-10)

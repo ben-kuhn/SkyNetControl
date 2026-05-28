@@ -24,9 +24,7 @@ def export_own_data(
     return Response(
         content=json.dumps(data, indent=2),
         media_type="application/json",
-        headers={
-            "Content-Disposition": f'attachment; filename="skynetcontrol-export-{user.callsign}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="skynetcontrol-export-{user.callsign}.json"'},
     )
 
 
@@ -43,9 +41,7 @@ def export_user_data_admin(
     return Response(
         content=json.dumps(data, indent=2),
         media_type="application/json",
-        headers={
-            "Content-Disposition": f'attachment; filename="skynetcontrol-export-{callsign}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="skynetcontrol-export-{callsign}.json"'},
     )
 
 

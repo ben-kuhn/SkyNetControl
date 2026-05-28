@@ -30,18 +30,20 @@ def _set_config(db, key, value):
 def test_lookup_returns_fresh_cache(db):
     from backend.integrations.callbook.service import lookup_callsign
 
-    db.add(CallbookCache(
-        callsign="W0ABC",
-        name="John Smith",
-        city="Denver",
-        county="Denver",
-        state="CO",
-        country="United States",
-        latitude=39.7392,
-        longitude=-104.9903,
-        source="hamqth",
-        fetched_at=datetime.now(timezone.utc),
-    ))
+    db.add(
+        CallbookCache(
+            callsign="W0ABC",
+            name="John Smith",
+            city="Denver",
+            county="Denver",
+            state="CO",
+            country="United States",
+            latitude=39.7392,
+            longitude=-104.9903,
+            source="hamqth",
+            fetched_at=datetime.now(timezone.utc),
+        )
+    )
     db.commit()
 
     result = lookup_callsign(db, "W0ABC")
@@ -54,14 +56,16 @@ def test_lookup_returns_fresh_cache(db):
 def test_lookup_skips_expired_cache(db):
     from backend.integrations.callbook.service import lookup_callsign
 
-    db.add(CallbookCache(
-        callsign="W0OLD",
-        name="Old Entry",
-        city="Denver",
-        state="CO",
-        source="hamqth",
-        fetched_at=datetime.now(timezone.utc) - timedelta(days=31),
-    ))
+    db.add(
+        CallbookCache(
+            callsign="W0OLD",
+            name="Old Entry",
+            city="Denver",
+            state="CO",
+            source="hamqth",
+            fetched_at=datetime.now(timezone.utc) - timedelta(days=31),
+        )
+    )
     db.commit()
 
     _set_config(db, "callbook.providers", json.dumps(["hamqth"]))
@@ -69,9 +73,15 @@ def test_lookup_skips_expired_cache(db):
     _set_config(db, "callbook.hamqth.password", "pass")
 
     mock_result = CallbookResult(
-        callsign="W0OLD", name="Updated Name", city="Boulder",
-        county="Boulder", state="CO", country="United States",
-        latitude=40.0, longitude=-105.0, source="hamqth",
+        callsign="W0OLD",
+        name="Updated Name",
+        city="Boulder",
+        county="Boulder",
+        state="CO",
+        country="United States",
+        latitude=40.0,
+        longitude=-105.0,
+        source="hamqth",
     )
 
     with patch("backend.integrations.callbook.service._lookup_from_provider", return_value=mock_result):
@@ -95,9 +105,15 @@ def test_lookup_tries_providers_in_order(db):
     _set_config(db, "callbook.qrz.password", "pass2")
 
     qrz_result = CallbookResult(
-        callsign="W0NEW", name="From QRZ", city="Denver",
-        county=None, state="CO", country="United States",
-        latitude=None, longitude=None, source="qrz",
+        callsign="W0NEW",
+        name="From QRZ",
+        city="Denver",
+        county=None,
+        state="CO",
+        country="United States",
+        latitude=None,
+        longitude=None,
+        source="qrz",
     )
 
     with patch("backend.integrations.callbook.service._lookup_from_provider", side_effect=[None, qrz_result]):
@@ -135,14 +151,22 @@ def test_lookup_from_provider_retries_on_auth_failure(db):
     _session_tokens["hamqth"] = "expired-token"
 
     fresh_result = CallbookResult(
-        callsign="W0ABC", name="John", city="Denver",
-        county=None, state="CO", country="United States",
-        latitude=None, longitude=None, source="hamqth",
+        callsign="W0ABC",
+        name="John",
+        city="Denver",
+        county=None,
+        state="CO",
+        country="United States",
+        latitude=None,
+        longitude=None,
+        source="hamqth",
     )
 
     provider = HamQTHProvider()
-    with patch.object(provider, "lookup", side_effect=[None, fresh_result]) as mock_lookup, \
-         patch.object(provider, "authenticate", return_value="new-token") as mock_auth:
+    with (
+        patch.object(provider, "lookup", side_effect=[None, fresh_result]) as mock_lookup,
+        patch.object(provider, "authenticate", return_value="new-token") as mock_auth,
+    ):
         result = _lookup_from_provider(provider, "W0ABC", "user", "pass", "hamqth")
 
     assert result is not None

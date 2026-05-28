@@ -29,7 +29,7 @@ def get_current_user(
     request.state.token_scopes = None
     # Try Bearer token first
     if authorization and authorization.startswith("Bearer skynet_"):
-        raw_token = authorization[len("Bearer "):]
+        raw_token = authorization[len("Bearer ") :]
         auth_result = authenticate_token(db, raw_token)
         if auth_result is None:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -108,6 +108,7 @@ def optional_user_with_scope(*scopes: str) -> Callable:
     Cookie auth bypasses scope checks (matching require_scope behavior).
     Anonymous (no token at all) returns None.
     """
+
     def dependency(
         request: Request,
         access_token: str | None = Cookie(default=None),
@@ -146,6 +147,7 @@ def require_scope(*scopes: str) -> Callable:
         if token_scopes is None:
             return user  # cookie auth = full access
         from backend.auth.scopes import SCOPES, _ROLE_RANK
+
         user_rank = _ROLE_RANK[user.role]
         for scope in scopes:
             if scope not in token_scopes:

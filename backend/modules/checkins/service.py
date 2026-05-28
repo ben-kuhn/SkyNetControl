@@ -146,6 +146,7 @@ def scan_and_import_messages(
             create_notification,
             resolve_session_recipient,
         )
+
         recipient = resolve_session_recipient(db, net_session)
         if recipient is not None:
             n = len(result)

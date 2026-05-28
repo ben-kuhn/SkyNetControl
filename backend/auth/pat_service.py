@@ -116,11 +116,7 @@ def revoke_token(db: Session, token_id: int, user_callsign: str, is_admin: bool)
 
 def authenticate_token(db: Session, raw_token: str) -> dict | None:
     token_hash = _hash_token(raw_token)
-    pat = (
-        db.query(PersonalAccessToken)
-        .filter_by(token_hash=token_hash, revoked_at=None)
-        .first()
-    )
+    pat = db.query(PersonalAccessToken).filter_by(token_hash=token_hash, revoked_at=None).first()
     if pat is None:
         return None
 
@@ -129,10 +125,7 @@ def authenticate_token(db: Session, raw_token: str) -> dict | None:
         return None
 
     # Debounced last_used_at update
-    if (
-        pat.last_used_at is None
-        or (now - pat.last_used_at).total_seconds() > LAST_USED_DEBOUNCE_SECONDS
-    ):
+    if pat.last_used_at is None or (now - pat.last_used_at).total_seconds() > LAST_USED_DEBOUNCE_SECONDS:
         pat.last_used_at = now
         db.commit()
 
