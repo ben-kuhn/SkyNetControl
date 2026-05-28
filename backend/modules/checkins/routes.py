@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -109,7 +111,10 @@ async def scan_mailbox_route(
             detail="PAT mailbox path or net address not configured",
         )
 
-    raw_messages = read_mailbox(mailbox_path, net_address=net_address)
+    # PAT stores incoming messages in {mailbox_path}/in — match the
+    # background scanner's behavior so both paths see the same files.
+    inbox_path = os.path.join(mailbox_path, "in")
+    raw_messages = read_mailbox(inbox_path, net_address=net_address)
     checkins = scan_and_import_messages(db, raw_messages, net_session)
 
     return {

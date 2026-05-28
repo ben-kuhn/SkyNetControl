@@ -13,10 +13,10 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Schedule", to: "/schedule", minRole: ["pending", "viewer", "net_control", "admin"] },
   { label: "Check-ins", to: "/checkins", minRole: ["viewer", "net_control", "admin"] },
-  { label: "Map", to: "/map", minRole: ["viewer", "net_control", "admin"] },
+  { label: "Members", to: "/members", minRole: ["viewer", "net_control", "admin"] },
   { label: "Reminders", to: "/reminders", minRole: ["net_control", "admin"] },
   { label: "Roster", to: "/roster", minRole: ["net_control", "admin"] },
-  { label: "Activities", to: "/activities", minRole: ["admin"] },
+  { label: "Activities", to: "/activities", minRole: ["net_control", "admin"] },
   { label: "Users", to: "/users", minRole: ["admin"] },
   { label: "Config", to: "/config", minRole: ["admin"] },
 ];

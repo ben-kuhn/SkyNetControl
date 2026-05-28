@@ -17,6 +17,11 @@ export async function apiFetch<T>(
 
   const response = await fetch(url, {
     ...options,
+    // Defensive: same-origin in production and dev (Vite proxy makes
+    // /api/* same-origin too), so cookies are sent automatically. But
+    // setting this explicitly avoids surprises if the topology ever
+    // changes (subdomain, separate hosting).
+    credentials: "include",
     headers: {
       ...headers,
       ...(options?.headers as Record<string, string>),

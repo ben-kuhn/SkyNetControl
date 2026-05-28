@@ -1,6 +1,10 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from backend.auth.dependencies import get_current_user, get_db_session, require_role
 from backend.auth.models import User, UserRole
@@ -237,7 +241,11 @@ async def send_chat_message_route(
     try:
         user_msg, assistant_msg = send_message(db, chat_session_id, body.content, api_key=api_key)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Claude API error: {exc}") from exc
+        # Log the full exception server-side; return a generic 502 so we
+        # don't leak Anthropic SDK details (request IDs, rate-limit info,
+        # key prefixes) to the client.
+        logger.exception("Claude API call failed for chat session %s", chat_session_id)
+        raise HTTPException(status_code=502, detail="Claude API call failed.") from exc
     return {
         "user_message": _message_to_response(user_msg),
         "assistant_message": _message_to_response(assistant_msg),

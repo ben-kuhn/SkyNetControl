@@ -54,10 +54,12 @@ async def login(provider: str, request: Request, app_settings: Settings = Depend
     authorization_url = f"{config['authorize_url']}?{urllib.parse.urlencode(params)}"
 
     response = RedirectResponse(url=authorization_url)
+    is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
         key="oauth_state",
         value=f"{provider}:{state}",
         httponly=True,
+        secure=is_secure,
         samesite="lax",
         max_age=600,
     )
@@ -116,8 +118,11 @@ async def callback(
     user = db.query(User).filter(User.oidc_subject == oidc_subject).first()
 
     if user is None:
-        # First user auto-becomes admin
-        user_count = db.query(User).count()
+        # First user auto-becomes admin. Lock the users table so two
+        # concurrent OAuth callbacks on PostgreSQL can't both see
+        # count==0 and both insert as ADMIN. SQLite serializes writes
+        # so this is a no-op there.
+        user_count = db.query(User).with_for_update().count()
         role = UserRole.ADMIN if user_count == 0 else UserRole.PENDING
 
         placeholder_callsign = f"PENDING-{oidc_subject[:12]}"
