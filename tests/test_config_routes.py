@@ -102,3 +102,64 @@ async def test_viewer_cannot_set_config(test_client, test_settings):
 async def test_unauthenticated_cannot_get_config(test_client):
     response = await test_client.get("/api/config/")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_get_config(test_client, test_settings):
+    """Audit H1: secrets in config should not be exposed to non-admins."""
+    token = create_access_token("KD0TST", "viewer", test_settings)
+    response = await test_client.get("/api/config/", cookies={"access_token": token})
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_sensitive_config_value_redacted_in_audit_log(test_client, test_settings, db_setup):
+    """Audit M1: secret values must not appear in audit log details."""
+    import json
+    from backend.audit.models import AuditLog
+    token = create_access_token("W0NE", "admin", test_settings)
+
+    response = await test_client.put(
+        "/api/config/claude_api_key",
+        json={"value": "sk-ant-supersecret-12345"},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+
+    with db_setup() as session:
+        entry = (
+            session.query(AuditLog)
+            .filter(AuditLog.action == "config.updated")
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+    assert entry is not None
+    details = json.loads(entry.details)
+    assert details["key"] == "claude_api_key"
+    assert details["value"] == "[REDACTED]"
+    assert "supersecret" not in entry.details
+
+
+@pytest.mark.asyncio
+async def test_non_sensitive_config_value_logged_verbatim(test_client, test_settings, db_setup):
+    """Non-secret keys still log the actual value for traceability."""
+    import json
+    from backend.audit.models import AuditLog
+    token = create_access_token("W0NE", "admin", test_settings)
+
+    response = await test_client.put(
+        "/api/config/net_address",
+        json={"value": "w0ne@winlink.org"},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+
+    with db_setup() as session:
+        entry = (
+            session.query(AuditLog)
+            .filter(AuditLog.action == "config.updated")
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+    details = json.loads(entry.details)
+    assert details["value"] == "w0ne@winlink.org"
