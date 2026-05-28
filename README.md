@@ -23,13 +23,15 @@ SKYNET_AUTH_GITHUB_CLIENT_ID=Iv1.xxxxxxxx
 SKYNET_AUTH_GITHUB_CLIENT_SECRET=xxxxxxxx
 EOF
 
-# 2. Run migrations once (the image bundles `skynetcontrol-alembic`).
+# 2. Run migrations (re-run on every version bump; safe to repeat).
 docker run --rm \
   -v skynetcontrol-data:/data \
   --env-file skynetcontrol.env \
   --entrypoint skynetcontrol-alembic \
   ghcr.io/ben-kuhn/skynetcontrol:latest \
   upgrade head
+
+# (The bundled alembic wrapper knows where its config lives; no -c needed.)
 
 # 3. Start the server.
 docker run -d \

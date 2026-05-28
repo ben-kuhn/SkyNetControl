@@ -35,6 +35,13 @@ python.pkgs.buildPythonApplication {
     cp alembic.ini $out/share/skynetcontrol/
     cp -r alembic $out/share/skynetcontrol/alembic
 
+    # alembic.ini's `script_location = alembic` is resolved relative to
+    # CWD by default. Rewrite it to an absolute path so users can run
+    # `skynetcontrol-alembic upgrade head` from any directory.
+    substituteInPlace $out/share/skynetcontrol/alembic.ini \
+      --replace "script_location = alembic" \
+                "script_location = $out/share/skynetcontrol/alembic"
+
     # Create a Python entry point script that invokes uvicorn.
     # buildPythonApplication's wrapPythonPrograms hook will wrap this
     # with the correct PYTHONPATH containing all dependencies.
@@ -48,9 +55,12 @@ python.pkgs.buildPythonApplication {
     chmod +x $out/bin/skynetcontrol-alembic
   '';
 
-  # Set SKYNET_STATIC_DIR on all wrapped programs
+  # Set SKYNET_STATIC_DIR on all wrapped programs. Also point ALEMBIC_CONFIG
+  # at the bundled config so `skynetcontrol-alembic upgrade head` works
+  # without the user needing to pass -c or cd into the share dir.
   makeWrapperArgs = [
     "--set" "SKYNET_STATIC_DIR" "${placeholder "out"}/share/skynetcontrol/static"
+    "--set" "ALEMBIC_CONFIG" "${placeholder "out"}/share/skynetcontrol/alembic.ini"
   ];
 
   meta = {
