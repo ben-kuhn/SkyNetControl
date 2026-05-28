@@ -187,7 +187,12 @@ If migrations fail, the unit fails to start and systemd surfaces the error in `j
 
 ## OCI image (Docker, Podman, Kubernetes)
 
-### Building
+The CI pipeline publishes a fresh image to GHCR on every push to `main` and on every version tag:
+
+**`ghcr.io/ben-kuhn/skynetcontrol:latest`** — track main
+**`ghcr.io/ben-kuhn/skynetcontrol:0.1.0`** — pinned version (set by `v0.1.0` tags)
+
+You can also build locally:
 
 ```bash
 nix-build oci.nix
@@ -199,12 +204,22 @@ This produces `skynetcontrol:latest` locally. The build is fully reproducible �
 ### Running
 
 ```bash
+# Migrations (one-time per upgrade)
+docker run --rm \
+  -v skynetcontrol-data:/data \
+  --env-file /path/to/skynetcontrol.env \
+  --entrypoint skynetcontrol-alembic \
+  ghcr.io/ben-kuhn/skynetcontrol:latest \
+  upgrade head
+
+# Server
 docker run -d \
   --name skynetcontrol \
+  --restart unless-stopped \
   -p 8000:8000 \
-  -v skynet-data:/data \
+  -v skynetcontrol-data:/data \
   --env-file /path/to/skynetcontrol.env \
-  skynetcontrol:latest
+  ghcr.io/ben-kuhn/skynetcontrol:latest
 ```
 
 The image:
@@ -212,29 +227,27 @@ The image:
 - Binds `0.0.0.0:8000`.
 - Defaults `SKYNET_DATABASE_URL=sqlite:////data/skynetcontrol.db` — mount a volume at `/data` to persist the database.
 - Sets `SKYNET_STATIC_DIR` to the bundled frontend assets.
-- Has no migrations baked into the entrypoint. Run them manually before starting:
-  ```bash
-  docker run --rm -v skynet-data:/data --env-file env \
-    --entrypoint skynetcontrol-alembic \
-    skynetcontrol:latest \
-    -c /nix/store/...-skynetcontrol-0.1.0/share/skynetcontrol/alembic.ini \
-    upgrade head
-  ```
-  The exact `alembic.ini` path is inside the package's Nix store output — get it from `nix-build default.nix --no-out-link` to know the hash, or just use a startup wrapper that does both.
+- Does NOT auto-run migrations. Run `skynetcontrol-alembic upgrade head` before each upgrade. (The NixOS module handles this automatically.)
 
-Easier: write a tiny shell script (or compose entry) that runs migrations then starts the server. The NixOS module already does this; the OCI image leaves it to you.
+The bundled `skynetcontrol-alembic` entry point is wrapped to know where the migrations and `alembic.ini` are inside the Nix store — you don't need to pass `-c`.
 
-### Pushing to a registry
+### Pushing a private build
+
+If you forked the repo and want your own published images, the included `.github/workflows/container.yml` already lowercases the repo name to satisfy GHCR. Just enable Actions on your fork.
+
+To push from a local Nix build manually:
 
 ```bash
-docker tag skynetcontrol:latest ghcr.io/your-org/skynetcontrol:0.1.0
-docker push ghcr.io/your-org/skynetcontrol:0.1.0
+docker tag skynetcontrol:latest ghcr.io/your-handle/skynetcontrol:0.1.0
+docker push ghcr.io/your-handle/skynetcontrol:0.1.0
 ```
+
+(GHCR rejects uppercase repo names — pass the path in lowercase.)
 
 Or use `skopeo copy` to publish directly from the build output without a local Docker daemon:
 
 ```bash
-skopeo copy docker-archive:result docker://ghcr.io/your-org/skynetcontrol:0.1.0
+skopeo copy docker-archive:result docker://ghcr.io/your-handle/skynetcontrol:0.1.0
 ```
 
 ### Kubernetes
@@ -256,7 +269,7 @@ spec:
     spec:
       initContainers:
         - name: migrate
-          image: ghcr.io/your-org/skynetcontrol:0.1.0
+          image: ghcr.io/ben-kuhn/skynetcontrol:latest
           command: ["skynetcontrol-alembic", "upgrade", "head"]
           envFrom:
             - secretRef:
@@ -265,7 +278,7 @@ spec:
             - { name: data, mountPath: /data }
       containers:
         - name: server
-          image: ghcr.io/your-org/skynetcontrol:0.1.0
+          image: ghcr.io/ben-kuhn/skynetcontrol:latest
           ports: [{ containerPort: 8000 }]
           envFrom:
             - secretRef:

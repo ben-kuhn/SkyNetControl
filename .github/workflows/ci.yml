@@ -22,10 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
+      # Only `ruff check` is gated. `ruff format --check` is skipped
+      # because the ruff version floats between local Nix shells and CI
+      # runners — formatting rules drift across minor versions and the
+      # check would break unrelated PRs. Run `ruff format` locally as
+      # part of your workflow if you care about style consistency.
       - name: Ruff check
         run: nix-shell --run "ruff check backend/ tests/"
-      - name: Ruff format check
-        run: nix-shell --run "ruff format --check backend/ tests/"
 
   build:
     name: Nix Build

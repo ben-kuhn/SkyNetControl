@@ -72,7 +72,7 @@ SKYNET_SMTP_PASSWORD=app-password-here
 ### Docker / OCI
 
 ```bash
-docker run --env-file /path/to/env ghcr.io/owner/skynetcontrol:latest
+docker run --env-file /path/to/env ghcr.io/ben-kuhn/skynetcontrol:latest
 ```
 
 ## Do NOT

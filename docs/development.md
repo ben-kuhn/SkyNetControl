@@ -61,7 +61,7 @@ Pick whichever provider you prefer. For local dev, GitHub is simplest:
    ```
 7. Re-source the env (`set -a; source .env; set +a`).
 
-For other providers, see [docs/deployment/secrets.md](deployment/secrets.md) and the developer console links there.
+For other providers (Google, Microsoft, Discord, Facebook, Authentik, Keycloak, Zitadel, …), see **[docs/deployment/oidc-providers.md](deployment/oidc-providers.md)**.
 
 #### Why `SKYNET_APP_BASE_URL=http://localhost:5173` in dev?
 
