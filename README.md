@@ -6,15 +6,15 @@ Built for ham radio operators running recurring digital nets, with first-class W
 
 ## Quick start
 
-### Production (Docker / Podman)
+### Production (Docker Compose)
 
 A reproducible OCI image is published on every push to `main`:
 
 **`ghcr.io/ben-kuhn/skynetcontrol:latest`**
 
+1. Create an env file with secrets (see [docs/deployment/secrets.md](docs/deployment/secrets.md) and [docs/deployment/oidc-providers.md](docs/deployment/oidc-providers.md) for the full list):
+
 ```bash
-# 1. Create an env file with secrets (see docs/deployment/secrets.md
-#    and docs/deployment/oidc-providers.md for the full list).
 cat > skynetcontrol.env <<'EOF'
 SKYNET_JWT_SECRET_KEY=replace-with-openssl-rand-hex-32
 SKYNET_APP_BASE_URL=https://net.example.org
@@ -22,26 +22,37 @@ SKYNET_AUTH_GITHUB_ENABLED=true
 SKYNET_AUTH_GITHUB_CLIENT_ID=Iv1.xxxxxxxx
 SKYNET_AUTH_GITHUB_CLIENT_SECRET=xxxxxxxx
 EOF
-
-# 2. Run migrations (re-run on every version bump; safe to repeat).
-docker run --rm \
-  -v skynetcontrol-data:/data \
-  --env-file skynetcontrol.env \
-  --entrypoint skynetcontrol-alembic \
-  ghcr.io/ben-kuhn/skynetcontrol:latest \
-  upgrade head
-
-# (The bundled alembic wrapper knows where its config lives; no -c needed.)
-
-# 3. Start the server.
-docker run -d \
-  --name skynetcontrol \
-  --restart unless-stopped \
-  -p 8000:8000 \
-  -v skynetcontrol-data:/data \
-  --env-file skynetcontrol.env \
-  ghcr.io/ben-kuhn/skynetcontrol:latest
 ```
+
+2. Create `docker-compose.yml`:
+
+```yaml
+services:
+  skynetcontrol:
+    image: ghcr.io/ben-kuhn/skynetcontrol:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - skynetcontrol-data:/data
+    env_file:
+      - skynetcontrol.env
+
+volumes:
+  skynetcontrol-data:
+```
+
+3. Start the server:
+
+```bash
+docker compose up -d
+```
+
+The container applies any pending database migrations on startup before
+launching the server, so first-run setup and version upgrades both work
+with a plain `docker compose up -d`. If you ever need to run alembic
+manually (e.g. to inspect history or downgrade), the wrapper is on PATH:
+`docker compose run --rm --entrypoint skynetcontrol-alembic skynetcontrol history`.
 
 Front it with nginx / Caddy / Traefik for TLS. Visit your `APP_BASE_URL`, sign in via the OAuth provider you configured, and the first user becomes admin automatically.
 
