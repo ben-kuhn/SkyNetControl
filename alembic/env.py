@@ -3,6 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from backend.config import settings
 from backend.db.base import Base
 # Import all models so Base.metadata includes their tables
 import backend.auth.models  # noqa: F401
@@ -21,6 +22,11 @@ import backend.integrations.callbook.models  # noqa: F401
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Honor the runtime database URL (SKYNET_DATABASE_URL) so migrations apply
+# to the same database the app will use. The default in alembic.ini is a
+# relative SQLite path useful only for local dev from the repo root.
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 target_metadata = Base.metadata
 
