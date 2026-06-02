@@ -187,6 +187,126 @@ def step_core(env: dict[str, str]) -> None:
     env["SKYNET_APP_BASE_URL"] = url.rstrip("/")
 
 
+def _enabled_providers(env: dict[str, str]) -> list[dict]:
+    return [p for p in PROVIDERS if env.get(f"{p['prefix']}ENABLED") == "true"]
+
+
+def _disabled_providers(env: dict[str, str]) -> list[dict]:
+    enabled = {p["name"] for p in _enabled_providers(env)}
+    return [p for p in PROVIDERS if p["name"] not in enabled]
+
+
+def _configure_provider(provider: dict, env: dict[str, str]) -> None:
+    """Prompt for one provider's credentials and write them into env."""
+    from prompt_toolkit import prompt
+    from prompt_toolkit.formatted_text import HTML
+
+    prefix = provider["prefix"]
+    print(f"\n  Configuring {provider['name']}")
+    print(f"  Developer console: {provider['console_url']}")
+
+    cur_id = env.get(f"{prefix}CLIENT_ID", "")
+    cur_secret = env.get(f"{prefix}CLIENT_SECRET", "")
+
+    id_hint = cur_id or "(not set)"
+    new_id = prompt(HTML(f"  Client ID [<ansigreen>{id_hint}</ansigreen>]: ")).strip() or cur_id
+    new_secret = prompt(
+        HTML(f"  Client secret [<ansigreen>{_masked(cur_secret)}</ansigreen>]: "),
+        is_password=True,
+    ).strip() or cur_secret
+
+    env[f"{prefix}ENABLED"] = "true"
+    env[f"{prefix}CLIENT_ID"] = new_id
+    env[f"{prefix}CLIENT_SECRET"] = new_secret
+
+    for extra in provider["extra"]:
+        cur_extra = env.get(f"{prefix}{extra}", "")
+        new_extra = prompt(
+            HTML(f"  {extra} [<ansigreen>{cur_extra or '(not set)'}</ansigreen>]: "),
+        ).strip() or cur_extra
+        env[f"{prefix}{extra}"] = new_extra
+
+
+def _remove_provider(provider: dict, env: dict[str, str]) -> None:
+    """Strip all env keys for a provider."""
+    prefix = provider["prefix"]
+    for key in list(env.keys()):
+        if key.startswith(prefix):
+            del env[key]
+
+
+def _choose(options: list[str], prompt_text: str) -> int | None:
+    """Show a numbered menu, return chosen 0-based index, or None on empty/invalid."""
+    from prompt_toolkit import prompt
+
+    if not options:
+        return None
+    for i, name in enumerate(options, 1):
+        print(f"    {i}) {name}")
+    raw = prompt(f"  {prompt_text}: ").strip()
+    if not raw.isdigit():
+        return None
+    idx = int(raw) - 1
+    if 0 <= idx < len(options):
+        return idx
+    return None
+
+
+def step_oidc(env: dict[str, str]) -> None:
+    """Step 2: Add/edit/remove OIDC providers in a loop."""
+    from prompt_toolkit import prompt
+
+    print("\n" + "=" * 60)
+    print("Step 2/4: OIDC providers")
+    print("=" * 60)
+    print("  At least one provider must be enabled before the backend will start.")
+
+    while True:
+        enabled = _enabled_providers(env)
+        names = ", ".join(p["name"] for p in enabled) if enabled else "none"
+        print(f"\n  Currently enabled: {names}")
+        action = prompt("  Action [a]dd / [e]dit / [r]emove / [d]one: ").strip().lower() or "d"
+
+        if action == "d":
+            if not enabled:
+                confirm = prompt("  No providers enabled. Continue anyway? [y/N]: ").strip().lower()
+                if confirm != "y":
+                    continue
+            return
+
+        if action == "a":
+            candidates = _disabled_providers(env)
+            if not candidates:
+                print("  All supported providers are already enabled.")
+                continue
+            idx = _choose([p["name"] for p in candidates], "Pick a provider to add")
+            if idx is None:
+                continue
+            _configure_provider(candidates[idx], env)
+
+        elif action == "e":
+            if not enabled:
+                print("  No providers to edit.")
+                continue
+            idx = _choose([p["name"] for p in enabled], "Pick a provider to edit")
+            if idx is None:
+                continue
+            _configure_provider(enabled[idx], env)
+
+        elif action == "r":
+            if not enabled:
+                print("  No providers to remove.")
+                continue
+            idx = _choose([p["name"] for p in enabled], "Pick a provider to remove")
+            if idx is None:
+                continue
+            _remove_provider(enabled[idx], env)
+            print(f"  Removed {enabled[idx]['name']}.")
+
+        else:
+            print(f"  Unknown action: {action!r}")
+
+
 def _check_optional_deps() -> None:
     """Print install instructions and exit if prompt_toolkit/pyyaml are missing."""
     missing = []
