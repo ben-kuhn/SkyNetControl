@@ -47,6 +47,57 @@ def save_env(values: dict[str, str], path: Path) -> None:
         pass
 
 
+PROVIDERS: list[dict] = [
+    {
+        "name": "Google",
+        "prefix": "SKYNET_AUTH_GOOGLE_",
+        "extra": [],
+        "console_url": "https://console.cloud.google.com/apis/credentials",
+    },
+    {
+        "name": "GitHub",
+        "prefix": "SKYNET_AUTH_GITHUB_",
+        "extra": [],
+        "console_url": "https://github.com/settings/developers",
+    },
+    {
+        "name": "Microsoft",
+        "prefix": "SKYNET_AUTH_MICROSOFT_",
+        "extra": [],
+        "console_url": "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
+    },
+    {
+        "name": "Discord",
+        "prefix": "SKYNET_AUTH_DISCORD_",
+        "extra": [],
+        "console_url": "https://discord.com/developers/applications",
+    },
+    {
+        "name": "Facebook",
+        "prefix": "SKYNET_AUTH_FACEBOOK_",
+        "extra": [],
+        "console_url": "https://developers.facebook.com/apps/",
+    },
+    {
+        "name": "Generic OIDC",
+        "prefix": "SKYNET_AUTH_OIDC_",
+        "extra": ["ISSUER_URL"],
+        "console_url": "(your IdP's app-registration UI)",
+    },
+]
+
+
+def is_secret_key(key: str) -> bool:
+    """True if `key` must never be inlined into a Nix module (must go in env file)."""
+    if key == "SKYNET_JWT_SECRET_KEY":
+        return True
+    if key == "SKYNET_SMTP_PASSWORD":
+        return True
+    if key.startswith("SKYNET_AUTH_") and key.endswith("_CLIENT_SECRET"):
+        return True
+    return False
+
+
 def _check_optional_deps() -> None:
     """Print install instructions and exit if prompt_toolkit/pyyaml are missing."""
     missing = []

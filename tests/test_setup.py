@@ -39,3 +39,51 @@ def test_save_env_overwrites_existing(tmp_path: Path) -> None:
     p.write_text("OLD=value\n")
     wizard.save_env({"NEW": "value"}, p)
     assert p.read_text() == "NEW=value\n"
+
+
+def test_providers_cover_all_supported_names() -> None:
+    names = {p["name"] for p in wizard.PROVIDERS}
+    assert names == {"Google", "GitHub", "Microsoft", "Discord", "Facebook", "Generic OIDC"}
+
+
+def test_provider_prefixes_match_docs() -> None:
+    by_name = {p["name"]: p for p in wizard.PROVIDERS}
+    assert by_name["GitHub"]["prefix"] == "SKYNET_AUTH_GITHUB_"
+    assert by_name["Google"]["prefix"] == "SKYNET_AUTH_GOOGLE_"
+    assert by_name["Microsoft"]["prefix"] == "SKYNET_AUTH_MICROSOFT_"
+    assert by_name["Discord"]["prefix"] == "SKYNET_AUTH_DISCORD_"
+    assert by_name["Facebook"]["prefix"] == "SKYNET_AUTH_FACEBOOK_"
+    assert by_name["Generic OIDC"]["prefix"] == "SKYNET_AUTH_OIDC_"
+
+
+def test_only_generic_oidc_has_issuer_url() -> None:
+    by_name = {p["name"]: p for p in wizard.PROVIDERS}
+    assert by_name["Generic OIDC"]["extra"] == ["ISSUER_URL"]
+    for name in ("Google", "GitHub", "Microsoft", "Discord", "Facebook"):
+        assert by_name[name]["extra"] == []
+
+
+@pytest.mark.parametrize("key", [
+    "SKYNET_JWT_SECRET_KEY",
+    "SKYNET_AUTH_GITHUB_CLIENT_SECRET",
+    "SKYNET_AUTH_GOOGLE_CLIENT_SECRET",
+    "SKYNET_AUTH_OIDC_CLIENT_SECRET",
+    "SKYNET_SMTP_PASSWORD",
+])
+def test_is_secret_key_true_for_secrets(key: str) -> None:
+    assert wizard.is_secret_key(key) is True
+
+
+@pytest.mark.parametrize("key", [
+    "SKYNET_APP_BASE_URL",
+    "SKYNET_AUTH_GITHUB_ENABLED",
+    "SKYNET_AUTH_GITHUB_CLIENT_ID",
+    "SKYNET_AUTH_OIDC_ISSUER_URL",
+    "SKYNET_SMTP_HOST",
+    "SKYNET_SMTP_PORT",
+    "SKYNET_SMTP_USERNAME",
+    "SKYNET_SMTP_FROM_ADDRESS",
+    "SKYNET_SMTP_USE_TLS",
+])
+def test_is_secret_key_false_for_plaintext(key: str) -> None:
+    assert wizard.is_secret_key(key) is False
