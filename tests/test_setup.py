@@ -113,3 +113,62 @@ def test_render_compose_honors_custom_port_and_volume() -> None:
     assert svc["volumes"] == ["custom-vol:/data"]
     assert svc["env_file"] == ["./custom.env"]
     assert "custom-vol" in parsed["volumes"]
+
+
+def _sample_env() -> dict[str, str]:
+    return {
+        "SKYNET_JWT_SECRET_KEY": "deadbeef" * 8,
+        "SKYNET_APP_BASE_URL": "https://net.example.org",
+        "SKYNET_AUTH_GITHUB_ENABLED": "true",
+        "SKYNET_AUTH_GITHUB_CLIENT_ID": "Iv1.abc",
+        "SKYNET_AUTH_GITHUB_CLIENT_SECRET": "ghs_xyz",
+        "SKYNET_SMTP_HOST": "smtp.example.com",
+        "SKYNET_SMTP_PASSWORD": "smtp-pass",
+    }
+
+
+def test_render_nix_module_flakes_uses_inputs_import() -> None:
+    out = wizard.render_nix_module(_sample_env(), flakes=True,
+                                    env_file_path="/run/skynetcontrol/env")
+    assert '(import "${inputs.skynetcontrol}/module.nix")' in out
+    assert "{ inputs, ... }:" in out
+
+
+def test_render_nix_module_nonflake_uses_path_import() -> None:
+    out = wizard.render_nix_module(_sample_env(), flakes=False,
+                                    env_file_path="/run/skynetcontrol/env")
+    assert "imports = [ /etc/nixos/skynetcontrol/module.nix ];" in out
+    assert "{ inputs" not in out
+
+
+def test_render_nix_module_inlines_plaintext_but_not_secrets() -> None:
+    out = wizard.render_nix_module(_sample_env(), flakes=True,
+                                    env_file_path="/run/skynetcontrol/env")
+    # plaintext gets inlined under settings (with SKYNET_ prefix stripped)
+    assert 'APP_BASE_URL = "https://net.example.org";' in out
+    assert 'AUTH_GITHUB_ENABLED = "true";' in out
+    assert 'AUTH_GITHUB_CLIENT_ID = "Iv1.abc";' in out
+    assert 'SMTP_HOST = "smtp.example.com";' in out
+    # secrets must not leak into the module text
+    assert "deadbeef" not in out
+    assert "ghs_xyz" not in out
+    assert "smtp-pass" not in out
+    assert "CLIENT_SECRET" not in out
+    assert "JWT_SECRET_KEY" not in out
+    assert "SMTP_PASSWORD" not in out
+
+
+def test_render_nix_module_includes_environment_file_path() -> None:
+    out = wizard.render_nix_module(_sample_env(), flakes=True,
+                                    env_file_path="/run/skynetcontrol/env")
+    assert "EnvironmentFile = [" in out
+    assert '"/run/skynetcontrol/env"' in out
+
+
+def test_render_nix_module_sorts_settings_for_stable_output() -> None:
+    out = wizard.render_nix_module(_sample_env(), flakes=True,
+                                    env_file_path="/run/skynetcontrol/env")
+    settings_block = out.split("settings = {")[1].split("};")[0]
+    keys = [line.strip().split(" =")[0]
+            for line in settings_block.strip().splitlines() if "=" in line]
+    assert keys == sorted(keys)

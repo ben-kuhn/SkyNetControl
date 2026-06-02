@@ -117,6 +117,46 @@ def render_compose(host_port: int, volume: str, env_file_name: str) -> str:
     return yaml.dump(compose, default_flow_style=False, sort_keys=False)
 
 
+def render_nix_module(env: dict[str, str], *, flakes: bool,
+                      env_file_path: str) -> str:
+    """Render a NixOS module snippet for services.skynetcontrol.
+
+    Plaintext SKYNET_* keys go inline under `settings`. Secrets are NOT
+    rendered — the caller is expected to write them to `env_file_path`
+    separately.
+    """
+    settings_lines = []
+    for key in sorted(env.keys()):
+        if not key.startswith("SKYNET_"):
+            continue
+        if is_secret_key(key):
+            continue
+        nix_key = key[len("SKYNET_"):]
+        value = env[key].replace("\\", "\\\\").replace('"', '\\"')
+        settings_lines.append(f'        {nix_key} = "{value}";')
+    settings_block = "\n".join(settings_lines) if settings_lines else "        # (no plaintext settings configured)"
+
+    if flakes:
+        header = "{ inputs, ... }: {\n  imports = [ (import \"${inputs.skynetcontrol}/module.nix\") ];"
+    else:
+        header = "{ ... }: {\n  imports = [ /etc/nixos/skynetcontrol/module.nix ];"
+
+    return f"""{header}
+
+  services.skynetcontrol = {{
+    enable = true;
+    settings = {{
+{settings_block}
+    }};
+  }};
+
+  systemd.services.skynetcontrol.serviceConfig.EnvironmentFile = [
+    "{env_file_path}"
+  ];
+}}
+"""
+
+
 def _check_optional_deps() -> None:
     """Print install instructions and exit if prompt_toolkit/pyyaml are missing."""
     missing = []
