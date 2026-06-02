@@ -98,6 +98,25 @@ def is_secret_key(key: str) -> bool:
     return False
 
 
+def render_compose(host_port: int, volume: str, env_file_name: str) -> str:
+    """Render a docker-compose.yml string for skynetcontrol with the given settings."""
+    import yaml  # local import — pyyaml is in the setup extra
+
+    compose = {
+        "services": {
+            "skynetcontrol": {
+                "image": "ghcr.io/ben-kuhn/skynetcontrol:latest",
+                "restart": "unless-stopped",
+                "ports": [f"{host_port}:8000"],
+                "volumes": [f"{volume}:/data"],
+                "env_file": [f"./{env_file_name}"],
+            }
+        },
+        "volumes": {volume: None},
+    }
+    return yaml.dump(compose, default_flow_style=False, sort_keys=False)
+
+
 def _check_optional_deps() -> None:
     """Print install instructions and exit if prompt_toolkit/pyyaml are missing."""
     missing = []

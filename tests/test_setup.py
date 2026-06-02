@@ -87,3 +87,29 @@ def test_is_secret_key_true_for_secrets(key: str) -> None:
 ])
 def test_is_secret_key_false_for_plaintext(key: str) -> None:
     assert wizard.is_secret_key(key) is False
+
+
+def test_render_compose_returns_valid_yaml_referencing_env_file() -> None:
+    import yaml as _yaml
+    out = wizard.render_compose(host_port=8000, volume="skynetcontrol-data",
+                                 env_file_name="skynetcontrol.env")
+    parsed = _yaml.safe_load(out)
+    svc = parsed["services"]["skynetcontrol"]
+    assert svc["image"] == "ghcr.io/ben-kuhn/skynetcontrol:latest"
+    assert svc["restart"] == "unless-stopped"
+    assert svc["ports"] == ["8000:8000"]
+    assert svc["volumes"] == ["skynetcontrol-data:/data"]
+    assert svc["env_file"] == ["./skynetcontrol.env"]
+    assert "skynetcontrol-data" in parsed["volumes"]
+
+
+def test_render_compose_honors_custom_port_and_volume() -> None:
+    import yaml as _yaml
+    out = wizard.render_compose(host_port=9001, volume="custom-vol",
+                                 env_file_name="custom.env")
+    parsed = _yaml.safe_load(out)
+    svc = parsed["services"]["skynetcontrol"]
+    assert svc["ports"] == ["9001:8000"]
+    assert svc["volumes"] == ["custom-vol:/data"]
+    assert svc["env_file"] == ["./custom.env"]
+    assert "custom-vol" in parsed["volumes"]
