@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets as _secrets
 import sys
 from pathlib import Path
 
@@ -155,6 +156,35 @@ def render_nix_module(env: dict[str, str], *, flakes: bool,
   ];
 }}
 """
+
+
+def _masked(value: str) -> str:
+    """Return a masked display for a secret default — e.g. ***abcd12."""
+    if not value:
+        return "(not set)"
+    return f"***{value[-6:]}" if len(value) > 6 else "(set)"
+
+
+def step_core(env: dict[str, str]) -> None:
+    """Step 1: Ensure JWT secret exists; prompt for APP_BASE_URL."""
+    from prompt_toolkit import prompt
+    from prompt_toolkit.formatted_text import HTML
+
+    print("\n" + "=" * 60)
+    print("Step 1/4: Core settings")
+    print("=" * 60)
+
+    if not env.get("SKYNET_JWT_SECRET_KEY"):
+        env["SKYNET_JWT_SECRET_KEY"] = _secrets.token_hex(32)
+        print("  Generated new SKYNET_JWT_SECRET_KEY")
+    else:
+        print(f"  Existing SKYNET_JWT_SECRET_KEY kept ({_masked(env['SKYNET_JWT_SECRET_KEY'])})")
+
+    current_url = env.get("SKYNET_APP_BASE_URL", "http://localhost:8000")
+    url = prompt(
+        HTML(f"APP_BASE_URL [<ansigreen>{current_url}</ansigreen>]: "),
+    ).strip() or current_url
+    env["SKYNET_APP_BASE_URL"] = url.rstrip("/")
 
 
 def _check_optional_deps() -> None:
