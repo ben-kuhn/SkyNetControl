@@ -10,8 +10,41 @@ Walks an operator through producing skynetcontrol.env plus one of:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+
+def load_env(path: Path) -> dict[str, str]:
+    """Load a KEY=value env file into a dict. Returns {} if the file is missing."""
+    if not path.exists():
+        return {}
+    result: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        result[key.strip()] = value
+    return result
+
+
+def save_env(values: dict[str, str], path: Path) -> None:
+    """Write `values` to `path` as KEY=value lines, mode 0o600.
+
+    Replaces the file's full contents — callers must merge changes in themselves.
+    """
+    content = "".join(f"{k}={v}\n" for k, v in values.items())
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, content.encode())
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(path, 0o600)
+    except PermissionError:
+        # bind-mounted file under rootless containers: not fatal
+        pass
 
 
 def _check_optional_deps() -> None:
