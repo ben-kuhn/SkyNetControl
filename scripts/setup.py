@@ -307,6 +307,137 @@ def step_oidc(env: dict[str, str]) -> None:
             print(f"  Unknown action: {action!r}")
 
 
+def step_smtp(env: dict[str, str]) -> None:
+    """Step 3: optional SMTP configuration."""
+    from prompt_toolkit import prompt
+    from prompt_toolkit.formatted_text import HTML
+
+    print("\n" + "=" * 60)
+    print("Step 3/4: SMTP (optional — for email notifications)")
+    print("=" * 60)
+
+    currently_on = bool(env.get("SKYNET_SMTP_HOST"))
+    default = "Y/n" if currently_on else "y/N"
+    raw = prompt(f"  Configure SMTP? [{default}]: ").strip().lower()
+    enable = (raw == "y") if raw in {"y", "n"} else currently_on
+
+    if not enable:
+        # If SMTP was previously configured and user opts out, leave keys alone
+        # so they aren't lost — they just won't be touched.
+        print("  Skipping SMTP step.")
+        return
+
+    fields = [
+        ("SKYNET_SMTP_HOST", "Host", "", False),
+        ("SKYNET_SMTP_PORT", "Port", "587", False),
+        ("SKYNET_SMTP_USERNAME", "Username", "", False),
+        ("SKYNET_SMTP_PASSWORD", "Password", "", True),
+        ("SKYNET_SMTP_FROM_ADDRESS", "From address", "", False),
+        ("SKYNET_SMTP_USE_TLS", "Use TLS (true/false)", "true", False),
+    ]
+    for key, label, default_val, is_password in fields:
+        current = env.get(key, default_val)
+        hint = _masked(current) if is_password else (current or "(not set)")
+        new = prompt(
+            HTML(f"  {label} [<ansigreen>{hint}</ansigreen>]: "),
+            is_password=is_password,
+        ).strip() or current
+        env[key] = new
+
+
+def _split_secrets(env: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Return (secret_env, plaintext_env) — both restricted to SKYNET_* keys."""
+    secret: dict[str, str] = {}
+    plaintext: dict[str, str] = {}
+    for k, v in env.items():
+        if not k.startswith("SKYNET_"):
+            continue
+        if is_secret_key(k):
+            secret[k] = v
+        else:
+            plaintext[k] = v
+    return secret, plaintext
+
+
+def _resolve_output_path(requested: Path, label: str) -> Path:
+    """If `requested` already exists, swap in a `.generated` filename and warn."""
+    if not requested.exists():
+        return requested
+    fallback = requested.with_name(requested.stem + ".generated" + requested.suffix)
+    print(f"  {label} already exists at {requested} — writing to {fallback} instead.")
+    print(f"  Review the diff, then: mv {fallback} {requested}")
+    return fallback
+
+
+def step_output(env: dict[str, str], env_path: Path,
+                compose_path: Path, nix_path: Path) -> None:
+    """Step 4: write skynetcontrol.env + chosen deployment artifact."""
+    from prompt_toolkit import prompt
+    from prompt_toolkit.formatted_text import HTML
+
+    print("\n" + "=" * 60)
+    print("Step 4/4: Output format")
+    print("=" * 60)
+    print("  1) docker-compose.yml")
+    print("  2) NixOS module (with flakes)")
+    print("  3) NixOS module (without flakes)")
+
+    while True:
+        raw = prompt("  Pick a format [1/2/3]: ").strip()
+        if raw in {"1", "2", "3"}:
+            choice = raw
+            break
+        print("  Please enter 1, 2, or 3.")
+
+    if choice == "1":
+        # docker-compose: full env file + compose
+        host_port_raw = prompt(HTML("  Host port [<ansigreen>8000</ansigreen>]: ")).strip() or "8000"
+        if not host_port_raw.isdigit() or not (1 <= int(host_port_raw) <= 65535):
+            print(f"  Invalid port {host_port_raw!r}, defaulting to 8000.")
+            host_port = 8000
+        else:
+            host_port = int(host_port_raw)
+        volume = prompt(HTML("  Docker volume name [<ansigreen>skynetcontrol-data</ansigreen>]: ")).strip() or "skynetcontrol-data"
+
+        full_env = {k: v for k, v in env.items() if k.startswith("SKYNET_")}
+        save_env(full_env, env_path)
+        print(f"  Wrote {env_path} (mode 0600, {len(full_env)} keys)")
+
+        target = _resolve_output_path(compose_path, "docker-compose.yml")
+        target.write_text(render_compose(host_port=host_port, volume=volume,
+                                          env_file_name=env_path.name))
+        print(f"  Wrote {target}")
+        print("\n  To start:  docker compose up -d")
+        return
+
+    # Nix branches: secrets-only env file + module snippet
+    secret_env, _ = _split_secrets(env)
+    save_env(secret_env, env_path)
+    print(f"  Wrote {env_path} (mode 0600, {len(secret_env)} secret keys)")
+
+    env_file_default = "/run/skynetcontrol/env"
+    env_file_path = prompt(
+        HTML(f"  Path the EnvironmentFile will live at on the target host "
+             f"[<ansigreen>{env_file_default}</ansigreen>]: "),
+    ).strip() or env_file_default
+
+    flakes = (choice == "2")
+    target = _resolve_output_path(nix_path, "skynetcontrol.nix")
+    target.write_text(render_nix_module(env, flakes=flakes, env_file_path=env_file_path))
+    print(f"  Wrote {target}")
+
+    if flakes:
+        print('\n  Reminder: add this to your flake inputs:')
+        print('    skynetcontrol.url = "github:ben-kuhn/SkyNetControl";')
+        print(f'  Then import {target.name} from your nixosConfigurations module list.')
+    else:
+        print("\n  Reminder: clone the project onto the target host:")
+        print("    git clone https://github.com/ben-kuhn/SkyNetControl /etc/nixos/skynetcontrol")
+        print(f"  Then add {target.name} to your imports in configuration.nix.")
+    print(f"  Move {env_path.name} into your secret store (sops-nix, agenix, etc.)")
+    print(f"  and have it materialise at {env_file_path}.")
+
+
 def _check_optional_deps() -> None:
     """Print install instructions and exit if prompt_toolkit/pyyaml are missing."""
     missing = []
@@ -337,11 +468,28 @@ def main() -> None:
 
     _check_optional_deps()
 
-    # Step wiring comes in Task 9.
-    print("Setup wizard scaffold OK")
-    print(f"  env file:     {Path(args.env_file).resolve()}")
-    print(f"  compose file: {Path(args.compose_file).resolve()}")
-    print(f"  nix file:     {Path(args.nix_file).resolve()}")
+    env_path = Path(args.env_file)
+    compose_path = Path(args.compose_file)
+    nix_path = Path(args.nix_file)
+
+    print("=" * 60)
+    print("  SkyNetControl setup wizard")
+    print("=" * 60)
+    if env_path.exists():
+        print(f"  Existing env loaded from {env_path} — values will pre-fill.")
+    else:
+        print(f"  No existing env at {env_path} — starting fresh.")
+
+    env = load_env(env_path)
+
+    step_core(env)
+    step_oidc(env)
+    step_smtp(env)
+    step_output(env, env_path, compose_path, nix_path)
+
+    print("\n" + "=" * 60)
+    print("  Setup complete.")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

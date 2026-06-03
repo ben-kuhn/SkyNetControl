@@ -172,3 +172,23 @@ def test_render_nix_module_sorts_settings_for_stable_output() -> None:
     keys = [line.strip().split(" =")[0]
             for line in settings_block.strip().splitlines() if "=" in line]
     assert keys == sorted(keys)
+
+
+def test_split_secrets_separates_keys_correctly() -> None:
+    env = {
+        "SKYNET_JWT_SECRET_KEY": "x",
+        "SKYNET_APP_BASE_URL": "https://example.org",
+        "SKYNET_AUTH_GITHUB_CLIENT_ID": "id",
+        "SKYNET_AUTH_GITHUB_CLIENT_SECRET": "sec",
+        "SKYNET_SMTP_PASSWORD": "pw",
+        "SKYNET_SMTP_HOST": "smtp.example.com",
+        "HOME": "/should/be/ignored",
+    }
+    secret, plaintext = wizard._split_secrets(env)
+    assert set(secret) == {"SKYNET_JWT_SECRET_KEY",
+                           "SKYNET_AUTH_GITHUB_CLIENT_SECRET",
+                           "SKYNET_SMTP_PASSWORD"}
+    assert set(plaintext) == {"SKYNET_APP_BASE_URL",
+                              "SKYNET_AUTH_GITHUB_CLIENT_ID",
+                              "SKYNET_SMTP_HOST"}
+    assert "HOME" not in secret and "HOME" not in plaintext
