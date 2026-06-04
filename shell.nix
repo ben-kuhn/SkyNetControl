@@ -23,7 +23,7 @@ pkgs.mkShell {
 
     # Install Python deps if pyproject.toml exists
     if [ -f pyproject.toml ]; then
-      pip install -e ".[dev]" --quiet 2>/dev/null || true
+      pip install -e ".[dev,setup]" --quiet 2>/dev/null || true
     fi
 
     # Install frontend deps if package.json exists

@@ -13,6 +13,13 @@ If you're not on Nix, you can install the deps manually — Python 3.12, Node.js
 
 ## First-time setup
 
+### Setup wizard
+
+For a fresh deployment (your own or a friend's), `python scripts/setup.py` is an
+interactive prompt_toolkit wizard that produces `skynetcontrol.env` plus a
+`docker-compose.yml` or `skynetcontrol.nix` module snippet. It pre-fills from any
+existing env file so re-running it to edit a single provider is safe.
+
 ### 1. Enter the dev shell
 
 ```bash
