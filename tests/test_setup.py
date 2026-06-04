@@ -174,6 +174,21 @@ def test_render_nix_module_sorts_settings_for_stable_output() -> None:
     assert keys == sorted(keys)
 
 
+def test_render_nix_module_escapes_dollar_brace_in_values() -> None:
+    """Values containing ${...} must be escaped so Nix treats them as literal,
+    not as a string-interpolation trigger."""
+    env = {"SKYNET_APP_BASE_URL": "https://auth.example.com/${tenant}/v2.0"}
+    out = wizard.render_nix_module(env, flakes=True,
+                                    env_file_path="/run/skynetcontrol/env")
+    # The literal ${ must appear escaped as ''${ — the Nix form for a literal $-brace.
+    assert "''${tenant}" in out
+    # The bare ${ (not preceded by '') must not appear in any setting value —
+    # that would trigger Nix string interpolation.
+    settings_block = out.split("settings = {")[1].split("};")[0]
+    import re
+    assert re.search(r"(?<!')\$\{", settings_block) is None
+
+
 def test_split_secrets_separates_keys_correctly() -> None:
     env = {
         "SKYNET_JWT_SECRET_KEY": "x",

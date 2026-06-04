@@ -133,7 +133,12 @@ def render_nix_module(env: dict[str, str], *, flakes: bool,
         if is_secret_key(key):
             continue
         nix_key = key[len("SKYNET_"):]
-        value = env[key].replace("\\", "\\\\").replace('"', '\\"')
+        value = (
+            env[key]
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("${", "''${")
+        )
         settings_lines.append(f'        {nix_key} = "{value}";')
     settings_block = "\n".join(settings_lines) if settings_lines else "        # (no plaintext settings configured)"
 
