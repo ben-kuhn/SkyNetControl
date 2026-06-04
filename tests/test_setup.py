@@ -63,6 +63,21 @@ def test_only_generic_oidc_has_issuer_url() -> None:
         assert by_name[name]["extra"] == []
 
 
+def test_provider_slugs_match_backend_callback_routes() -> None:
+    # Slugs are the URL-path component the backend mounts callback routes at
+    # (see docs/deployment/oidc-providers.md). They must match exactly or the
+    # OAuth redirect URI we show the user won't actually work.
+    by_name = {p["name"]: p["slug"] for p in wizard.PROVIDERS}
+    assert by_name == {
+        "Google": "google",
+        "GitHub": "github",
+        "Microsoft": "microsoft",
+        "Discord": "discord",
+        "Facebook": "facebook",
+        "Generic OIDC": "oidc",
+    }
+
+
 @pytest.mark.parametrize("key", [
     "SKYNET_JWT_SECRET_KEY",
     "SKYNET_AUTH_GITHUB_CLIENT_SECRET",

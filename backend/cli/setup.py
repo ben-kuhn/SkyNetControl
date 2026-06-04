@@ -51,36 +51,42 @@ PROVIDERS: list[dict] = [
     {
         "name": "Google",
         "prefix": "SKYNET_AUTH_GOOGLE_",
+        "slug": "google",
         "extra": [],
         "console_url": "https://console.cloud.google.com/apis/credentials",
     },
     {
         "name": "GitHub",
         "prefix": "SKYNET_AUTH_GITHUB_",
+        "slug": "github",
         "extra": [],
         "console_url": "https://github.com/settings/developers",
     },
     {
         "name": "Microsoft",
         "prefix": "SKYNET_AUTH_MICROSOFT_",
+        "slug": "microsoft",
         "extra": [],
         "console_url": "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
     },
     {
         "name": "Discord",
         "prefix": "SKYNET_AUTH_DISCORD_",
+        "slug": "discord",
         "extra": [],
         "console_url": "https://discord.com/developers/applications",
     },
     {
         "name": "Facebook",
         "prefix": "SKYNET_AUTH_FACEBOOK_",
+        "slug": "facebook",
         "extra": [],
         "console_url": "https://developers.facebook.com/apps/",
     },
     {
         "name": "Generic OIDC",
         "prefix": "SKYNET_AUTH_OIDC_",
+        "slug": "oidc",
         "extra": ["ISSUER_URL"],
         "console_url": "(your IdP's app-registration UI)",
     },
@@ -206,8 +212,13 @@ def _configure_provider(provider: dict, env: dict[str, str]) -> None:
     from prompt_toolkit.formatted_text import HTML
 
     prefix = provider["prefix"]
+    base_url = env.get("SKYNET_APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    redirect_uri = f"{base_url}/api/auth/callback/{provider['slug']}"
+
     print(f"\n  Configuring {provider['name']}")
     print(f"  Developer console: {provider['console_url']}")
+    print(f"  Set the OAuth redirect / callback URL there to:")
+    print(f"    {redirect_uri}")
 
     cur_id = env.get(f"{prefix}CLIENT_ID", "")
     cur_secret = env.get(f"{prefix}CLIENT_SECRET", "")
