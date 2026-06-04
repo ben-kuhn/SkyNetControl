@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import os
 import secrets as _secrets
-import sys
 from pathlib import Path
 
 
@@ -443,24 +442,6 @@ def step_output(env: dict[str, str], env_path: Path,
     print(f"  and have it materialise at {env_file_path}.")
 
 
-def _check_optional_deps() -> None:
-    """Print install instructions and exit if prompt_toolkit/pyyaml are missing."""
-    missing = []
-    try:
-        import prompt_toolkit  # noqa: F401
-    except ImportError:
-        missing.append("prompt_toolkit")
-    try:
-        import yaml  # noqa: F401
-    except ImportError:
-        missing.append("pyyaml")
-    if missing:
-        joined = ", ".join(missing)
-        print(f"Missing required setup dependencies: {joined}", file=sys.stderr)
-        print('Install with:  pip install -e ".[setup]"', file=sys.stderr)
-        sys.exit(1)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="SkyNetControl setup wizard")
     parser.add_argument("--env-file", default="skynetcontrol.env",
@@ -470,8 +451,6 @@ def main() -> None:
     parser.add_argument("--nix-file", default="skynetcontrol.nix",
                         help="Path to write Nix module snippet (default: skynetcontrol.nix)")
     args = parser.parse_args()
-
-    _check_optional_deps()
 
     env_path = Path(args.env_file)
     compose_path = Path(args.compose_file)

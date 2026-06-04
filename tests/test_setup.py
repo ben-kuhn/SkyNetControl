@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import setup as wizard
+from backend.cli import setup as wizard
 
 
 def test_load_env_returns_empty_dict_when_missing(tmp_path: Path) -> None:

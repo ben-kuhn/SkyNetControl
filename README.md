@@ -12,11 +12,11 @@ A reproducible OCI image is published on every push to `main`:
 
 **`ghcr.io/ben-kuhn/skynetcontrol:latest`**
 
-1. Create an env file with secrets. The fastest way is the interactive setup wizard, which can also generate your `docker-compose.yml` (or a NixOS module snippet):
+1. Create an env file with secrets. The fastest way is the interactive setup wizard bundled in the image — it can also generate your `docker-compose.yml` (or a NixOS module snippet). Run it in the directory where you want the files to land:
 
 ```bash
-pip install -e ".[setup]"
-python scripts/setup.py
+docker run --rm -it -v "$PWD:/work" -w /work \
+  ghcr.io/ben-kuhn/skynetcontrol:latest skynetcontrol-setup
 ```
 
 The wizard walks you through JWT secret generation, OIDC provider credentials, optional SMTP, and the deployment artifact format. See [docs/deployment/secrets.md](docs/deployment/secrets.md) and [docs/deployment/oidc-providers.md](docs/deployment/oidc-providers.md) for the full list of variables if you prefer to write the file by hand:

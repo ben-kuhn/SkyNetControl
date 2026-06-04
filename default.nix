@@ -27,6 +27,8 @@ python.pkgs.buildPythonApplication {
     httpx
     anthropic
     jinja2
+    prompt-toolkit
+    pyyaml
   ];
 
   postInstall = ''
