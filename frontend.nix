@@ -8,7 +8,7 @@ pkgs.buildNpmPackage {
   # Hash of the node_modules tree derived from package-lock.json. After
   # bumping frontend dependencies, set this to the all-zero placeholder
   # and re-run `nix-build frontend.nix`; Nix will print the correct value.
-  npmDepsHash = "sha256-MHcknAgfxdwVwU13FEuMPatlwNq++hnckBcHkJh4W/8=";
+  npmDepsHash = "sha256-BxLs1+J1ybjrnE3TMRRaYGg6zvvMz0j4OD2yMofi8ac=";
 
   # nodejs_22 matches the dev shell.
   nodejs = pkgs.nodejs_22;
