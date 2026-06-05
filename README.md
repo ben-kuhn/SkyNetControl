@@ -88,7 +88,31 @@ systemd.services.skynetcontrol.serviceConfig.EnvironmentFile = [
 ];
 ```
 
-See **[docs/deployment/nix.md](docs/deployment/nix.md)** for the full NixOS setup including reverse proxy + ACME, PostgreSQL, backups, and overlay use.
+#### Database storage
+
+By default the module configures `StateDirectory=skynetcontrol`, which lives at `/var/lib/skynetcontrol/`. The SQLite database file lands there as `skynetcontrol.db`. Both paths are tunable via `services.skynetcontrol.stateDir` and `services.skynetcontrol.databaseUrl` — the latter takes any SQLAlchemy URL, so pointing at PostgreSQL is a one-line swap.
+
+That state directory is the only persistent data the service writes. Everything else (templates, sessions, check-ins, audit log, tokens) lives inside the database.
+
+#### Backups
+
+For SQLite, snapshot the DB file. With the service stopped (or using `sqlite3 .backup` for an online snapshot):
+
+```bash
+sudo systemctl stop skynetcontrol
+sudo cp /var/lib/skynetcontrol/skynetcontrol.db /backup/skynetcontrol-$(date +%F).db
+sudo systemctl start skynetcontrol
+```
+
+Online, no downtime:
+
+```bash
+sudo sqlite3 /var/lib/skynetcontrol/skynetcontrol.db ".backup '/backup/skynetcontrol-$(date +%F).db'"
+```
+
+For PostgreSQL, use `pg_dump` per your normal database backup workflow. Either way, the secrets file (e.g. `/run/secrets/skynetcontrol-env`) is separate state — back it up alongside.
+
+See **[docs/deployment/nix.md](docs/deployment/nix.md)** for the full NixOS setup including reverse proxy + ACME, PostgreSQL, and overlay use.
 
 ### Local development
 
