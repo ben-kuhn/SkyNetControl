@@ -46,8 +46,10 @@ export function ProtectedRoute({
     }
   }
 
-  // Non-pending user trying to access pending-only routes
-  if (pendingOnly && user.role !== "pending") {
+  // Non-pending user trying to access pending-only routes. Admins still
+  // carrying a PENDING- placeholder callsign are an exception — they're
+  // who /register is *for*.
+  if (pendingOnly && user.role !== "pending" && !hasPlaceholderCallsign) {
     return <Navigate to="/schedule" replace />;
   }
 
