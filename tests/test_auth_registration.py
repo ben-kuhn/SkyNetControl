@@ -149,7 +149,7 @@ async def test_register_admin_with_placeholder_callsign(test_client, test_settin
     with factory() as session:
         session.add(
             User(
-                callsign="PENDING-pocketid:80",
+                callsign="PENDING-pocketid:80f",
                 oidc_subject="pocketid:80f1abc",
                 name="First Admin",
                 role=UserRole.ADMIN,
@@ -157,7 +157,7 @@ async def test_register_admin_with_placeholder_callsign(test_client, test_settin
         )
         session.commit()
 
-    token = create_access_token("PENDING-pocketid:80", "admin", test_settings)
+    token = create_access_token("PENDING-pocketid:80f", "admin", test_settings)
     response = await test_client.post(
         "/api/auth/register",
         json={"callsign": "W0ABC"},
