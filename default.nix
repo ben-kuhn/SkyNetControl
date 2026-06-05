@@ -55,6 +55,10 @@ python.pkgs.buildPythonApplication {
     # wrapPythonPrograms will wrap this with the correct PYTHONPATH.
     printf '%s\n' '#!${python}/bin/python' 'import sys' 'from alembic.config import main' 'sys.exit(main())' > $out/bin/skynetcontrol-alembic
     chmod +x $out/bin/skynetcontrol-alembic
+
+    # Database-copy CLI for cross-engine / host-to-host migrations.
+    printf '%s\n' '#!${python}/bin/python' 'import sys' 'from backend.cli.db_copy import main' 'sys.exit(main())' > $out/bin/skynetcontrol-db-copy
+    chmod +x $out/bin/skynetcontrol-db-copy
   '';
 
   # Set SKYNET_STATIC_DIR on all wrapped programs. Also point ALEMBIC_CONFIG
