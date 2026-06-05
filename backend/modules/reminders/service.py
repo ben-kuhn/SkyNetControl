@@ -6,6 +6,7 @@ from datetime import date as date_type, datetime, timezone
 import jinja2
 from sqlalchemy.orm import Session
 
+from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.models import Activity
 from backend.modules.reminders.models import ReminderTemplate, ReminderLog, ReminderStatus, TemplateType
 from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
@@ -198,6 +199,9 @@ def build_template_context(db: Session, net_session: NetSession) -> dict:
 
     next_week_preview = _build_next_week_preview(db, net_session)
 
+    net_callsign = get_config_value(db, "default_net_control", default="") or ""
+    net_address = get_config_value(db, "net_address", default="") or ""
+
     return {
         "date": date_str,
         "time": time_str,
@@ -205,6 +209,8 @@ def build_template_context(db: Session, net_session: NetSession) -> dict:
         "activity_title": activity_title,
         "activity_instructions": activity_instructions,
         "net_control": net_control,
+        "net_callsign": net_callsign,
+        "net_address": net_address,
         "next_week_preview": next_week_preview,
     }
 
