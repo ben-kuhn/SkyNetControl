@@ -20,7 +20,7 @@ Each enabled provider needs a client ID and secret from the provider's developer
 | GitHub | `SKYNET_AUTH_GITHUB_CLIENT_ID` | `SKYNET_AUTH_GITHUB_CLIENT_SECRET` | [GitHub Developer Settings](https://github.com/settings/developers) |
 | Discord | `SKYNET_AUTH_DISCORD_CLIENT_ID` | `SKYNET_AUTH_DISCORD_CLIENT_SECRET` | [Discord Developer Portal](https://discord.com/developers/applications) |
 | Facebook | `SKYNET_AUTH_FACEBOOK_CLIENT_ID` | `SKYNET_AUTH_FACEBOOK_CLIENT_SECRET` | [Meta Developer Dashboard](https://developers.facebook.com/apps/) |
-| Generic OIDC | `SKYNET_AUTH_OIDC_CLIENT_ID` | `SKYNET_AUTH_OIDC_CLIENT_SECRET` | Also set `SKYNET_AUTH_OIDC_ISSUER_URL` |
+| Generic OIDC (multi) | `SKYNET_AUTH_OIDC_<SLUG>_CLIENT_ID` | `SKYNET_AUTH_OIDC_<SLUG>_CLIENT_SECRET` | Per provider, also set `_ENABLED`, `_ISSUER_URL`, `_NAME`. `<SLUG>` is uppercase + underscores in the env var; the URL slug uses lowercase + dashes (e.g. `MY_IDP` ↔ `my-idp`). Repeat for as many OIDC providers as you need. |
 
 Enable a provider by setting `SKYNET_AUTH_{PROVIDER}_ENABLED=true`.
 
