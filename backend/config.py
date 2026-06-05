@@ -13,10 +13,6 @@ class ProviderSettings(BaseModel):
     client_secret: str = ""
 
 
-class OIDCProviderSettings(ProviderSettings):
-    issuer_url: str = ""
-
-
 class OIDCProviderConfig(BaseModel):
     slug: str
     name: str
@@ -59,7 +55,6 @@ class Settings(BaseSettings):
     auth_github: ProviderSettings = ProviderSettings()
     auth_discord: ProviderSettings = ProviderSettings()
     auth_facebook: ProviderSettings = ProviderSettings()
-    auth_oidc: OIDCProviderSettings = OIDCProviderSettings()  # removed in Task 3
     auth_oidc_providers: list[OIDCProviderConfig] = []
 
     # SMTP

@@ -1,5 +1,5 @@
 from backend.auth.providers import PROVIDERS, get_enabled_providers
-from backend.config import Settings, ProviderSettings, OIDCProviderSettings
+from backend.config import Settings, ProviderSettings, OIDCProviderConfig
 
 
 def test_all_providers_defined():
@@ -78,10 +78,12 @@ def test_get_enabled_providers_google_enabled():
 def test_get_enabled_providers_oidc_enabled():
     settings = Settings(
         database_url="sqlite:///",
-        auth_oidc=OIDCProviderSettings(
-            enabled=True, client_id="oid", client_secret="osec", issuer_url="https://idp.example.com"
-        ),
+        auth_oidc_providers=[OIDCProviderConfig(
+            slug="authentik", name="Authentik",
+            enabled=True, client_id="oid", client_secret="osec",
+            issuer_url="https://idp.example.com",
+        )],
     )
     result = get_enabled_providers(settings)
-    assert "oidc" in result
-    assert result["oidc"].client_id == "oid"
+    assert "authentik" in result
+    assert result["authentik"].client_id == "oid"
