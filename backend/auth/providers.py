@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Callable
 
-from backend.config import Settings, ProviderSettings
+from backend.config import Settings, ProviderSettings, OIDCProviderConfig
 
 
 @dataclass
@@ -68,7 +68,7 @@ def _facebook_extract_email(data: dict) -> str:
     return data.get("email", "")
 
 
-PROVIDERS: dict[str, ProviderConfig] = {
+FIXED_PROVIDERS: dict[str, ProviderConfig] = {
     "google": ProviderConfig(
         protocol="oidc",
         label="Google",
@@ -120,26 +120,46 @@ PROVIDERS: dict[str, ProviderConfig] = {
         extract_name=_facebook_extract_name,
         extract_email=_facebook_extract_email,
     ),
-    "oidc": ProviderConfig(
-        protocol="oidc",
-        label="SSO",
-        scopes="openid email profile",
-        # discovery_url is empty — populated from settings.auth_oidc.issuer_url at runtime
-        extract_subject=_oidc_extract_subject,
-        extract_name=_oidc_extract_name,
-        extract_email=_oidc_extract_email,
-    ),
 }
 
 
-def get_enabled_providers(settings: Settings) -> dict[str, ProviderSettings]:
-    """Return a dict of provider_name -> ProviderSettings for all enabled providers."""
-    mapping = {
+def _normalise_issuer(url: str) -> str:
+    """Return the OIDC discovery URL — append /.well-known/openid-configuration if not already present."""
+    url = url.rstrip("/")
+    if url.endswith("/.well-known/openid-configuration"):
+        return url
+    return f"{url}/.well-known/openid-configuration"
+
+
+def build_providers(settings: Settings) -> dict[str, ProviderConfig]:
+    """Return all registered providers, combining fixed entries with the dynamic OIDC list."""
+    result = dict(FIXED_PROVIDERS)
+    for op in settings.auth_oidc_providers:
+        result[op.slug] = ProviderConfig(
+            protocol="oidc",
+            label=op.name,
+            scopes="openid email profile",
+            discovery_url=_normalise_issuer(op.issuer_url) if op.issuer_url else "",
+            extract_subject=_oidc_extract_subject,
+            extract_name=_oidc_extract_name,
+            extract_email=_oidc_extract_email,
+        )
+    return result
+
+
+def get_enabled_providers(settings: Settings) -> dict[str, ProviderSettings | OIDCProviderConfig]:
+    """Return enabled providers keyed by slug, with their per-provider credentials."""
+    fixed: dict[str, ProviderSettings] = {
         "google": settings.auth_google,
         "microsoft": settings.auth_microsoft,
         "github": settings.auth_github,
         "discord": settings.auth_discord,
         "facebook": settings.auth_facebook,
-        "oidc": settings.auth_oidc,
     }
-    return {name: ps for name, ps in mapping.items() if ps.enabled}
+    enabled: dict[str, ProviderSettings | OIDCProviderConfig] = {
+        name: ps for name, ps in fixed.items() if ps.enabled
+    }
+    for op in settings.auth_oidc_providers:
+        if op.enabled:
+            enabled[op.slug] = op
+    return enabled

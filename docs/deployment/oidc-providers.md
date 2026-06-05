@@ -10,7 +10,7 @@ This guide covers how to register an OAuth/OIDC app with each supported provider
 
 `APP_BASE_URL` is whatever you set in `SKYNET_APP_BASE_URL` — your real public URL in production (e.g. `https://net.example.org`), or `http://localhost:5173` for local dev.
 
-`{provider}` is one of: `github`, `google`, `microsoft`, `discord`, `facebook`, `oidc`.
+`{provider}` is one of the built-in providers (`github`, `google`, `microsoft`, `discord`, `facebook`) or the slug you choose for a Generic OIDC provider (e.g. `authentik`, `keycloak`). The bare slug `oidc` is reserved and not usable.
 
 ---
 
@@ -109,53 +109,54 @@ Note: Facebook requires the app to be in Live Mode (and reviewed for `email` per
 
 ---
 
-## Generic OIDC (Authentik, Keycloak, Zitadel, etc.)
+## Generic OIDC
 
-For any provider that speaks standard OIDC. The setup pattern is similar everywhere:
+For any OIDC-compliant provider that isn't listed above (Authentik, Keycloak, Okta, Auth0, Zitadel, …). You can configure multiple Generic OIDC providers — each gets its own URL slug, friendly name, issuer URL, and OAuth credentials.
 
-1. In your identity provider, register a new OIDC application:
-   - **Client type**: confidential
-   - **Redirect URI**: `{APP_BASE_URL}/api/auth/callback/oidc`
-   - **Scopes**: `openid email profile` (the only scopes SkyNetControl requests)
-2. Note the **Issuer URL** — the base URL of the provider's OIDC discovery endpoint. SkyNetControl appends `/.well-known/openid-configuration` automatically.
-3. Get the **Client ID** and **Client secret**.
-4. In your env:
-   ```
-   SKYNET_AUTH_OIDC_ENABLED=true
-   SKYNET_AUTH_OIDC_CLIENT_ID=skynetcontrol
-   SKYNET_AUTH_OIDC_CLIENT_SECRET=xxxxxxxx
-   SKYNET_AUTH_OIDC_ISSUER_URL=https://auth.example.org
-   ```
+### Env-var pattern
 
-### Authentik
+```
+SKYNET_AUTH_OIDC_<MIDDLE>_ENABLED=true
+SKYNET_AUTH_OIDC_<MIDDLE>_NAME=My Authentik
+SKYNET_AUTH_OIDC_<MIDDLE>_CLIENT_ID=...
+SKYNET_AUTH_OIDC_<MIDDLE>_CLIENT_SECRET=...
+SKYNET_AUTH_OIDC_<MIDDLE>_ISSUER_URL=https://idp.example.com
+```
 
-1. **Applications** → **Create**:
-   - Name: `SkyNetControl`
-   - Slug: `skynetcontrol`
-   - Provider: create a new **OAuth2/OpenID Provider** with:
-     - Client type: Confidential
-     - Redirect URI (regex): `https://net.example.org/api/auth/callback/oidc` (escape dots if you want to be strict)
-     - Scopes: openid, email, profile
-2. Copy the Client ID and Client Secret from the provider detail.
-3. The issuer URL is your Authentik base, e.g. `https://auth.example.org/application/o/skynetcontrol/`.
+- `<MIDDLE>` is uppercase letters/digits/underscores (e.g. `AUTHENTIK`, `MY_IDP`).
+- The URL slug is the lowercase version with underscores → dashes (e.g. `MY_IDP` → `my-idp`).
+- Reserved slugs (cannot be used): `google`, `github`, `microsoft`, `discord`, `facebook`, `oidc`.
+- `NAME` is the label shown on the login button (e.g. "My Authentik"). Defaults to the title-cased slug if omitted.
+- The callback URL to register in the IdP is `{APP_BASE_URL}/api/auth/callback/<slug>`.
 
-### Keycloak
+### Example: Authentik + Keycloak side-by-side
 
-1. In your realm, **Clients** → **Create client**:
-   - Client type: OpenID Connect
-   - Client ID: `skynetcontrol`
-   - Client authentication: ON
-   - Authentication flow: Standard flow
-2. **Settings** → **Valid redirect URIs**: `{APP_BASE_URL}/api/auth/callback/oidc`
-3. **Credentials** tab → copy the secret.
-4. Issuer URL: `https://keycloak.example.org/realms/{realm-name}`.
+```bash
+# Authentik
+SKYNET_AUTH_OIDC_AUTHENTIK_ENABLED=true
+SKYNET_AUTH_OIDC_AUTHENTIK_NAME=Authentik
+SKYNET_AUTH_OIDC_AUTHENTIK_CLIENT_ID=...
+SKYNET_AUTH_OIDC_AUTHENTIK_CLIENT_SECRET=...
+SKYNET_AUTH_OIDC_AUTHENTIK_ISSUER_URL=https://authentik.example.org/application/o/skynet/
 
-### Zitadel
+# Keycloak
+SKYNET_AUTH_OIDC_KEYCLOAK_ENABLED=true
+SKYNET_AUTH_OIDC_KEYCLOAK_NAME=Keycloak
+SKYNET_AUTH_OIDC_KEYCLOAK_CLIENT_ID=...
+SKYNET_AUTH_OIDC_KEYCLOAK_CLIENT_SECRET=...
+SKYNET_AUTH_OIDC_KEYCLOAK_ISSUER_URL=https://kc.example.org/realms/skynet
+```
 
-1. **Projects** → create a project → **New application** → **Web** → **Code** (PKCE optional).
-2. Redirect URI: `{APP_BASE_URL}/api/auth/callback/oidc`.
-3. Copy the Client ID and (if confidential) the Client secret.
-4. Issuer URL: your Zitadel instance URL (e.g., `https://your-instance.zitadel.cloud`).
+Callback URLs to register in each IdP, for `APP_BASE_URL=https://net.example.org`:
+
+- Authentik: `https://net.example.org/api/auth/callback/authentik`
+- Keycloak: `https://net.example.org/api/auth/callback/keycloak`
+
+The setup wizard (`skynetcontrol-setup`) prompts for friendly name + slug per provider and prints the per-provider redirect URI as you go — recommended over editing env files by hand.
+
+### Breaking change (2026-06-04)
+
+Earlier deployments used bare `SKYNET_AUTH_OIDC_CLIENT_ID` / `_CLIENT_SECRET` / `_ISSUER_URL` / `_ENABLED` without a slug. Those env vars are no longer recognised. Move your config to the slug-prefixed form (e.g. wrap your existing creds as `SKYNET_AUTH_OIDC_SSO_*`).
 
 ---
 

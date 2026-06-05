@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from backend.auth.service import fetch_oidc_discovery, init_providers
-from backend.config import Settings, ProviderSettings, OIDCProviderSettings
+from backend.config import Settings, ProviderSettings, OIDCProviderConfig
 
 
 @pytest.mark.asyncio
@@ -83,9 +83,11 @@ async def test_init_providers_with_github():
 async def test_init_providers_with_generic_oidc():
     settings = Settings(
         database_url="sqlite:///",
-        auth_oidc=OIDCProviderSettings(
-            enabled=True, client_id="oid", client_secret="osec", issuer_url="https://idp.example.com"
-        ),
+        auth_oidc_providers=[OIDCProviderConfig(
+            slug="authentik", name="Authentik",
+            enabled=True, client_id="oid", client_secret="osec",
+            issuer_url="https://idp.example.com",
+        )],
     )
 
     mock_discovery = {
@@ -97,8 +99,8 @@ async def test_init_providers_with_generic_oidc():
     with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock, return_value=mock_discovery):
         providers = await init_providers(settings)
 
-    assert "oidc" in providers
-    assert providers["oidc"]["authorize_url"] == "https://idp.example.com/authorize"
+    assert "authentik" in providers
+    assert providers["authentik"]["authorize_url"] == "https://idp.example.com/authorize"
 
 
 @pytest.mark.asyncio
@@ -135,3 +137,48 @@ async def test_init_providers_all_fail_raises():
     with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock, return_value=None):
         with pytest.raises(RuntimeError, match="No auth providers"):
             await init_providers(settings)
+
+
+@pytest.mark.asyncio
+async def test_init_providers_with_two_oidc():
+    settings = Settings(
+        database_url="sqlite:///",
+        auth_oidc_providers=[
+            OIDCProviderConfig(
+                slug="authentik", name="Authentik", enabled=True,
+                client_id="ca", client_secret="sa",
+                issuer_url="https://a.example.com",
+            ),
+            OIDCProviderConfig(
+                slug="keycloak", name="Keycloak", enabled=True,
+                client_id="ck", client_secret="sk",
+                issuer_url="https://k.example.com",
+            ),
+        ],
+    )
+
+    discoveries = {
+        "https://a.example.com/.well-known/openid-configuration": {
+            "authorization_endpoint": "https://a.example.com/authorize",
+            "token_endpoint": "https://a.example.com/token",
+            "userinfo_endpoint": "https://a.example.com/userinfo",
+        },
+        "https://k.example.com/.well-known/openid-configuration": {
+            "authorization_endpoint": "https://k.example.com/authorize",
+            "token_endpoint": "https://k.example.com/token",
+            "userinfo_endpoint": "https://k.example.com/userinfo",
+        },
+    }
+
+    async def fake_discover(url):
+        return discoveries.get(url)
+
+    with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock,
+               side_effect=fake_discover):
+        providers = await init_providers(settings)
+
+    assert "authentik" in providers and "keycloak" in providers
+    assert providers["authentik"]["authorize_url"] == "https://a.example.com/authorize"
+    assert providers["keycloak"]["authorize_url"] == "https://k.example.com/authorize"
+    assert providers["authentik"]["label"] == "Authentik"
+    assert providers["keycloak"]["label"] == "Keycloak"

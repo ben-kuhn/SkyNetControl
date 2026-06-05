@@ -222,3 +222,56 @@ def test_split_secrets_separates_keys_correctly() -> None:
                               "SKYNET_AUTH_GITHUB_CLIENT_ID",
                               "SKYNET_SMTP_HOST"}
     assert "HOME" not in secret and "HOME" not in plaintext
+
+
+def test_oidc_providers_from_env_groups_by_middle() -> None:
+    env = {
+        "SKYNET_AUTH_OIDC_AUTHENTIK_ENABLED": "true",
+        "SKYNET_AUTH_OIDC_AUTHENTIK_NAME": "Authentik",
+        "SKYNET_AUTH_OIDC_AUTHENTIK_CLIENT_ID": "x",
+        "SKYNET_AUTH_OIDC_KEYCLOAK_ENABLED": "true",
+        "SKYNET_AUTH_OIDC_KEYCLOAK_NAME": "Keycloak",
+        "SKYNET_AUTH_OIDC_KEYCLOAK_CLIENT_ID": "y",
+        "SKYNET_AUTH_GITHUB_ENABLED": "true",  # noise: not OIDC
+    }
+    descriptors = wizard._oidc_providers_from_env(env)
+    by_slug = {d["slug"]: d for d in descriptors}
+    assert set(by_slug) == {"authentik", "keycloak"}
+    assert by_slug["authentik"]["name"] == "Authentik"
+    assert by_slug["authentik"]["prefix"] == "SKYNET_AUTH_OIDC_AUTHENTIK_"
+    assert by_slug["authentik"]["extra"] == ["ISSUER_URL"]
+    assert by_slug["authentik"]["is_oidc"] is True
+
+
+def test_oidc_providers_from_env_partial_provider() -> None:
+    # Only ENABLED set — descriptor still returned (so user can edit/complete).
+    env = {"SKYNET_AUTH_OIDC_AUTHENTIK_ENABLED": "true"}
+    descriptors = wizard._oidc_providers_from_env(env)
+    assert len(descriptors) == 1
+    assert descriptors[0]["slug"] == "authentik"
+    assert descriptors[0]["name"] == "Authentik"  # title-cased default
+
+
+def test_oidc_providers_from_env_dashed_slug() -> None:
+    env = {"SKYNET_AUTH_OIDC_MY_IDP_ENABLED": "true"}
+    descriptors = wizard._oidc_providers_from_env(env)
+    assert descriptors[0]["slug"] == "my-idp"
+    assert descriptors[0]["prefix"] == "SKYNET_AUTH_OIDC_MY_IDP_"
+
+
+def test_enabled_providers_includes_oidc() -> None:
+    env = {
+        "SKYNET_AUTH_OIDC_AUTHENTIK_ENABLED": "true",
+        "SKYNET_AUTH_OIDC_AUTHENTIK_NAME": "Authentik",
+    }
+    enabled = wizard._enabled_providers(env)
+    slugs = [p["slug"] for p in enabled]
+    assert "authentik" in slugs
+
+
+def test_disabled_providers_always_includes_generic_oidc() -> None:
+    # Even with an OIDC provider already configured, the template stays available.
+    env = {"SKYNET_AUTH_OIDC_AUTHENTIK_ENABLED": "true"}
+    disabled = wizard._disabled_providers(env)
+    names = [p["name"] for p in disabled]
+    assert "Generic OIDC" in names

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from jose import JWTError, jwt
 
-from backend.auth.providers import PROVIDERS, get_enabled_providers
+from backend.auth.providers import build_providers, get_enabled_providers
 from backend.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -57,16 +57,15 @@ async def init_providers(settings: Settings) -> dict[str, dict]:
     if not enabled:
         raise RuntimeError("No auth providers are enabled. Set at least one SKYNET_AUTH_*_ENABLED=true.")
 
+    registry = build_providers(settings)
     resolved = {}
     for name, provider_settings in enabled.items():
-        registry = PROVIDERS[name]
+        config = registry[name]
 
-        if registry.protocol == "oidc":
-            # Determine discovery URL
-            if name == "oidc":
-                discovery_url = f"{provider_settings.issuer_url}/.well-known/openid-configuration"
-            else:
-                discovery_url = registry.discovery_url
+        if config.protocol == "oidc":
+            # Dynamic OIDC entries already have discovery_url baked in by
+            # build_providers; fixed OIDC entries (google, microsoft) too.
+            discovery_url = config.discovery_url
 
             discovery = await fetch_oidc_discovery(discovery_url)
             if discovery is None:
@@ -77,9 +76,9 @@ async def init_providers(settings: Settings) -> dict[str, dict]:
             token_url = discovery.get("token_endpoint", "")
             userinfo_url = discovery.get("userinfo_endpoint", "")
         else:
-            authorize_url = registry.authorize_url
-            token_url = registry.token_url
-            userinfo_url = registry.userinfo_url
+            authorize_url = config.authorize_url
+            token_url = config.token_url
+            userinfo_url = config.userinfo_url
 
         resolved[name] = {
             "authorize_url": authorize_url,
@@ -87,12 +86,12 @@ async def init_providers(settings: Settings) -> dict[str, dict]:
             "userinfo_url": userinfo_url,
             "client_id": provider_settings.client_id,
             "client_secret": provider_settings.client_secret,
-            "scopes": registry.scopes,
-            "label": registry.label,
-            "protocol": registry.protocol,
-            "extract_subject": registry.extract_subject,
-            "extract_name": registry.extract_name,
-            "extract_email": registry.extract_email,
+            "scopes": config.scopes,
+            "label": config.label,
+            "protocol": config.protocol,
+            "extract_subject": config.extract_subject,
+            "extract_name": config.extract_name,
+            "extract_email": config.extract_email,
         }
 
     if not resolved:
