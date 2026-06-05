@@ -4,14 +4,33 @@ import { fetchConfig, setConfigValue } from "../api/config";
 import { Button } from "../components/Button";
 import { Spinner } from "../components/Spinner";
 
+type ConfigFieldType = "text" | "boolean" | "multiselect";
+
+interface MultiSelectOption {
+  value: string;
+  label: string;
+}
+
 interface ConfigField {
   key: string;
   label: string;
   group: string;
-  placeholder: string;
   helpText: string;
-  mono?: boolean;
-  secret?: boolean;
+  type?: ConfigFieldType; // defaults to "text"
+  placeholder?: string;   // text fields only
+  mono?: boolean;         // text fields only
+  secret?: boolean;       // text fields only
+  options?: MultiSelectOption[]; // multiselect only
+  visibleWhen?: (values: Record<string, string>) => boolean;
+}
+
+function parseBackends(raw: string): string[] {
+  try {
+    const v = JSON.parse(raw || "[]");
+    return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 const CONFIG_FIELDS: ConfigField[] = [
@@ -119,34 +138,78 @@ function ConfigFieldRow({
 }) {
   const [showSecret, setShowSecret] = useState(false);
   const isDirty = value !== savedValue;
+  const type = field.type ?? "text";
+
+  let input: React.ReactNode;
+  if (type === "boolean") {
+    const checked = value === "true";
+    input = (
+      <label className="inline-flex items-center gap-2 text-sm text-text-primary">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+          className="accent-accent"
+        />
+        <span className="text-text-secondary">{checked ? "Enabled" : "Disabled"}</span>
+      </label>
+    );
+  } else if (type === "multiselect") {
+    const selected = parseBackends(value);
+    const toggle = (v: string) => {
+      const next = selected.includes(v)
+        ? selected.filter((s) => s !== v)
+        : [...selected, v];
+      onChange(JSON.stringify(next));
+    };
+    input = (
+      <div className="flex flex-col gap-1">
+        {(field.options ?? []).map((opt) => (
+          <label key={opt.value} className="inline-flex items-center gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              checked={selected.includes(opt.value)}
+              onChange={() => toggle(opt.value)}
+              className="accent-accent"
+            />
+            <span className="text-text-secondary">{opt.label}</span>
+          </label>
+        ))}
+      </div>
+    );
+  } else {
+    input = (
+      <div className="relative flex-1 max-w-md">
+        <input
+          type={field.secret && !showSecret ? "password" : "text"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          className={`w-full bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted ${
+            field.mono ? "font-mono" : ""
+          } ${field.secret ? "pr-10" : ""}`}
+        />
+        {field.secret && (
+          <button
+            type="button"
+            onClick={() => setShowSecret(!showSecret)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary text-xs px-1"
+            title={showSecret ? "Hide" : "Show"}
+          >
+            {showSecret ? "Hide" : "Show"}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4 last:mb-0">
       <label className="block text-sm text-text-secondary mb-1">
         {field.label}
       </label>
-      <div className="flex gap-2">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type={field.secret && !showSecret ? "password" : "text"}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={field.placeholder}
-            className={`w-full bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted ${
-              field.mono ? "font-mono" : ""
-            } ${field.secret ? "pr-10" : ""}`}
-          />
-          {field.secret && (
-            <button
-              type="button"
-              onClick={() => setShowSecret(!showSecret)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary text-xs px-1"
-              title={showSecret ? "Hide" : "Show"}
-            >
-              {showSecret ? "Hide" : "Show"}
-            </button>
-          )}
-        </div>
+      <div className="flex gap-2 items-start">
+        <div className="flex-1">{input}</div>
         <Button
           size="sm"
           variant={isDirty ? "primary" : "secondary"}
