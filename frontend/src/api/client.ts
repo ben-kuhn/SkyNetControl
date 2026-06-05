@@ -37,7 +37,11 @@ export async function apiFetch<T>(
       // response body wasn't JSON
     }
 
-    if (response.status === 401) {
+    if (
+      response.status === 401 &&
+      path !== "/auth/me" &&
+      window.location.pathname !== "/login"
+    ) {
       window.location.href = "/login";
     }
 
