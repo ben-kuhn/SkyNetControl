@@ -30,13 +30,16 @@ export function ProtectedRoute({
     return <Navigate to="/login" replace />;
   }
 
-  // Handle PENDING users
-  if (user.role === "pending") {
-    if (pendingOnly && !user.callsign.startsWith("PENDING-")) {
+  // Treat anyone still carrying a PENDING-... placeholder callsign as
+  // needing registration, even if their role is already ADMIN (the
+  // first-signup case).
+  const hasPlaceholderCallsign = user.callsign.startsWith("PENDING-");
+  if (user.role === "pending" || hasPlaceholderCallsign) {
+    if (pendingOnly && !hasPlaceholderCallsign) {
       return <Navigate to="/pending" replace />;
     }
     if (!allowPending) {
-      if (user.callsign.startsWith("PENDING-")) {
+      if (hasPlaceholderCallsign) {
         return <Navigate to="/register" replace />;
       }
       return <Navigate to="/pending" replace />;
