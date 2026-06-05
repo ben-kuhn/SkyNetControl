@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import secrets as _secrets
 from pathlib import Path
 
@@ -85,12 +86,51 @@ PROVIDERS: list[dict] = [
     },
     {
         "name": "Generic OIDC",
-        "prefix": "SKYNET_AUTH_OIDC_",
+        "prefix": "SKYNET_AUTH_OIDC_",  # template only — real providers get a slugged prefix
         "slug": "oidc",
         "extra": ["ISSUER_URL"],
         "console_url": "(your IdP's app-registration UI)",
+        "is_template": True,
     },
 ]
+
+_OIDC_ENV_RE = re.compile(
+    r"^SKYNET_AUTH_OIDC_([A-Z0-9_]+)_(NAME|ENABLED|CLIENT_ID|CLIENT_SECRET|ISSUER_URL)$"
+)
+
+
+def _oidc_providers_from_env(env: dict[str, str]) -> list[dict]:
+    """Return one descriptor per OIDC provider present in env.
+
+    Each descriptor mirrors a PROVIDERS entry but with `slug`, `prefix`,
+    `is_oidc=True`. NAME defaults to title-cased slug when absent.
+    """
+    from backend.auth.oidc_slug import slug_from_env_middle  # local: avoid cycle
+
+    seen: dict[str, str] = {}  # slug -> env middle (e.g. "AUTHENTIK")
+    names: dict[str, str] = {}
+    for key in env:
+        m = _OIDC_ENV_RE.match(key)
+        if not m:
+            continue
+        middle = m.group(1)
+        slug = slug_from_env_middle(middle)
+        seen.setdefault(slug, middle)
+        if m.group(2) == "NAME":
+            names[slug] = env[key]
+
+    descriptors = []
+    for slug in sorted(seen):
+        middle = seen[slug]
+        descriptors.append({
+            "name": names.get(slug, slug.title()),
+            "slug": slug,
+            "prefix": f"SKYNET_AUTH_OIDC_{middle}_",
+            "extra": ["ISSUER_URL"],
+            "console_url": "(your IdP's app-registration UI)",
+            "is_oidc": True,
+        })
+    return descriptors
 
 
 def is_secret_key(key: str) -> bool:
@@ -198,12 +238,23 @@ def step_core(env: dict[str, str]) -> None:
 
 
 def _enabled_providers(env: dict[str, str]) -> list[dict]:
-    return [p for p in PROVIDERS if env.get(f"{p['prefix']}ENABLED") == "true"]
+    fixed = [p for p in PROVIDERS
+             if not p.get("is_template")
+             and env.get(f"{p['prefix']}ENABLED") == "true"]
+    oidc = [p for p in _oidc_providers_from_env(env)
+            if env.get(f"{p['prefix']}ENABLED") == "true"]
+    return fixed + oidc
 
 
 def _disabled_providers(env: dict[str, str]) -> list[dict]:
-    enabled = {p["name"] for p in _enabled_providers(env)}
-    return [p for p in PROVIDERS if p["name"] not in enabled]
+    enabled_slugs = {p["slug"] for p in _enabled_providers(env)}
+    out = []
+    for p in PROVIDERS:
+        if p.get("is_template"):
+            out.append(p)  # always available to add another OIDC
+        elif p["slug"] not in enabled_slugs:
+            out.append(p)
+    return out
 
 
 def _configure_provider(provider: dict, env: dict[str, str]) -> None:
