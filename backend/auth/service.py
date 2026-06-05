@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from jose import JWTError, jwt
 
-from backend.auth.providers import PROVIDERS, get_enabled_providers
+from backend.auth.providers import FIXED_PROVIDERS as PROVIDERS, get_enabled_providers
 from backend.config import Settings
 
 logger = logging.getLogger(__name__)
