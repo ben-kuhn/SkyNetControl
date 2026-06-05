@@ -10,7 +10,7 @@ This guide covers how to register an OAuth/OIDC app with each supported provider
 
 `APP_BASE_URL` is whatever you set in `SKYNET_APP_BASE_URL` — your real public URL in production (e.g. `https://net.example.org`), or `http://localhost:5173` for local dev.
 
-`{provider}` is one of: `github`, `google`, `microsoft`, `discord`, `facebook`, `oidc`.
+`{provider}` is one of the built-in providers (`github`, `google`, `microsoft`, `discord`, `facebook`) or the slug you choose for a Generic OIDC provider (e.g. `authentik`, `keycloak`). The bare slug `oidc` is reserved and not usable.
 
 ---
 
