@@ -7,6 +7,7 @@ import jinja2
 from sqlalchemy.orm import Session
 
 from backend.config import settings
+from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn
 from backend.modules.notifications.models import NotificationKind
@@ -227,6 +228,9 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
 
     session_url = f"{settings.app_base_url}/checkins?session={net_session.id}"
 
+    net_callsign = get_config_value(db, "default_net_control", default="") or ""
+    net_address = get_config_value(db, "net_address", default="") or ""
+
     return {
         "date": date_str,
         "time": time_str,
@@ -234,6 +238,8 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
         "activity_title": activity_title,
         "activity_instructions": activity_instructions,
         "net_control": net_control,
+        "net_callsign": net_callsign,
+        "net_address": net_address,
         "next_week_preview": next_week_preview,
         "checkins": checkins,
         "new_members": new_members,
