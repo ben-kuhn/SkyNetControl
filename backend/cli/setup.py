@@ -258,10 +258,55 @@ def _disabled_providers(env: dict[str, str]) -> list[dict]:
 
 
 def _configure_provider(provider: dict, env: dict[str, str]) -> None:
-    """Prompt for one provider's credentials and write them into env."""
+    """Prompt for one provider's credentials and write them into env.
+
+    For the Generic OIDC template (is_template=True), this adds a *new*
+    OIDC provider: prompts for a friendly name, derives a slug, then
+    re-dispatches to itself with the new provider descriptor.
+    """
     from prompt_toolkit import prompt
     from prompt_toolkit.formatted_text import HTML
 
+    from backend.auth.oidc_slug import (
+        env_middle_from_slug, slugify, validate_slug,
+    )
+
+    if provider.get("is_template"):
+        # Step 1: friendly name
+        while True:
+            name = prompt(HTML("\n  Friendly name for this OIDC provider "
+                               "(e.g. <ansigreen>Authentik</ansigreen>): ")).strip()
+            if name:
+                break
+            print("  Name is required.")
+
+        # Step 2: slug — default from name, editable, validated, unique
+        existing_slugs = {p["slug"] for p in _oidc_providers_from_env(env)}
+        default_slug = slugify(name)
+        while True:
+            slug = prompt(HTML(f"  URL slug [<ansigreen>{default_slug}</ansigreen>]: ")).strip() or default_slug
+            err = validate_slug(slug)
+            if err is None and slug in existing_slugs:
+                err = f"'{slug}' is already configured — pick another or [r]emove the existing one first"
+            if err is None:
+                break
+            print(f"  {err}")
+            default_slug = slug  # let user edit their own input next round
+
+        # Now act as if we were configuring a discovered OIDC provider.
+        new_descriptor = {
+            "name": name,
+            "slug": slug,
+            "prefix": f"SKYNET_AUTH_OIDC_{env_middle_from_slug(slug)}_",
+            "extra": ["ISSUER_URL"],
+            "console_url": "(your IdP's app-registration UI)",
+            "is_oidc": True,
+        }
+        env[f"{new_descriptor['prefix']}NAME"] = name
+        _configure_provider(new_descriptor, env)
+        return
+
+    # Existing OIDC provider OR fixed provider — same flow.
     prefix = provider["prefix"]
     base_url = env.get("SKYNET_APP_BASE_URL", "http://localhost:8000").rstrip("/")
     redirect_uri = f"{base_url}/api/auth/callback/{provider['slug']}"
@@ -270,6 +315,14 @@ def _configure_provider(provider: dict, env: dict[str, str]) -> None:
     print(f"  Developer console: {provider['console_url']}")
     print(f"  Set the OAuth redirect / callback URL there to:")
     print(f"    {redirect_uri}")
+
+    # OIDC providers (not templates): allow renaming.
+    if provider.get("is_oidc"):
+        cur_name = env.get(f"{prefix}NAME", provider["name"])
+        new_name = prompt(
+            HTML(f"  Friendly name [<ansigreen>{cur_name}</ansigreen>]: "),
+        ).strip() or cur_name
+        env[f"{prefix}NAME"] = new_name
 
     cur_id = env.get(f"{prefix}CLIENT_ID", "")
     cur_secret = env.get(f"{prefix}CLIENT_SECRET", "")
