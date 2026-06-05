@@ -74,7 +74,7 @@ export function ProfilePage() {
     setCallsignError(null);
     const upper = newCallsign.toUpperCase();
     if (!CALLSIGN_PATTERN.test(upper)) {
-      setCallsignError("Invalid callsign format (e.g., W0NE, KD0ABC)");
+      setCallsignError("Invalid callsign format (e.g., WAØXYZ, KD0ABC)");
       return;
     }
     setCallsignLoading(true);
@@ -206,7 +206,7 @@ export function ProfilePage() {
               <Input
                 value={newCallsign}
                 onChange={(e) => setNewCallsign(e.target.value.toUpperCase())}
-                placeholder="W0NEW"
+                placeholder="WAØXYZ"
                 error={callsignError || undefined}
                 mono
               />

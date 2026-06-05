@@ -4,6 +4,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.config_mgmt.service import set_config_value
 from backend.db.base import Base
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
@@ -231,6 +232,19 @@ def test_build_template_context_no_next_session(db: Session, season_and_sessions
     # session2 is the last session, so no next session
     ctx = build_template_context(db, session2)
     assert ctx["next_week_preview"] == ""
+
+
+def test_build_template_context_includes_net_identity(db: Session, season_and_sessions):
+    """build_template_context exposes net_callsign and net_address from config
+    so seeded templates don't have to hardcode net branding."""
+    _, session1, _, _ = season_and_sessions
+    set_config_value(db, "default_net_control", "K0XYZ")
+    set_config_value(db, "net_address", "k0xyz@winlink.org")
+
+    ctx = build_template_context(db, session1)
+
+    assert ctx["net_callsign"] == "K0XYZ"
+    assert ctx["net_address"] == "k0xyz@winlink.org"
 
 
 # --- Rendering tests ---

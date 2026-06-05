@@ -4,6 +4,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from backend.config_mgmt.service import set_config_value
 from backend.db.base import Base
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
@@ -279,6 +280,19 @@ def test_build_roster_context_activity(db, season_and_sessions):
     assert ctx["total_count"] == 0
     assert ctx["checkins"] == []
     assert ctx["new_members"] == []
+
+
+def test_build_roster_context_includes_net_identity(db, season_and_sessions):
+    """build_roster_context exposes net_callsign and net_address from config
+    so seeded roster templates don't have to hardcode net branding."""
+    _, session1, _, _ = season_and_sessions
+    set_config_value(db, "default_net_control", "K0XYZ")
+    set_config_value(db, "net_address", "k0xyz@winlink.org")
+
+    ctx = build_roster_context(db, session1)
+
+    assert ctx["net_callsign"] == "K0XYZ"
+    assert ctx["net_address"] == "k0xyz@winlink.org"
 
 
 def test_build_roster_context_session_url(db, season_and_sessions):

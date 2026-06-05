@@ -141,6 +141,35 @@ async def test_register_already_registered(test_client, test_settings, db_setup)
 
 
 @pytest.mark.asyncio
+async def test_register_admin_with_placeholder_callsign(test_client, test_settings, db_setup):
+    """First-signup admins start with a PENDING-... placeholder callsign and must be
+    able to claim a real one via /register without going through the
+    admin-approval round-trip."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(
+            User(
+                callsign="PENDING-pocketid:80f",
+                oidc_subject="pocketid:80f1abc",
+                name="First Admin",
+                role=UserRole.ADMIN,
+            )
+        )
+        session.commit()
+
+    token = create_access_token("PENDING-pocketid:80f", "admin", test_settings)
+    response = await test_client.post(
+        "/api/auth/register",
+        json={"callsign": "W0ABC"},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["callsign"] == "W0ABC"
+    assert body["role"] == "admin"
+
+
+@pytest.mark.asyncio
 async def test_register_unauthenticated(test_client):
     response = await test_client.post("/api/auth/register", json={"callsign": "W0ABC"})
     assert response.status_code == 401
