@@ -313,7 +313,7 @@ def _configure_provider(provider: dict, env: dict[str, str]) -> None:
 
     print(f"\n  Configuring {provider['name']}")
     print(f"  Developer console: {provider['console_url']}")
-    print(f"  Set the OAuth redirect / callback URL there to:")
+    print("  Set the OAuth redirect / callback URL there to:")
     print(f"    {redirect_uri}")
 
     # OIDC providers (not templates): allow renaming.
@@ -542,7 +542,8 @@ def step_output(env: dict[str, str], env_path: Path,
             host_port = 8000
         else:
             host_port = int(host_port_raw)
-        volume = prompt(HTML("  Docker volume name [<ansigreen>skynetcontrol-data</ansigreen>]: ")).strip() or "skynetcontrol-data"
+        volume_prompt = HTML("  Docker volume name [<ansigreen>skynetcontrol-data</ansigreen>]: ")
+        volume = prompt(volume_prompt).strip() or "skynetcontrol-data"
 
         full_env = {k: v for k, v in env.items() if k.startswith("SKYNET_")}
         save_env(full_env, env_path)
