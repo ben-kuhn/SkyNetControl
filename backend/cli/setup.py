@@ -371,18 +371,43 @@ def _choose(options: list[str], prompt_text: str) -> int | None:
     return None
 
 
+def _enabled_label(provider: dict) -> str:
+    """Display label for a provider in the wizard's enabled list."""
+    if provider.get("is_oidc"):
+        return f"{provider['name']} (oidc: {provider['slug']})"
+    return provider["name"]
+
+
+def _print_redirect_recap(enabled: list[dict], base_url: str) -> None:
+    """Print a recap of redirect URIs for the currently-enabled providers."""
+    if not enabled:
+        return
+    width = max(len(p["name"]) for p in enabled) + 2
+    print("\n  Redirect URIs to configure in your provider consoles:")
+    for p in enabled:
+        label = (p["name"] + ":").ljust(width)
+        print(f"    {label} {base_url}/api/auth/callback/{p['slug']}")
+
+
 def step_oidc(env: dict[str, str]) -> None:
     """Step 2: Add/edit/remove OIDC providers in a loop."""
     from prompt_toolkit import prompt
+
+    base_url = env.get("SKYNET_APP_BASE_URL", "http://localhost:8000").rstrip("/")
 
     print("\n" + "=" * 60)
     print("Step 2/4: OIDC providers")
     print("=" * 60)
     print("  At least one provider must be enabled before the backend will start.")
+    print("  Redirect URI pattern (configure these in each provider's developer console):")
+    print(f"    {base_url}/api/auth/callback/<provider>")
 
     while True:
         enabled = _enabled_providers(env)
-        names = ", ".join(p["name"] for p in enabled) if enabled else "none"
+        if enabled:
+            names = ", ".join(_enabled_label(p) for p in enabled)
+        else:
+            names = "none"
         print(f"\n  Currently enabled: {names}")
         action = prompt("  Action [a]dd / [e]dit / [r]emove / [d]one: ").strip().lower() or "d"
 
@@ -391,6 +416,7 @@ def step_oidc(env: dict[str, str]) -> None:
                 confirm = prompt("  No providers enabled. Continue anyway? [y/N]: ").strip().lower()
                 if confirm != "y":
                     continue
+            _print_redirect_recap(enabled, base_url)
             return
 
         if action == "a":
@@ -407,7 +433,7 @@ def step_oidc(env: dict[str, str]) -> None:
             if not enabled:
                 print("  No providers to edit.")
                 continue
-            idx = _choose([p["name"] for p in enabled], "Pick a provider to edit")
+            idx = _choose([_enabled_label(p) for p in enabled], "Pick a provider to edit")
             if idx is None:
                 continue
             _configure_provider(enabled[idx], env)
@@ -416,11 +442,11 @@ def step_oidc(env: dict[str, str]) -> None:
             if not enabled:
                 print("  No providers to remove.")
                 continue
-            idx = _choose([p["name"] for p in enabled], "Pick a provider to remove")
+            idx = _choose([_enabled_label(p) for p in enabled], "Pick a provider to remove")
             if idx is None:
                 continue
             _remove_provider(enabled[idx], env)
-            print(f"  Removed {enabled[idx]['name']}.")
+            print(f"  Removed {_enabled_label(enabled[idx])}.")
 
         else:
             print(f"  Unknown action: {action!r}")
