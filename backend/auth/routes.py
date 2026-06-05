@@ -181,7 +181,7 @@ async def register(
     db: Session = Depends(get_db_session),
     app_settings: Settings = Depends(get_settings),
 ):
-    if user.role != UserRole.PENDING:
+    if not user.callsign.startswith("PENDING-"):
         raise HTTPException(status_code=409, detail="User already registered")
 
     callsign = body.callsign.upper()
