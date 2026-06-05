@@ -90,29 +90,22 @@ systemd.services.skynetcontrol.serviceConfig.EnvironmentFile = [
 
 #### Database storage
 
-By default the module configures `StateDirectory=skynetcontrol`, which lives at `/var/lib/skynetcontrol/`. The SQLite database file lands there as `skynetcontrol.db`. Both paths are tunable via `services.skynetcontrol.stateDir` and `services.skynetcontrol.databaseUrl` — the latter takes any SQLAlchemy URL, so pointing at PostgreSQL is a one-line swap.
+The module exposes `services.skynetcontrol.stateDir` (default `/var/lib/skynetcontrol`) and `services.skynetcontrol.databaseUrl` (default points at `<stateDir>/skynetcontrol.db`). Override either to put state on a dedicated ZFS dataset, a bind-mount, or external PostgreSQL. See **[docs/deployment/nix.md#custom-storage-location](docs/deployment/nix.md#custom-storage-location)** for ZFS / bind-mount / PostgreSQL recipes.
 
-That state directory is the only persistent data the service writes. Everything else (templates, sessions, check-ins, audit log, tokens) lives inside the database.
+#### Backups and migration
 
-#### Backups
+Pick the backup pattern that matches your storage: ZFS snapshots, online `sqlite3 .backup` via systemd timer, restic over the state dir, or `pg_dump` for PostgreSQL. See **[docs/deployment/nix.md#backups](docs/deployment/nix.md#backups)** for the full recipes.
 
-For SQLite, snapshot the DB file. With the service stopped (or using `sqlite3 .backup` for an online snapshot):
-
-```bash
-sudo systemctl stop skynetcontrol
-sudo cp /var/lib/skynetcontrol/skynetcontrol.db /backup/skynetcontrol-$(date +%F).db
-sudo systemctl start skynetcontrol
-```
-
-Online, no downtime:
+To move a database between engines (SQLite ↔ PostgreSQL) or between hosts, use the bundled `skynetcontrol-db-copy` CLI:
 
 ```bash
-sudo sqlite3 /var/lib/skynetcontrol/skynetcontrol.db ".backup '/backup/skynetcontrol-$(date +%F).db'"
+sudo skynetcontrol-alembic upgrade head  # against the new URL
+sudo skynetcontrol-db-copy \
+  sqlite:////var/lib/skynetcontrol/skynetcontrol.db \
+  'postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql'
 ```
 
-For PostgreSQL, use `pg_dump` per your normal database backup workflow. Either way, the secrets file (e.g. `/run/secrets/skynetcontrol-env`) is separate state — back it up alongside.
-
-See **[docs/deployment/nix.md](docs/deployment/nix.md)** for the full NixOS setup including reverse proxy + ACME, PostgreSQL, and overlay use.
+See **[docs/deployment/nix.md#moving-between-database-backends](docs/deployment/nix.md#moving-between-database-backends)** for the full migration recipe.
 
 ### Local development
 
