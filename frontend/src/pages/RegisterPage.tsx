@@ -21,7 +21,7 @@ export function RegisterPage() {
 
     const upper = callsign.toUpperCase();
     if (!CALLSIGN_PATTERN.test(upper)) {
-      setError("Invalid callsign format (e.g., W0NE, KD0ABC)");
+      setError("Invalid callsign format (e.g., WAØXYZ, KD0ABC)");
       return;
     }
 
