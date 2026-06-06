@@ -100,7 +100,7 @@ To move a database between engines (SQLite ↔ PostgreSQL) or between hosts, use
 
 ```bash
 sudo skynetcontrol-alembic upgrade head  # against the new URL
-sudo skynetcontrol-db-copy \
+sudo skynetcontrol-db-copy --replace \
   sqlite:////var/lib/skynetcontrol/skynetcontrol.db \
   'postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql'
 ```

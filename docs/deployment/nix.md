@@ -301,8 +301,9 @@ sudo systemctl stop skynetcontrol
 sudo SKYNET_DATABASE_URL='postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql' \
   skynetcontrol-alembic upgrade head
 
-# 3. Copy the rows.
-sudo skynetcontrol-db-copy \
+# 3. Copy the rows. --replace truncates the freshly-migrated target first
+#    (it has seed rows from migrations — default templates, etc.).
+sudo skynetcontrol-db-copy --replace \
   sqlite:////var/lib/skynetcontrol/skynetcontrol.db \
   'postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql'
 
@@ -311,7 +312,7 @@ sudo skynetcontrol-db-copy \
 sudo nixos-rebuild switch
 ```
 
-The command refuses to copy into a target that's unmigrated, or that already has data — explicit safety to prevent clobbering. Reverse the source / target arguments to roll back.
+By default the command refuses to copy into a target that's unmigrated or already has data — explicit safety to prevent clobbering. `--replace` wipes the target before copying; omit it only when you're certain the target is truly empty (which a freshly-migrated DB is *not*, since seed migrations insert default templates). Reverse the source / target arguments to roll back.
 
 ### Updating
 

@@ -79,3 +79,34 @@ def test_copy_database_refuses_when_target_has_data(tmp_path):
 
     with pytest.raises(RuntimeError, match="target.*not empty"):
         copy_database(src_url, dst_url)
+
+
+def test_copy_database_replace_truncates_target_first(tmp_path):
+    """In real deployments the freshly-migrated target always has seed rows
+    (default templates etc.), so --replace must wipe them before copying."""
+    src_url = _make_db(str(tmp_path / "src.db"))
+    dst_url = _make_db(str(tmp_path / "dst.db"))
+
+    src_engine = create_engine(src_url)
+    SrcSession = sessionmaker(bind=src_engine)
+    with SrcSession() as s:
+        s.add(User(callsign="K0XYZ", oidc_subject="g:x", name="Alice", role=UserRole.ADMIN))
+        s.commit()
+    src_engine.dispose()
+
+    # Pre-populate target with conflicting data (simulating seed rows from migrations).
+    dst_engine = create_engine(dst_url)
+    DstSession = sessionmaker(bind=dst_engine)
+    with DstSession() as s:
+        s.add(User(callsign="W0PRESEED", oidc_subject="g:p", name="Preseed", role=UserRole.VIEWER))
+        s.commit()
+    dst_engine.dispose()
+
+    copy_database(src_url, dst_url, replace=True)
+
+    dst_engine = create_engine(dst_url)
+    with sessionmaker(bind=dst_engine)() as s:
+        users = s.execute(select(User)).scalars().all()
+        assert len(users) == 1
+        assert users[0].callsign == "K0XYZ"
+    dst_engine.dispose()
