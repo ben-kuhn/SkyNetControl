@@ -314,6 +314,90 @@ sudo nixos-rebuild switch
 
 By default the command refuses to copy into a target that's unmigrated or already has data — explicit safety to prevent clobbering. `--replace` wipes the target before copying; omit it only when you're certain the target is truly empty (which a freshly-migrated DB is *not*, since seed migrations insert default templates). Reverse the source / target arguments to roll back.
 
+### PAT integration (hourly Winlink fetch)
+
+SkyNetControl reads check-ins out of a PAT mailbox directory but does not fetch mail from Winlink itself. Pair the service with a systemd timer that runs `pat connect telnet` once an hour. The two services need to agree on a mailbox directory; the SkyNetControl service runs under a `DynamicUser` (transient UID, no stable name), so the cleanest approach is to give PAT its own static user and grant SkyNetControl read access via a shared group.
+
+```nix
+{ config, lib, pkgs, ... }:
+
+{
+  environment.systemPackages = [ pkgs.pat ];
+
+  # Static user for PAT.
+  users.groups.pat = {};
+  users.users.pat = {
+    isSystemUser = true;
+    group = "pat";
+    home = "/var/lib/pat";
+    createHome = true;
+  };
+
+  # The mailbox directory needs to be group-readable so SkyNetControl
+  # (a different UID, joined to the pat group via SupplementaryGroups
+  # below) can walk it.
+  systemd.tmpfiles.rules = [
+    "d /var/lib/pat                              0750 pat pat - -"
+    "d /var/lib/pat/.config                      0750 pat pat - -"
+    "d /var/lib/pat/.config/pat                  0750 pat pat - -"
+    "d /var/lib/pat/.local                       0750 pat pat - -"
+    "d /var/lib/pat/.local/share                 0750 pat pat - -"
+    "d /var/lib/pat/.local/share/pat             0750 pat pat - -"
+    "d /var/lib/pat/.local/share/pat/mailbox     0750 pat pat - -"
+  ];
+
+  # Hourly fetch. PAT reads ~/.config/pat/config.json — log in once as
+  # the pat user (`sudo -u pat pat configure`) before enabling the
+  # timer, so it has your callsign + Winlink password.
+  systemd.services."pat-fetch" = {
+    description = "Pull Winlink mail via PAT (telnet/CMS)";
+    serviceConfig = {
+      Type = "oneshot";
+      User = "pat";
+      Group = "pat";
+      ExecStart = "${pkgs.pat}/bin/pat connect telnet";
+      TimeoutStartSec = "5m";
+      # PAT prints progress to stderr — surface it in the journal.
+      StandardOutput = "journal";
+      StandardError = "journal";
+    };
+  };
+
+  systemd.timers."pat-fetch" = {
+    description = "Hourly Winlink fetch";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "hourly";
+      Persistent = true;        # run a missed tick after a reboot
+      RandomizedDelaySec = "5m"; # don't stampede every PAT user on the hour
+    };
+  };
+
+  # Let SkyNetControl's dynamic user read the pat-owned mailbox.
+  systemd.services.skynetcontrol.serviceConfig.SupplementaryGroups = [ "pat" ];
+
+  # Tell SkyNetControl where the mailbox lives. Replace W0NE with your callsign.
+  services.skynetcontrol.settings.PAT_MAILBOX_PATH =
+    "/var/lib/pat/.local/share/pat/mailbox/W0NE";
+}
+```
+
+First-time setup, once after `nixos-rebuild switch`:
+
+```bash
+sudo -u pat pat configure   # writes ~pat/.config/pat/config.json
+sudo systemctl start pat-fetch.service   # one manual fetch to seed the mailbox
+sudo systemctl list-timers pat-fetch     # confirm scheduling
+journalctl -u pat-fetch -f               # follow live
+```
+
+Then in SkyNetControl's `/config` page, enable **Auto-Scanner** and set **Scan Interval** to something less than 60 minutes — typically 5 — so check-ins surface promptly after each PAT fetch.
+
+Two notes:
+
+- **Transport.** `telnet` reaches Winlink's CMS over the internet — no radio needed. Swap for `ax25`, `ardop`, or `vara` if you're pulling over RF, and accept that those transports usually want a tighter loop (or a long-running `pat http` service) instead of an hourly oneshot.
+- **Mailbox path matches the user.** PAT writes to `~/.local/share/pat/mailbox/<CALLSIGN>` — the `~` resolves to `/var/lib/pat` because that's what `users.users.pat.home` is set to. If you move that home, update the `PAT_MAILBOX_PATH` setting and the tmpfiles rules together.
+
 ### Updating
 
 The module re-evaluates whenever the `skynetcontrol` package input changes. Migrations run via `ExecStartPre` on each restart, so a `nixos-rebuild switch` is the full update path:
@@ -369,6 +453,115 @@ The image:
 - Does NOT auto-run migrations. Run `skynetcontrol-alembic upgrade head` before each upgrade. (The NixOS module handles this automatically.)
 
 The bundled `skynetcontrol-alembic` entry point is wrapped to know where the migrations and `alembic.ini` are inside the Nix store — you don't need to pass `-c`.
+
+### PAT integration (hourly Winlink fetch)
+
+The SkyNetControl image only *reads* a PAT mailbox; it doesn't talk to Winlink. You run PAT on the host (or in its own container) on an hourly cron / systemd timer, and share the mailbox directory with the SkyNetControl container via a bind mount.
+
+This guide assumes you can edit a few files, install a package, and run `crontab -e` — no Nix experience needed.
+
+**1. Install and configure PAT on the host.**
+
+Most distros have it:
+
+```bash
+# Debian/Ubuntu
+sudo apt install pat
+# Fedora/RHEL
+sudo dnf install pat
+# Arch
+sudo pacman -S pat
+```
+
+(Or grab a binary from <https://getpat.io/> if your distro doesn't package it.)
+
+Pick the host user PAT will run as. Easiest: just use the user you log in as. Throughout the examples below this is **`ham`** — substitute your own.
+
+```bash
+pat configure   # opens an editor; set your callsign + Winlink password
+pat connect telnet   # one-shot fetch; confirms the config works
+```
+
+After a successful fetch PAT has created `~/.local/share/pat/mailbox/<YOURCALL>/` with `in/`, `out/`, `sent/`, `archive/`. That `in/` directory is what SkyNetControl will scan.
+
+**2. Make the mailbox directory available to the container.**
+
+The SkyNetControl OCI image runs as **root** inside the container by default, so it can read any host directory you bind-mount in. No `chown` gymnastics needed — the only requirement is that the host path exists before you start the container.
+
+Start (or restart) the container with two added flags: the bind mount and a `SKYNET_PAT_MAILBOX_PATH` env var pointing at it.
+
+```bash
+docker run -d \
+  --name skynetcontrol \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  -v skynetcontrol-data:/data \
+  -v /home/ham/.local/share/pat/mailbox:/pat-mailbox:ro \
+  -e SKYNET_PAT_MAILBOX_PATH=/pat-mailbox/W0NE \
+  --env-file /path/to/skynetcontrol.env \
+  ghcr.io/ben-kuhn/skynetcontrol:latest
+```
+
+What's going on:
+
+- `-v /home/ham/.local/share/pat/mailbox:/pat-mailbox:ro` — bind-mount PAT's entire mailbox directory tree into the container, read-only. Read-only is correct: SkyNetControl never writes here; it only parses what PAT delivers.
+- `-e SKYNET_PAT_MAILBOX_PATH=/pat-mailbox/W0NE` — point the in-app config at the per-callsign subdirectory. Replace `W0NE` with your callsign.
+
+**Don't want to run the container as root?** Add `--user $(id -u ham):$(id -g ham)` to the `docker run` command. Then the bind mount can stay as-is — PAT's mailbox is owned by `ham`, the container now runs as `ham`, the UIDs match.
+
+If your `skynetcontrol-data` named volume already exists and was created under root, switching to `--user` will require fixing its ownership: `docker run --rm -v skynetcontrol-data:/data --user 0 alpine chown -R <uid>:<gid> /data`.
+
+**3. Schedule the hourly fetch.**
+
+The simplest cron entry, in `crontab -e` as your host user:
+
+```cron
+# Fetch Winlink mail every hour at :07 (the offset avoids the top-of-the-hour stampede)
+7 * * * * /usr/bin/pat connect telnet >> ~/.local/state/pat-fetch.log 2>&1
+```
+
+(Adjust the binary path if `which pat` reports a different location.)
+
+Confirm with `tail -f ~/.local/state/pat-fetch.log` after the next tick.
+
+If you're on a systemd-based host and prefer a timer (more visibility via `systemctl status`), drop these two files in `~/.config/systemd/user/` and run `systemctl --user enable --now pat-fetch.timer`:
+
+```ini
+# ~/.config/systemd/user/pat-fetch.service
+[Unit]
+Description=Pull Winlink mail via PAT (telnet/CMS)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pat connect telnet
+TimeoutStartSec=5m
+```
+
+```ini
+# ~/.config/systemd/user/pat-fetch.timer
+[Unit]
+Description=Hourly Winlink fetch
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target
+```
+
+User-level systemd timers need `loginctl enable-linger ham` so they keep running when you're not logged in.
+
+**4. Enable the in-app scanner.**
+
+In SkyNetControl's `/config` page, set **Auto-Scanner** to on and **Scan Interval** to 5 minutes. Now the flow is: every hour PAT pulls Winlink mail into `~/.local/share/pat/mailbox/<CALL>/in/`, and within 5 minutes SkyNetControl notices the new files and parses out check-ins.
+
+**Troubleshooting permissions.** If the `/checkins` page never shows new check-ins after a real fetch:
+
+- `ls -l ~/.local/share/pat/mailbox/<CALL>/in/` — confirm PAT wrote files there as the host user you expect.
+- `docker exec skynetcontrol ls /pat-mailbox/<CALL>/in/` — confirm the container sees the same files (and isn't getting an empty directory, which would mean the bind mount is wrong).
+- `docker exec skynetcontrol cat /proc/self/status | head -1` — confirm what user the container's main process is running as.
 
 ### Pushing a private build
 
