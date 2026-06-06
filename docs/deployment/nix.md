@@ -163,9 +163,111 @@ services.skynetcontrol = {
 
 The peer-authenticated socket-path URL avoids putting credentials anywhere. Migrations will run automatically against the new database on next restart.
 
+### Custom storage location
+
+The NixOS module exposes two storage knobs:
+
+- `services.skynetcontrol.stateDir` — where the systemd unit's `StateDirectory` lives. Defaults to `/var/lib/skynetcontrol`. Set this to any path the system can write to:
+
+  ```nix
+  services.skynetcontrol.stateDir = "/tank/skynetcontrol";
+  ```
+
+  The module adds this path to `ReadWritePaths`, and systemd's `StateDirectory=` will create it with the dynamic-user ownership on first start. Make sure the parent directory exists and is on a filesystem the service can write to.
+
+- `services.skynetcontrol.databaseUrl` — the SQLAlchemy URL. Defaults to `sqlite:////var/lib/skynetcontrol/skynetcontrol.db` (note the four slashes — SQLAlchemy's absolute-path SQLite form). Override this to put the DB file outside `stateDir` or to use a different engine:
+
+  ```nix
+  services.skynetcontrol.databaseUrl = "sqlite:////tank/skynetcontrol/skynetcontrol.db";
+  ```
+
+#### Pattern 1: Put state on a ZFS dataset
+
+Create a dedicated dataset so you can snapshot just the SkyNetControl state:
+
+```bash
+sudo zfs create -o mountpoint=/tank/skynetcontrol tank/skynetcontrol
+```
+
+Then point the module at it:
+
+```nix
+services.skynetcontrol.stateDir = "/tank/skynetcontrol";
+services.skynetcontrol.databaseUrl = "sqlite:////tank/skynetcontrol/skynetcontrol.db";
+```
+
+After `nixos-rebuild switch`, systemd will create the directory on next start with the dynamic-user ownership. The DB lives entirely on the dedicated dataset — snapshots, replication, and quotas all apply.
+
+#### Pattern 2: Bind-mount over the default location
+
+If you don't want to change `stateDir` (e.g. another tool already expects `/var/lib/skynetcontrol`), bind-mount the real storage in:
+
+```nix
+fileSystems."/var/lib/skynetcontrol" = {
+  device = "/tank/skynetcontrol";
+  options = [ "bind" ];
+};
+```
+
+This keeps the module's defaults and routes all state I/O through the new device. The bind mount needs to be in place before `skynetcontrol.service` starts — NixOS orders fileSystems before multi-user.target by default, so this is automatic.
+
+#### Pattern 3: External PostgreSQL
+
+For multi-instance setups or just to avoid SQLite altogether, swap the URL:
+
+```nix
+services.skynetcontrol.databaseUrl =
+  "postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql";
+```
+
+Run a local `services.postgresql.enable = true;` with a matching role and DB, or point at a remote cluster — peer auth via the socket path is the cleanest for a co-located DB. Migrations run automatically on next service restart.
+
 ### Backups
 
-The SQLite default puts state at `/var/lib/skynetcontrol/skynetcontrol.db`. Snapshot that file (with the service stopped, or via `sqlite3 .backup`) to back up everything except secrets:
+Pick whichever fits your storage layout. All three patterns coexist.
+
+#### Filesystem snapshots (when state is on ZFS/btrfs)
+
+If you put state on its own dataset/subvolume, snapshots are the simplest backup:
+
+```bash
+sudo zfs snapshot tank/skynetcontrol@$(date +%F)
+```
+
+For automatic daily snapshots use `services.zfs.autoSnapshot.enable = true;` (or `sanoid`, `znapzend`, etc.). Restore is just `zfs clone` or `zfs rollback` — the service does not need to be stopped to take a snapshot, since ZFS gives you an atomic point-in-time view even while SQLite is mid-write.
+
+#### Online SQLite snapshot via `sqlite3 .backup`
+
+If you're not on a snapshotting filesystem, use SQLite's built-in online backup. It produces a consistent copy without stopping the service:
+
+```bash
+sudo sqlite3 /var/lib/skynetcontrol/skynetcontrol.db \
+  ".backup '/backup/skynetcontrol-$(date +%F).db'"
+```
+
+(With `DynamicUser = true;` the service user is a dynamic UID, so running the backup as root and `chown`-ing after is the simplest path.)
+
+A systemd timer makes this nightly:
+
+```nix
+systemd.services."skynetcontrol-backup" = {
+  description = "Online backup of SkyNetControl SQLite DB";
+  serviceConfig.Type = "oneshot";
+  script = ''
+    ${pkgs.sqlite}/bin/sqlite3 \
+      ${config.services.skynetcontrol.stateDir}/skynetcontrol.db \
+      ".backup '/backup/skynetcontrol-$(date +%F).db'"
+  '';
+};
+systemd.timers."skynetcontrol-backup" = {
+  wantedBy = [ "timers.target" ];
+  timerConfig = { OnCalendar = "daily"; Persistent = true; };
+};
+```
+
+#### Stop-and-copy (lowest-tech fallback)
+
+When you just want a one-shot before an upgrade:
 
 ```bash
 sudo systemctl stop skynetcontrol
@@ -173,7 +275,44 @@ sudo cp /var/lib/skynetcontrol/skynetcontrol.db /backup/skynetcontrol-$(date +%F
 sudo systemctl start skynetcontrol
 ```
 
-For PostgreSQL, use `pg_dump` per your normal database backup workflow.
+#### restic / borg over the state dir
+
+The whole `stateDir` is the unit of backup. Any backup tool that walks a directory works — point it at `services.skynetcontrol.stateDir`. With SQLite's WAL mode this is *mostly* safe, but for a guaranteed-consistent backup pair it with stopping the service or with `sqlite3 .backup` into a snapshot path that restic then captures.
+
+#### PostgreSQL
+
+When `databaseUrl` points at PostgreSQL, ignore the SQLite recipes and use `pg_dump` / `pg_basebackup` per your normal database backup workflow. The `stateDir` then contains only ephemeral runtime state.
+
+### Moving between database backends
+
+The Nix package ships `skynetcontrol-db-copy`, which uses SQLAlchemy reflection to copy every row from one DB URL to another. Use it to:
+
+- Migrate from SQLite to PostgreSQL (or back) without writing custom dumps.
+- Move from one host's DB to another's by copying over the network: the source URL can be a remote PostgreSQL URL.
+- Promote a backup snapshot back into a live engine (read from the snapshot DB, write into the running one — when the live one is empty).
+
+Recipe (SQLite → PostgreSQL):
+
+```bash
+# 1. Stop the service so the source DB isn't being written to.
+sudo systemctl stop skynetcontrol
+
+# 2. Make sure the new target is migrated to the same head as the source.
+sudo SKYNET_DATABASE_URL='postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql' \
+  skynetcontrol-alembic upgrade head
+
+# 3. Copy the rows. --replace truncates the freshly-migrated target first
+#    (it has seed rows from migrations — default templates, etc.).
+sudo skynetcontrol-db-copy --replace \
+  sqlite:////var/lib/skynetcontrol/skynetcontrol.db \
+  'postgresql+psycopg://skynetcontrol@/skynetcontrol?host=/run/postgresql'
+
+# 4. Flip the module to the new URL and restart.
+# (edit services.skynetcontrol.databaseUrl in configuration.nix)
+sudo nixos-rebuild switch
+```
+
+By default the command refuses to copy into a target that's unmigrated or already has data — explicit safety to prevent clobbering. `--replace` wipes the target before copying; omit it only when you're certain the target is truly empty (which a freshly-migrated DB is *not*, since seed migrations insert default templates). Reverse the source / target arguments to roll back.
 
 ### Updating
 
