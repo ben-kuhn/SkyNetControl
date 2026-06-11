@@ -1,8 +1,33 @@
 import os
+import re
 from datetime import datetime, timezone
 from email import message_from_string, policy
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+
+# Address-like tokens in a `To:` header: callsigns, local-parts, full emails.
+_ADDRESS_TOKEN_RE = re.compile(r"[a-z0-9._%+\-]+(?:@[a-z0-9.\-]+)?")
+
+
+def _to_matches_net(net_address: str, to_address: str) -> bool:
+    """Return True if `to_address` is addressed to our net.
+
+    PAT delivers inbound Winlink mail with `To: <CALLSIGN>` (bare local-part,
+    no @domain). Outbound or relayed copies may use the full `user@winlink.org`
+    form or RFC-2822 angle-bracketed forms. Accept any of:
+      - net_address appears as a substring (handles full and angle-bracketed)
+      - local-part of net_address equals any address-like token in to_address
+    """
+    net = net_address.strip().lower()
+    to = to_address.strip().lower()
+    if not net or not to:
+        return False
+    if net in to:
+        return True
+    local = net.split("@", 1)[0]
+    if not local:
+        return False
+    return any(token == local for token in _ADDRESS_TOKEN_RE.findall(to))
 
 
 def read_message_file(file_path: Path | str) -> dict | None:
@@ -58,7 +83,6 @@ def read_mailbox(
     if not os.path.isdir(mailbox_path):
         return []
 
-    net_addr_lower = net_address.lower()
     extensions = {".mime", ".b2f", ".eml"}
     messages = []
 
@@ -73,8 +97,7 @@ def read_mailbox(
         if parsed is None:
             continue
 
-        to_addr = parsed.get("to_address", "").lower()
-        if net_addr_lower not in to_addr:
+        if not _to_matches_net(net_address, parsed.get("to_address", "")):
             continue
 
         messages.append(parsed)

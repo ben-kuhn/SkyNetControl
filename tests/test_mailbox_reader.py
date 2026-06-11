@@ -83,3 +83,53 @@ def test_read_message_file_malformed(tmp_path):
     bad_file.write_text("this is not a valid message")
     result = read_message_file(bad_file)
     assert result is None
+
+
+# PAT delivers inbound Winlink mail with `To: <CALLSIGN>` (bare local-part,
+# no @domain). The previous substring filter dropped every message because
+# "w0ne@winlink.org" is not a substring of "W0NE".
+def test_read_mailbox_matches_bare_callsign_to_header(tmp_path):
+    msg = (
+        "From: KD0TST@winlink.org\n"
+        "Subject: Check-in\n"
+        "Date: Thu, 11 Jun 2026 18:30:00 +0000\n"
+        "Message-Id: <BARE001@winlink.org>\n"
+        "To: W0NE\n"
+        "\n"
+        "Bare-callsign To header (PAT inbound).\n"
+    )
+    (tmp_path / "BARE001.b2f").write_text(msg)
+    messages = read_mailbox(str(tmp_path), net_address="w0ne@winlink.org")
+    assert len(messages) == 1
+    assert messages[0]["message_id"] == "<BARE001@winlink.org>"
+
+
+def test_read_mailbox_matches_angle_bracketed_to_header(tmp_path):
+    msg = (
+        "From: KD0TST@winlink.org\n"
+        "Subject: Check-in\n"
+        "Date: Thu, 11 Jun 2026 18:30:00 +0000\n"
+        "Message-Id: <ANGLE001@winlink.org>\n"
+        'To: "W0NE Net" <w0ne@winlink.org>\n'
+        "\n"
+        "Body.\n"
+    )
+    (tmp_path / "ANGLE001.b2f").write_text(msg)
+    messages = read_mailbox(str(tmp_path), net_address="w0ne@winlink.org")
+    assert len(messages) == 1
+
+
+def test_read_mailbox_rejects_bare_callsign_for_different_net(tmp_path):
+    # `To: W0NE` must not match a different net (e.g. KD0TST's net).
+    msg = (
+        "From: W0ABC@winlink.org\n"
+        "Subject: Check-in\n"
+        "Date: Thu, 11 Jun 2026 18:30:00 +0000\n"
+        "Message-Id: <WRONG001@winlink.org>\n"
+        "To: W0NE\n"
+        "\n"
+        "Should not match.\n"
+    )
+    (tmp_path / "WRONG001.b2f").write_text(msg)
+    messages = read_mailbox(str(tmp_path), net_address="kd0tst@winlink.org")
+    assert messages == []
