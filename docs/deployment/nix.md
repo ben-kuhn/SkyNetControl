@@ -5,7 +5,7 @@ SkyNetControl ships three Nix derivations. Pick whichever fits your environment:
 | File | Use for |
 |------|---------|
 | `default.nix` | `nix-build` to produce a runnable Python application. Suitable for ad-hoc deploys, CI smoke tests, or as input to other Nix consumers. |
-| `module.nix` | NixOS systemd service — the recommended production path on a NixOS host. Handles state directory, dynamic user, automatic migrations, security hardening. |
+| `module.nix` | NixOS systemd service — the recommended production path on a NixOS host. Handles state directory, service user, automatic migrations, security hardening. |
 | `oci.nix` | OCI container image built with `dockerTools.buildLayeredImage`. For Docker, Podman, Kubernetes — anywhere outside NixOS. |
 
 All three share `default.nix` as the package definition. The frontend is built separately via `frontend.nix` and copied into the package's `share/` tree.
@@ -61,8 +61,8 @@ In your NixOS flake or configuration, import `module.nix`:
 
 - Creates a systemd unit `skynetcontrol.service`, started at boot (`wantedBy = [ "multi-user.target" ]`).
 - Runs `skynetcontrol-alembic upgrade head` as `ExecStartPre` — migrations apply automatically on every restart.
-- Uses `DynamicUser=true` so the service runs as an unprivileged ephemeral user.
-- Creates `StateDirectory=skynetcontrol` at `/var/lib/skynetcontrol/` — the SQLite database lives here by default.
+- Runs as a static system user `skynetcontrol:skynetcontrol` (created by the module).
+- Pre-creates `stateDir` (default `/var/lib/skynetcontrol/`) via `systemd.tmpfiles` with `skynetcontrol:skynetcontrol` ownership — the SQLite database lives here by default.
 - Hardening: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`. `ReadWritePaths` lets it touch the state dir.
 - Restarts on failure with a 5s delay.
 
@@ -74,7 +74,7 @@ In your NixOS flake or configuration, import `module.nix`:
 | `port` | `8000` | Listen port. |
 | `host` | `127.0.0.1` | Bind address. Use `0.0.0.0` if you're not fronting with a reverse proxy. |
 | `stateDir` | `/var/lib/skynetcontrol` | Service state. The default database URL points inside here. |
-| `databaseUrl` | `sqlite:////var/lib/skynetcontrol/skynetcontrol.db` | Override to point at PostgreSQL. |
+| `databaseUrl` | `sqlite:///${stateDir}/skynetcontrol.db` | Defaults inside `stateDir`. Override to point at PostgreSQL. |
 | `settings` | `{}` | Attrset of additional env vars. Any `SKYNET_*` setting from `backend/config.py` can be set here. Keys are uppercased and prefixed with `SKYNET_` automatically (so `JWT_SECRET_KEY` becomes `SKYNET_JWT_SECRET_KEY`). |
 
 ### Secrets
@@ -167,13 +167,13 @@ The peer-authenticated socket-path URL avoids putting credentials anywhere. Migr
 
 The NixOS module exposes two storage knobs:
 
-- `services.skynetcontrol.stateDir` — where the systemd unit's `StateDirectory` lives. Defaults to `/var/lib/skynetcontrol`. Set this to any path the system can write to:
+- `services.skynetcontrol.stateDir` — where service state lives. Defaults to `/var/lib/skynetcontrol`. Set this to any path the system can write to:
 
   ```nix
   services.skynetcontrol.stateDir = "/tank/skynetcontrol";
   ```
 
-  The module adds this path to `ReadWritePaths`, and systemd's `StateDirectory=` will create it with the dynamic-user ownership on first start. Make sure the parent directory exists and is on a filesystem the service can write to.
+  The module pre-creates this directory via `systemd.tmpfiles` with `skynetcontrol:skynetcontrol` ownership (mode `0750`) and adds it to `ReadWritePaths`. The parent directory must exist (e.g. the ZFS dataset must be mounted) before the tmpfiles rule runs.
 
 - `services.skynetcontrol.databaseUrl` — the SQLAlchemy URL. Defaults to `sqlite:////var/lib/skynetcontrol/skynetcontrol.db` (note the four slashes — SQLAlchemy's absolute-path SQLite form). Override this to put the DB file outside `stateDir` or to use a different engine:
 
@@ -196,7 +196,7 @@ services.skynetcontrol.stateDir = "/tank/skynetcontrol";
 services.skynetcontrol.databaseUrl = "sqlite:////tank/skynetcontrol/skynetcontrol.db";
 ```
 
-After `nixos-rebuild switch`, systemd will create the directory on next start with the dynamic-user ownership. The DB lives entirely on the dedicated dataset — snapshots, replication, and quotas all apply.
+After `nixos-rebuild switch`, `systemd-tmpfiles` will create the directory with `skynetcontrol:skynetcontrol` ownership on next service start. The DB lives entirely on the dedicated dataset — snapshots, replication, and quotas all apply.
 
 #### Pattern 2: Bind-mount over the default location
 
@@ -245,7 +245,7 @@ sudo sqlite3 /var/lib/skynetcontrol/skynetcontrol.db \
   ".backup '/backup/skynetcontrol-$(date +%F).db'"
 ```
 
-(With `DynamicUser = true;` the service user is a dynamic UID, so running the backup as root and `chown`-ing after is the simplest path.)
+(Run the backup as root; the resulting file will be owned by root and readable by whatever restic / borg / rsync job picks it up next.)
 
 A systemd timer makes this nightly:
 
@@ -316,7 +316,7 @@ By default the command refuses to copy into a target that's unmigrated or alread
 
 ### PAT integration (hourly Winlink fetch)
 
-SkyNetControl reads check-ins out of a PAT mailbox directory but does not fetch mail from Winlink itself. Pair the service with a systemd timer that runs `pat connect telnet` once an hour. The two services need to agree on a mailbox directory; the SkyNetControl service runs under a `DynamicUser` (transient UID, no stable name), so the cleanest approach is to give PAT its own static user and grant SkyNetControl read access via a shared group.
+SkyNetControl reads check-ins out of a PAT mailbox directory but does not fetch mail from Winlink itself. Pair the service with a systemd timer that runs `pat connect telnet` once an hour. The two services need to agree on a mailbox directory; the cleanest approach is to give PAT its own static user and grant the `skynetcontrol` user read access via a shared group.
 
 ```nix
 { config, lib, pkgs, ... }:
@@ -373,8 +373,8 @@ SkyNetControl reads check-ins out of a PAT mailbox directory but does not fetch 
     };
   };
 
-  # Let SkyNetControl's dynamic user read the pat-owned mailbox.
-  systemd.services.skynetcontrol.serviceConfig.SupplementaryGroups = [ "pat" ];
+  # Let the skynetcontrol user read the pat-owned mailbox.
+  users.users.skynetcontrol.extraGroups = [ "pat" ];
 
   # Tell SkyNetControl where the mailbox lives. Replace W0NE with your callsign.
   services.skynetcontrol.settings.PAT_MAILBOX_PATH =
@@ -407,6 +407,25 @@ sudo nixos-rebuild switch
 ```
 
 If migrations fail, the unit fails to start and systemd surfaces the error in `journalctl -u skynetcontrol`. Roll back with `nixos-rebuild switch --rollback`.
+
+### Migrating from older versions (`DynamicUser`)
+
+Earlier revisions of the module ran the service under systemd `DynamicUser=true`, which kept the database under `/var/lib/private/skynetcontrol/`. The current module uses a static `skynetcontrol:skynetcontrol` system user, and `stateDir` is now actually wired into the database URL.
+
+After upgrading, before starting the new unit:
+
+```bash
+sudo systemctl stop skynetcontrol
+sudo nixos-rebuild switch        # creates the skynetcontrol user/group and stateDir
+# Default-stateDir installs:
+sudo chown -R skynetcontrol:skynetcontrol /var/lib/skynetcontrol
+# Custom-stateDir installs (where the old DB silently went to /var/lib/private/<svc>):
+sudo mv /var/lib/private/skynetcontrol/skynetcontrol.db /your/statedir/
+sudo chown -R skynetcontrol:skynetcontrol /your/statedir
+sudo systemctl start skynetcontrol
+```
+
+Any custom `serviceConfig.SupplementaryGroups` override (e.g. for PAT mailbox access) should be replaced with `users.users.skynetcontrol.extraGroups = [ … ];` — the static user makes the secondary-group mechanism the natural one.
 
 ## OCI image (Docker, Podman, Kubernetes)
 

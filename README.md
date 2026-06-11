@@ -69,7 +69,7 @@ For the in-app runtime settings (net address, PAT mailbox path, Claude API key, 
 
 ### Production (NixOS)
 
-For NixOS hosts, use the `services.skynetcontrol` module from `module.nix`. It handles state directories, dynamic users, automatic migrations, and systemd hardening:
+For NixOS hosts, use the `services.skynetcontrol` module from `module.nix`. It handles state directories, the service user, automatic migrations, and systemd hardening:
 
 ```nix
 services.skynetcontrol = {
