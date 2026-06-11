@@ -48,11 +48,14 @@ def test_providers_cover_all_supported_names() -> None:
 
 def test_provider_prefixes_match_docs() -> None:
     by_name = {p["name"]: p for p in wizard.PROVIDERS}
-    assert by_name["GitHub"]["prefix"] == "SKYNET_AUTH_GITHUB_"
-    assert by_name["Google"]["prefix"] == "SKYNET_AUTH_GOOGLE_"
-    assert by_name["Microsoft"]["prefix"] == "SKYNET_AUTH_MICROSOFT_"
-    assert by_name["Discord"]["prefix"] == "SKYNET_AUTH_DISCORD_"
-    assert by_name["Facebook"]["prefix"] == "SKYNET_AUTH_FACEBOOK_"
+    # Fixed providers use a double underscore between the provider segment and
+    # the field — see backend/config.py's env_nested_delimiter.
+    assert by_name["GitHub"]["prefix"] == "SKYNET_AUTH_GITHUB__"
+    assert by_name["Google"]["prefix"] == "SKYNET_AUTH_GOOGLE__"
+    assert by_name["Microsoft"]["prefix"] == "SKYNET_AUTH_MICROSOFT__"
+    assert by_name["Discord"]["prefix"] == "SKYNET_AUTH_DISCORD__"
+    assert by_name["Facebook"]["prefix"] == "SKYNET_AUTH_FACEBOOK__"
+    # Generic OIDC providers are parsed by a custom regex and keep single underscore.
     assert by_name["Generic OIDC"]["prefix"] == "SKYNET_AUTH_OIDC_"
 
 
@@ -80,10 +83,10 @@ def test_provider_slugs_match_backend_callback_routes() -> None:
 
 @pytest.mark.parametrize("key", [
     "SKYNET_JWT_SECRET_KEY",
-    "SKYNET_AUTH_GITHUB_CLIENT_SECRET",
-    "SKYNET_AUTH_GOOGLE_CLIENT_SECRET",
-    "SKYNET_AUTH_OIDC_CLIENT_SECRET",
-    "SKYNET_SMTP_PASSWORD",
+    "SKYNET_AUTH_GITHUB__CLIENT_SECRET",
+    "SKYNET_AUTH_GOOGLE__CLIENT_SECRET",
+    "SKYNET_AUTH_OIDC_AUTHENTIK_CLIENT_SECRET",
+    "SKYNET_SMTP__PASSWORD",
 ])
 def test_is_secret_key_true_for_secrets(key: str) -> None:
     assert wizard.is_secret_key(key) is True
@@ -91,14 +94,14 @@ def test_is_secret_key_true_for_secrets(key: str) -> None:
 
 @pytest.mark.parametrize("key", [
     "SKYNET_APP_BASE_URL",
-    "SKYNET_AUTH_GITHUB_ENABLED",
-    "SKYNET_AUTH_GITHUB_CLIENT_ID",
-    "SKYNET_AUTH_OIDC_ISSUER_URL",
-    "SKYNET_SMTP_HOST",
-    "SKYNET_SMTP_PORT",
-    "SKYNET_SMTP_USERNAME",
-    "SKYNET_SMTP_FROM_ADDRESS",
-    "SKYNET_SMTP_USE_TLS",
+    "SKYNET_AUTH_GITHUB__ENABLED",
+    "SKYNET_AUTH_GITHUB__CLIENT_ID",
+    "SKYNET_AUTH_OIDC_AUTHENTIK_ISSUER_URL",
+    "SKYNET_SMTP__HOST",
+    "SKYNET_SMTP__PORT",
+    "SKYNET_SMTP__USERNAME",
+    "SKYNET_SMTP__FROM_ADDRESS",
+    "SKYNET_SMTP__USE_TLS",
 ])
 def test_is_secret_key_false_for_plaintext(key: str) -> None:
     assert wizard.is_secret_key(key) is False
@@ -134,11 +137,11 @@ def _sample_env() -> dict[str, str]:
     return {
         "SKYNET_JWT_SECRET_KEY": "deadbeef" * 8,
         "SKYNET_APP_BASE_URL": "https://net.example.org",
-        "SKYNET_AUTH_GITHUB_ENABLED": "true",
-        "SKYNET_AUTH_GITHUB_CLIENT_ID": "Iv1.abc",
-        "SKYNET_AUTH_GITHUB_CLIENT_SECRET": "ghs_xyz",
-        "SKYNET_SMTP_HOST": "smtp.example.com",
-        "SKYNET_SMTP_PASSWORD": "smtp-pass",
+        "SKYNET_AUTH_GITHUB__ENABLED": "true",
+        "SKYNET_AUTH_GITHUB__CLIENT_ID": "Iv1.abc",
+        "SKYNET_AUTH_GITHUB__CLIENT_SECRET": "ghs_xyz",
+        "SKYNET_SMTP__HOST": "smtp.example.com",
+        "SKYNET_SMTP__PASSWORD": "smtp-pass",
     }
 
 
@@ -161,16 +164,16 @@ def test_render_nix_module_inlines_plaintext_but_not_secrets() -> None:
                                     env_file_path="/run/skynetcontrol/env")
     # plaintext gets inlined under settings (with SKYNET_ prefix stripped)
     assert 'APP_BASE_URL = "https://net.example.org";' in out
-    assert 'AUTH_GITHUB_ENABLED = "true";' in out
-    assert 'AUTH_GITHUB_CLIENT_ID = "Iv1.abc";' in out
-    assert 'SMTP_HOST = "smtp.example.com";' in out
+    assert 'AUTH_GITHUB__ENABLED = "true";' in out
+    assert 'AUTH_GITHUB__CLIENT_ID = "Iv1.abc";' in out
+    assert 'SMTP__HOST = "smtp.example.com";' in out
     # secrets must not leak into the module text
     assert "deadbeef" not in out
     assert "ghs_xyz" not in out
     assert "smtp-pass" not in out
     assert "CLIENT_SECRET" not in out
     assert "JWT_SECRET_KEY" not in out
-    assert "SMTP_PASSWORD" not in out
+    assert "SMTP__PASSWORD" not in out
 
 
 def test_render_nix_module_includes_environment_file_path() -> None:
@@ -208,19 +211,19 @@ def test_split_secrets_separates_keys_correctly() -> None:
     env = {
         "SKYNET_JWT_SECRET_KEY": "x",
         "SKYNET_APP_BASE_URL": "https://example.org",
-        "SKYNET_AUTH_GITHUB_CLIENT_ID": "id",
-        "SKYNET_AUTH_GITHUB_CLIENT_SECRET": "sec",
-        "SKYNET_SMTP_PASSWORD": "pw",
-        "SKYNET_SMTP_HOST": "smtp.example.com",
+        "SKYNET_AUTH_GITHUB__CLIENT_ID": "id",
+        "SKYNET_AUTH_GITHUB__CLIENT_SECRET": "sec",
+        "SKYNET_SMTP__PASSWORD": "pw",
+        "SKYNET_SMTP__HOST": "smtp.example.com",
         "HOME": "/should/be/ignored",
     }
     secret, plaintext = wizard._split_secrets(env)
     assert set(secret) == {"SKYNET_JWT_SECRET_KEY",
-                           "SKYNET_AUTH_GITHUB_CLIENT_SECRET",
-                           "SKYNET_SMTP_PASSWORD"}
+                           "SKYNET_AUTH_GITHUB__CLIENT_SECRET",
+                           "SKYNET_SMTP__PASSWORD"}
     assert set(plaintext) == {"SKYNET_APP_BASE_URL",
-                              "SKYNET_AUTH_GITHUB_CLIENT_ID",
-                              "SKYNET_SMTP_HOST"}
+                              "SKYNET_AUTH_GITHUB__CLIENT_ID",
+                              "SKYNET_SMTP__HOST"}
     assert "HOME" not in secret and "HOME" not in plaintext
 
 
@@ -232,7 +235,7 @@ def test_oidc_providers_from_env_groups_by_middle() -> None:
         "SKYNET_AUTH_OIDC_KEYCLOAK_ENABLED": "true",
         "SKYNET_AUTH_OIDC_KEYCLOAK_NAME": "Keycloak",
         "SKYNET_AUTH_OIDC_KEYCLOAK_CLIENT_ID": "y",
-        "SKYNET_AUTH_GITHUB_ENABLED": "true",  # noise: not OIDC
+        "SKYNET_AUTH_GITHUB__ENABLED": "true",  # noise: not OIDC
     }
     descriptors = wizard._oidc_providers_from_env(env)
     by_slug = {d["slug"]: d for d in descriptors}

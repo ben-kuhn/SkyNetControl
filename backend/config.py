@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # SMTP
     smtp: SmtpSettings = SmtpSettings()
 
-    model_config = {"env_prefix": "SKYNET_", "env_nested_delimiter": "_"}
+    model_config = {"env_prefix": "SKYNET_", "env_nested_delimiter": "__"}
 
     @model_validator(mode="before")
     @classmethod

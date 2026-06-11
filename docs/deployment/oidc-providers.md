@@ -27,9 +27,9 @@ Best for personal/homelab deployments. No domain verification, no app review.
 4. Click **Generate a new client secret**, copy it.
 5. In your env:
    ```
-   SKYNET_AUTH_GITHUB_ENABLED=true
-   SKYNET_AUTH_GITHUB_CLIENT_ID=Iv1.xxxxxxxxxxxx
-   SKYNET_AUTH_GITHUB_CLIENT_SECRET=xxxxxxxxxxxx
+   SKYNET_AUTH_GITHUB__ENABLED=true
+   SKYNET_AUTH_GITHUB__CLIENT_ID=Iv1.xxxxxxxxxxxx
+   SKYNET_AUTH_GITHUB__CLIENT_SECRET=xxxxxxxxxxxx
    ```
 
 That's it. Any GitHub user can now sign in. The first one to do so becomes admin automatically.
@@ -49,9 +49,9 @@ That's it. Any GitHub user can now sign in. The first one to do so becomes admin
 5. Copy the **Client ID** and **Client secret**.
 6. In your env:
    ```
-   SKYNET_AUTH_GOOGLE_ENABLED=true
-   SKYNET_AUTH_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   SKYNET_AUTH_GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
+   SKYNET_AUTH_GOOGLE__ENABLED=true
+   SKYNET_AUTH_GOOGLE__CLIENT_ID=xxxxx.apps.googleusercontent.com
+   SKYNET_AUTH_GOOGLE__CLIENT_SECRET=GOCSPX-xxxxxxxx
    ```
 
 While the app is in "Testing" mode, only listed test users can sign in. Move to "Production" when you're ready to open it up.
@@ -70,9 +70,9 @@ While the app is in "Testing" mode, only listed test users can sign in. Move to 
 5. Under **Certificates & secrets** → **New client secret**. Copy the value (not the ID).
 6. In your env:
    ```
-   SKYNET_AUTH_MICROSOFT_ENABLED=true
-   SKYNET_AUTH_MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-   SKYNET_AUTH_MICROSOFT_CLIENT_SECRET=xxxxxxxxxxxxxxx
+   SKYNET_AUTH_MICROSOFT__ENABLED=true
+   SKYNET_AUTH_MICROSOFT__CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   SKYNET_AUTH_MICROSOFT__CLIENT_SECRET=xxxxxxxxxxxxxxx
    ```
 
 ---
@@ -85,9 +85,9 @@ While the app is in "Testing" mode, only listed test users can sign in. Move to 
 4. **Reset Secret** to generate a new one; copy it.
 5. In your env:
    ```
-   SKYNET_AUTH_DISCORD_ENABLED=true
-   SKYNET_AUTH_DISCORD_CLIENT_ID=xxxxxxxxxxxxxxxxx
-   SKYNET_AUTH_DISCORD_CLIENT_SECRET=xxxxxxxx
+   SKYNET_AUTH_DISCORD__ENABLED=true
+   SKYNET_AUTH_DISCORD__CLIENT_ID=xxxxxxxxxxxxxxxxx
+   SKYNET_AUTH_DISCORD__CLIENT_SECRET=xxxxxxxx
    ```
 
 ---
@@ -100,9 +100,9 @@ While the app is in "Testing" mode, only listed test users can sign in. Move to 
 4. From the app's **Settings** → **Basic**, copy the **App ID** and **App Secret**.
 5. In your env:
    ```
-   SKYNET_AUTH_FACEBOOK_ENABLED=true
-   SKYNET_AUTH_FACEBOOK_CLIENT_ID=xxxxxxxxxxxxxxxx
-   SKYNET_AUTH_FACEBOOK_CLIENT_SECRET=xxxxxxxx
+   SKYNET_AUTH_FACEBOOK__ENABLED=true
+   SKYNET_AUTH_FACEBOOK__CLIENT_ID=xxxxxxxxxxxxxxxx
+   SKYNET_AUTH_FACEBOOK__CLIENT_SECRET=xxxxxxxx
    ```
 
 Note: Facebook requires the app to be in Live Mode (and reviewed for `email` permission) before strangers can sign in.

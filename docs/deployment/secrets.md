@@ -15,11 +15,11 @@ Each enabled provider needs a client ID and secret from the provider's developer
 
 | Provider | Client ID | Client Secret | Extra |
 |----------|-----------|--------------|-------|
-| Google | `SKYNET_AUTH_GOOGLE_CLIENT_ID` | `SKYNET_AUTH_GOOGLE_CLIENT_SECRET` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) |
-| Microsoft | `SKYNET_AUTH_MICROSOFT_CLIENT_ID` | `SKYNET_AUTH_MICROSOFT_CLIENT_SECRET` | [Azure Portal](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) |
-| GitHub | `SKYNET_AUTH_GITHUB_CLIENT_ID` | `SKYNET_AUTH_GITHUB_CLIENT_SECRET` | [GitHub Developer Settings](https://github.com/settings/developers) |
-| Discord | `SKYNET_AUTH_DISCORD_CLIENT_ID` | `SKYNET_AUTH_DISCORD_CLIENT_SECRET` | [Discord Developer Portal](https://discord.com/developers/applications) |
-| Facebook | `SKYNET_AUTH_FACEBOOK_CLIENT_ID` | `SKYNET_AUTH_FACEBOOK_CLIENT_SECRET` | [Meta Developer Dashboard](https://developers.facebook.com/apps/) |
+| Google | `SKYNET_AUTH_GOOGLE__CLIENT_ID` | `SKYNET_AUTH_GOOGLE__CLIENT_SECRET` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) |
+| Microsoft | `SKYNET_AUTH_MICROSOFT__CLIENT_ID` | `SKYNET_AUTH_MICROSOFT__CLIENT_SECRET` | [Azure Portal](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) |
+| GitHub | `SKYNET_AUTH_GITHUB__CLIENT_ID` | `SKYNET_AUTH_GITHUB__CLIENT_SECRET` | [GitHub Developer Settings](https://github.com/settings/developers) |
+| Discord | `SKYNET_AUTH_DISCORD__CLIENT_ID` | `SKYNET_AUTH_DISCORD__CLIENT_SECRET` | [Discord Developer Portal](https://discord.com/developers/applications) |
+| Facebook | `SKYNET_AUTH_FACEBOOK__CLIENT_ID` | `SKYNET_AUTH_FACEBOOK__CLIENT_SECRET` | [Meta Developer Dashboard](https://developers.facebook.com/apps/) |
 | Generic OIDC (multi) | `SKYNET_AUTH_OIDC_<SLUG>_CLIENT_ID` | `SKYNET_AUTH_OIDC_<SLUG>_CLIENT_SECRET` | Per provider, also set `_ENABLED`, `_ISSUER_URL`, `_NAME`. `<SLUG>` is uppercase + underscores in the env var; the URL slug uses lowercase + dashes (e.g. `MY_IDP` ↔ `my-idp`). Repeat for as many OIDC providers as you need. |
 
 Enable a provider by setting `SKYNET_AUTH_{PROVIDER}_ENABLED=true`.
@@ -28,14 +28,14 @@ Enable a provider by setting `SKYNET_AUTH_{PROVIDER}_ENABLED=true`.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `SKYNET_SMTP_HOST` | SMTP server | (empty — email disabled) |
-| `SKYNET_SMTP_PORT` | SMTP port | `587` |
-| `SKYNET_SMTP_USERNAME` | SMTP login | (empty) |
-| `SKYNET_SMTP_PASSWORD` | SMTP password | (empty) |
-| `SKYNET_SMTP_USE_TLS` | Use STARTTLS | `true` |
-| `SKYNET_SMTP_FROM_ADDRESS` | From header | (empty) |
+| `SKYNET_SMTP__HOST` | SMTP server | (empty — email disabled) |
+| `SKYNET_SMTP__PORT` | SMTP port | `587` |
+| `SKYNET_SMTP__USERNAME` | SMTP login | (empty) |
+| `SKYNET_SMTP__PASSWORD` | SMTP password | (empty) |
+| `SKYNET_SMTP__USE_TLS` | Use STARTTLS | `true` |
+| `SKYNET_SMTP__FROM_ADDRESS` | From header | (empty) |
 
-If `SKYNET_SMTP_HOST` is not set, email notifications are silently disabled.
+If `SKYNET_SMTP__HOST` is not set, email notifications are silently disabled.
 
 ## Deployment Patterns
 
@@ -62,11 +62,11 @@ systemd.services.skynetcontrol.serviceConfig.EnvironmentFile =
 ```ini
 # /etc/skynetcontrol/env (mode 0600, owned by service user)
 SKYNET_JWT_SECRET_KEY=hex-string-here
-SKYNET_AUTH_GOOGLE_ENABLED=true
-SKYNET_AUTH_GOOGLE_CLIENT_ID=your-client-id
-SKYNET_AUTH_GOOGLE_CLIENT_SECRET=your-client-secret
-SKYNET_SMTP_HOST=smtp.example.com
-SKYNET_SMTP_PASSWORD=app-password-here
+SKYNET_AUTH_GOOGLE__ENABLED=true
+SKYNET_AUTH_GOOGLE__CLIENT_ID=your-client-id
+SKYNET_AUTH_GOOGLE__CLIENT_SECRET=your-client-secret
+SKYNET_SMTP__HOST=smtp.example.com
+SKYNET_SMTP__PASSWORD=app-password-here
 ```
 
 ### Docker / OCI

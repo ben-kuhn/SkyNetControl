@@ -25,9 +25,9 @@ The wizard walks you through JWT secret generation, OIDC provider credentials, o
 cat > skynetcontrol.env <<'EOF'
 SKYNET_JWT_SECRET_KEY=replace-with-openssl-rand-hex-32
 SKYNET_APP_BASE_URL=https://net.example.org
-SKYNET_AUTH_GITHUB_ENABLED=true
-SKYNET_AUTH_GITHUB_CLIENT_ID=Iv1.xxxxxxxx
-SKYNET_AUTH_GITHUB_CLIENT_SECRET=xxxxxxxx
+SKYNET_AUTH_GITHUB__ENABLED=true
+SKYNET_AUTH_GITHUB__CLIENT_ID=Iv1.xxxxxxxx
+SKYNET_AUTH_GITHUB__CLIENT_SECRET=xxxxxxxx
 EOF
 ```
 

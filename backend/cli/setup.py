@@ -51,35 +51,35 @@ def save_env(values: dict[str, str], path: Path) -> None:
 PROVIDERS: list[dict] = [
     {
         "name": "Google",
-        "prefix": "SKYNET_AUTH_GOOGLE_",
+        "prefix": "SKYNET_AUTH_GOOGLE__",
         "slug": "google",
         "extra": [],
         "console_url": "https://console.cloud.google.com/apis/credentials",
     },
     {
         "name": "GitHub",
-        "prefix": "SKYNET_AUTH_GITHUB_",
+        "prefix": "SKYNET_AUTH_GITHUB__",
         "slug": "github",
         "extra": [],
         "console_url": "https://github.com/settings/developers",
     },
     {
         "name": "Microsoft",
-        "prefix": "SKYNET_AUTH_MICROSOFT_",
+        "prefix": "SKYNET_AUTH_MICROSOFT__",
         "slug": "microsoft",
         "extra": [],
         "console_url": "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps",
     },
     {
         "name": "Discord",
-        "prefix": "SKYNET_AUTH_DISCORD_",
+        "prefix": "SKYNET_AUTH_DISCORD__",
         "slug": "discord",
         "extra": [],
         "console_url": "https://discord.com/developers/applications",
     },
     {
         "name": "Facebook",
-        "prefix": "SKYNET_AUTH_FACEBOOK_",
+        "prefix": "SKYNET_AUTH_FACEBOOK__",
         "slug": "facebook",
         "extra": [],
         "console_url": "https://developers.facebook.com/apps/",
@@ -137,7 +137,7 @@ def is_secret_key(key: str) -> bool:
     """True if `key` must never be inlined into a Nix module (must go in env file)."""
     if key == "SKYNET_JWT_SECRET_KEY":
         return True
-    if key == "SKYNET_SMTP_PASSWORD":
+    if key == "SKYNET_SMTP__PASSWORD":
         return True
     if key.startswith("SKYNET_AUTH_") and key.endswith("_CLIENT_SECRET"):
         return True
@@ -461,7 +461,7 @@ def step_smtp(env: dict[str, str]) -> None:
     print("Step 3/4: SMTP (optional — for email notifications)")
     print("=" * 60)
 
-    currently_on = bool(env.get("SKYNET_SMTP_HOST"))
+    currently_on = bool(env.get("SKYNET_SMTP__HOST"))
     default = "Y/n" if currently_on else "y/N"
     raw = prompt(f"  Configure SMTP? [{default}]: ").strip().lower()
     enable = (raw == "y") if raw in {"y", "n"} else currently_on
@@ -473,12 +473,12 @@ def step_smtp(env: dict[str, str]) -> None:
         return
 
     fields = [
-        ("SKYNET_SMTP_HOST", "Host", "", False),
-        ("SKYNET_SMTP_PORT", "Port", "587", False),
-        ("SKYNET_SMTP_USERNAME", "Username", "", False),
-        ("SKYNET_SMTP_PASSWORD", "Password", "", True),
-        ("SKYNET_SMTP_FROM_ADDRESS", "From address", "", False),
-        ("SKYNET_SMTP_USE_TLS", "Use TLS (true/false)", "true", False),
+        ("SKYNET_SMTP__HOST", "Host", "", False),
+        ("SKYNET_SMTP__PORT", "Port", "587", False),
+        ("SKYNET_SMTP__USERNAME", "Username", "", False),
+        ("SKYNET_SMTP__PASSWORD", "Password", "", True),
+        ("SKYNET_SMTP__FROM_ADDRESS", "From address", "", False),
+        ("SKYNET_SMTP__USE_TLS", "Use TLS (true/false)", "true", False),
     ]
     for key, label, default_val, is_password in fields:
         current = env.get(key, default_val)

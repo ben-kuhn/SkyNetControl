@@ -63,9 +63,9 @@ Pick whichever provider you prefer. For local dev, GitHub is simplest:
 5. Copy the Client ID; generate and copy a new Client Secret.
 6. Set in `.env`:
    ```
-   SKYNET_AUTH_GITHUB_ENABLED=true
-   SKYNET_AUTH_GITHUB_CLIENT_ID=Iv1.abcd...
-   SKYNET_AUTH_GITHUB_CLIENT_SECRET=xxxxxxxxxx
+   SKYNET_AUTH_GITHUB__ENABLED=true
+   SKYNET_AUTH_GITHUB__CLIENT_ID=Iv1.abcd...
+   SKYNET_AUTH_GITHUB__CLIENT_SECRET=xxxxxxxxxx
    ```
 7. Re-source the env (`set -a; source .env; set +a`).
 
