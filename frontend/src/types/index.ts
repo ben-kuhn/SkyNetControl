@@ -13,6 +13,9 @@ export interface Provider {
   label: string;
 }
 
+export type SessionType = "regular_checkin" | "activity" | "real_event";
+export type SessionStatus = "scheduled" | "completed" | "cancelled";
+
 export interface Session {
   id: number;
   season_id: number | null;
@@ -23,6 +26,47 @@ export interface Session {
   status: string;
   activity_id: number | null;
   net_control_callsign: string | null;
+}
+
+export interface Season {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  day_of_week: number | null;
+  time: string | null;
+  is_week_long: boolean;
+  activity_cadence: number;
+  sessions: Session[];
+}
+
+export interface SeasonCreate {
+  name: string;
+  start_date: string;
+  end_date: string;
+  day_of_week: number | null;
+  time: string | null;
+  is_week_long: boolean;
+  activity_cadence: number;
+}
+
+export interface SessionCreate {
+  start_date: string;
+  end_date?: string | null;
+  session_type: SessionType;
+  season_id?: number | null;
+  grace_period_hours?: number;
+  net_control_callsign?: string | null;
+  activity_id?: number | null;
+}
+
+export interface SessionUpdate {
+  status?: SessionStatus;
+  session_type?: SessionType;
+  net_control_callsign?: string | null;
+  activity_id?: number | null;
+  grace_period_hours?: number;
+  end_date?: string | null;
 }
 
 export class ApiError extends Error {
