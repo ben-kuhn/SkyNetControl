@@ -47,3 +47,30 @@ def test_get_all_config(db: Session):
         "net_address": "w0ne@winlink.org",
         "default_net_control": "W0NE",
     }
+
+
+# When the DB has no value for a key, fall back to SKYNET_<KEY> from the
+# environment. This is what the deployment docs promise: setting e.g.
+# `services.skynetcontrol.settings.PAT_MAILBOX_PATH` should let the app
+# read it without needing an admin to touch the Config page.
+def test_env_fallback_when_db_unset(db: Session, monkeypatch):
+    monkeypatch.setenv("SKYNET_PAT_MAILBOX_PATH", "/from/env")
+    assert get_config_value(db, "pat_mailbox_path") == "/from/env"
+
+
+def test_db_value_wins_over_env(db: Session, monkeypatch):
+    monkeypatch.setenv("SKYNET_PAT_MAILBOX_PATH", "/from/env")
+    set_config_value(db, "pat_mailbox_path", "/from/db")
+    assert get_config_value(db, "pat_mailbox_path") == "/from/db"
+
+
+def test_env_fallback_dotted_key(db: Session, monkeypatch):
+    # Dotted keys (e.g. callbook.qrz.username) map to SKYNET_<UPPER>__<UPPER>__…
+    # following the Pydantic-settings nested-env-delimiter convention.
+    monkeypatch.setenv("SKYNET_CALLBOOK__QRZ__USERNAME", "envuser")
+    assert get_config_value(db, "callbook.qrz.username") == "envuser"
+
+
+def test_default_returned_when_neither_db_nor_env(db: Session, monkeypatch):
+    monkeypatch.delenv("SKYNET_PAT_MAILBOX_PATH", raising=False)
+    assert get_config_value(db, "pat_mailbox_path", default="fallback") == "fallback"

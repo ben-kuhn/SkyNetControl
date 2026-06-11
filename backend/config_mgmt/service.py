@@ -1,8 +1,16 @@
 import json
+import os
 
 from sqlalchemy.orm import Session
 
 from backend.config_mgmt.models import AppConfig
+
+
+def _env_key_for(key: str) -> str:
+    # Mirror Pydantic-settings: env_prefix=SKYNET_, env_nested_delimiter=__.
+    # `pat_mailbox_path` → SKYNET_PAT_MAILBOX_PATH
+    # `callbook.qrz.username` → SKYNET_CALLBOOK__QRZ__USERNAME
+    return "SKYNET_" + key.upper().replace(".", "__")
 
 
 DEFAULT_CHECKIN_MODES = [
@@ -23,9 +31,12 @@ DEFAULT_CHECKIN_MODES = [
 
 def get_config_value(db: Session, key: str, default: str | None = None) -> str | None:
     config = db.get(AppConfig, key)
-    if config is None:
-        return default
-    return config.value
+    if config is not None:
+        return config.value
+    env_value = os.environ.get(_env_key_for(key))
+    if env_value is not None:
+        return env_value
+    return default
 
 
 def set_config_value(db: Session, key: str, value: str) -> None:
