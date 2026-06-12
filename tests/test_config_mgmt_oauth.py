@@ -91,7 +91,7 @@ def test_list_returns_sorted_by_slug(db: Session):
     assert [p.slug for p in list_oauth_providers(db)] == ["alpha", "zeta"]
 
 
-def test_partial_rows_are_ignored_for_list(db: Session):
+def test_partial_rows_surface_in_list(db: Session):
     # A provider with only a `name` row but no `client_id` is incomplete.
     # list_oauth_providers should still surface it (with empty fields) so
     # the operator can finish the configuration; downstream code is

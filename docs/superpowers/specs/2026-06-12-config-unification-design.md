@@ -65,7 +65,7 @@ AppConfig DB table (mutable, edited via wizard / /config)
         lazy-read on every use, no caching
                   ▼
   get_oauth_provider(db, slug)
-  get_smtp_settings(db)
+  get_smtp_config(db)
   get_config_value(db, key)
 ```
 
@@ -274,7 +274,7 @@ a working state. Every phase gets its own implementation plan under
 `docs/superpowers/plans/`.
 
 **Phase 1 — DB-backed Settings layer.** Add `get_oauth_provider(db, slug)`,
-`get_smtp_settings(db)`, etc. as new accessors over the existing AppConfig
+`get_smtp_config(db)`, etc. as new accessors over the existing AppConfig
 table. No callers change. Introduce the `setup_completed` sentinel concept
 (no UI wired). *Implemented per
 `docs/superpowers/plans/2026-06-12-config-unification-phase-1-db-backed-settings-layer.md`.*
