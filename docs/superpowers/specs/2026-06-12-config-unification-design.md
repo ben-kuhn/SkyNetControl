@@ -276,7 +276,8 @@ a working state. Every phase gets its own implementation plan under
 **Phase 1 — DB-backed Settings layer.** Add `get_oauth_provider(db, slug)`,
 `get_smtp_settings(db)`, etc. as new accessors over the existing AppConfig
 table. No callers change. Introduce the `setup_completed` sentinel concept
-(no UI wired).
+(no UI wired). *Implemented per
+`docs/superpowers/plans/2026-06-12-config-unification-phase-1-db-backed-settings-layer.md`.*
 
 **Phase 2 — Move OAuth + SMTP read paths to DB.** Switch `init_providers` and
 the email backend from `Settings` to the new DB accessors. An Alembic data
