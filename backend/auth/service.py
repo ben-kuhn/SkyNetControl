@@ -44,58 +44,69 @@ async def fetch_oidc_discovery(discovery_url: str) -> dict | None:
         return None
 
 
-async def init_providers(settings: Settings) -> dict[str, dict]:
-    """Initialize all enabled auth providers. Returns dict of provider_name -> resolved config.
+# Module-level cache: discovery_url -> resolved discovery dict.
+# Phase 2a accepts no TTL: cache lives for the process lifetime. OIDC
+# providers rotate endpoints rarely enough that a restart suffices. If
+# this becomes a problem the cache can grow a TTL or an invalidation hook
+# tied to upsert_oauth_provider.
+_DISCOVERY_CACHE: dict[str, dict] = {}
 
-    Each resolved config contains: authorize_url, token_url, userinfo_url,
-    client_id, client_secret, scopes, label, protocol, and the provider's
-    extract_* functions from the registry.
 
-    Raises RuntimeError if no providers could be initialized.
+async def _get_discovery(discovery_url: str) -> dict | None:
+    cached = _DISCOVERY_CACHE.get(discovery_url)
+    if cached is not None:
+        return cached
+    discovery = await fetch_oidc_discovery(discovery_url)
+    if discovery is not None:
+        _DISCOVERY_CACHE[discovery_url] = discovery
+    return discovery
+
+
+async def resolve_provider(db, slug: str) -> dict | None:
+    """Lazily resolve a single provider for a login flow.
+
+    Reads the provider's credentials from the AppConfig table (Phase 1),
+    merges with the static provider registry (FIXED_PROVIDERS or the
+    dynamic OIDC entry from build_providers), and — for OIDC — fetches
+    or reads from the discovery cache.
+
+    Returns the resolved auth-flow dict (with authorize/token/userinfo
+    URLs filled in), or None if the provider is unknown, disabled,
+    has no client_id, or — for OIDC — discovery failed.
     """
-    enabled = get_enabled_providers(settings)
-    if not enabled:
-        raise RuntimeError("No auth providers are enabled. Set at least one SKYNET_AUTH_*_ENABLED=true.")
+    enabled = get_enabled_providers(db)
+    provider_settings = enabled.get(slug)
+    if provider_settings is None:
+        return None
 
-    registry = build_providers(settings)
-    resolved = {}
-    for name, provider_settings in enabled.items():
-        config = registry[name]
+    registry = build_providers(db)
+    config = registry.get(slug)
+    if config is None:
+        return None
 
-        if config.protocol == "oidc":
-            # Dynamic OIDC entries already have discovery_url baked in by
-            # build_providers; fixed OIDC entries (google, microsoft) too.
-            discovery_url = config.discovery_url
+    if config.protocol == "oidc":
+        discovery = await _get_discovery(config.discovery_url) if config.discovery_url else None
+        if discovery is None:
+            logger.warning("resolve_provider(%s): OIDC discovery failed", slug)
+            return None
+        authorize_url = discovery.get("authorization_endpoint", "")
+        token_url = discovery.get("token_endpoint", "")
+        userinfo_url = discovery.get("userinfo_endpoint", "")
+    else:
+        authorize_url = config.authorize_url
+        token_url = config.token_url
+        userinfo_url = config.userinfo_url
 
-            discovery = await fetch_oidc_discovery(discovery_url)
-            if discovery is None:
-                logger.warning("Skipping provider %s — OIDC discovery failed", name)
-                continue
-
-            authorize_url = discovery.get("authorization_endpoint", "")
-            token_url = discovery.get("token_endpoint", "")
-            userinfo_url = discovery.get("userinfo_endpoint", "")
-        else:
-            authorize_url = config.authorize_url
-            token_url = config.token_url
-            userinfo_url = config.userinfo_url
-
-        resolved[name] = {
-            "authorize_url": authorize_url,
-            "token_url": token_url,
-            "userinfo_url": userinfo_url,
-            "client_id": provider_settings.client_id,
-            "client_secret": provider_settings.client_secret,
-            "scopes": config.scopes,
-            "label": config.label,
-            "protocol": config.protocol,
-            "extract_subject": config.extract_subject,
-            "extract_name": config.extract_name,
-            "extract_email": config.extract_email,
-        }
-
-    if not resolved:
-        raise RuntimeError("No auth providers could be initialized. Check provider configuration and connectivity.")
-
-    logger.info("Initialized auth providers: %s", ", ".join(resolved.keys()))
-    return resolved
+    return {
+        "authorize_url": authorize_url,
+        "token_url": token_url,
+        "userinfo_url": userinfo_url,
+        "client_id": provider_settings.client_id,
+        "client_secret": provider_settings.client_secret,
+        "scopes": config.scopes,
+        "label": config.label,
+        "protocol": config.protocol,
+        "extract_subject": config.extract_subject,
+        "extract_name": config.extract_name,
+        "extract_email": config.extract_email,
+    }

@@ -24,3 +24,25 @@ async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+def seed_oauth_provider():
+    """Factory that writes an OAuth provider row given a db session.
+
+    Usage:
+        def test_x(db_session, seed_oauth_provider):
+            seed_oauth_provider(db_session, "google", client_id="cid", client_secret="csec")
+    """
+    from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
+
+    def _seed(db, slug: str, **overrides):
+        upsert_oauth_provider(db, OAuthProviderConfig(
+            slug=slug,
+            name=overrides.get("name", slug.title()),
+            enabled=overrides.get("enabled", True),
+            client_id=overrides.get("client_id", "test-cid"),
+            client_secret=overrides.get("client_secret", "test-csec"),
+            issuer_url=overrides.get("issuer_url", ""),
+        ))
+    return _seed

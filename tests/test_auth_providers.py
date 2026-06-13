@@ -1,5 +1,37 @@
-from backend.auth.providers import FIXED_PROVIDERS, get_enabled_providers
-from backend.config import Settings, ProviderSettings, OIDCProviderConfig
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from backend.auth.providers import (
+    FIXED_PROVIDERS,
+    build_providers,
+    get_enabled_providers,
+)
+from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
+from backend.db.base import Base
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as session:
+        yield session
+    engine.dispose()
+
+
+def _seed(db, slug, **kw):
+    upsert_oauth_provider(db, OAuthProviderConfig(
+        slug=slug, name=kw.get("name", slug.title()),
+        enabled=kw.get("enabled", True),
+        client_id=kw.get("client_id", "cid"),
+        client_secret=kw.get("client_secret", "csec"),
+        issuer_url=kw.get("issuer_url", ""),
+    ))
+
+
+# --- FIXED_PROVIDERS registry tests (no DB needed) ---
 
 
 def test_all_providers_defined():
@@ -59,99 +91,6 @@ def test_discord_extract_name():
     assert config.extract_name({"username": "testuser"}) == "testuser"
 
 
-def test_get_enabled_providers_none_enabled():
-    settings = Settings(database_url="sqlite:///")
-    result = get_enabled_providers(settings)
-    assert result == {}
-
-
-def test_get_enabled_providers_google_enabled():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_google=ProviderSettings(enabled=True, client_id="gid", client_secret="gsec"),
-    )
-    result = get_enabled_providers(settings)
-    assert "google" in result
-    assert result["google"].client_id == "gid"
-
-
-def test_get_enabled_providers_oidc_enabled():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[OIDCProviderConfig(
-            slug="authentik", name="Authentik",
-            enabled=True, client_id="oid", client_secret="osec",
-            issuer_url="https://idp.example.com",
-        )],
-    )
-    result = get_enabled_providers(settings)
-    assert "authentik" in result
-    assert result["authentik"].client_id == "oid"
-
-
-def test_build_providers_returns_fixed_five_when_no_oidc() -> None:
-    from backend.auth.providers import build_providers
-    settings = Settings(database_url="sqlite:///")
-    providers = build_providers(settings)
-    assert set(providers) == {"google", "microsoft", "github", "discord", "facebook"}
-
-
-def test_build_providers_adds_dynamic_oidc_entry() -> None:
-    from backend.auth.providers import build_providers
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[OIDCProviderConfig(
-            slug="authentik", name="Authentik",
-            enabled=True, client_id="x", client_secret="y",
-            issuer_url="https://idp.example.com",
-        )],
-    )
-    providers = build_providers(settings)
-    assert "authentik" in providers
-    assert providers["authentik"].label == "Authentik"
-    assert providers["authentik"].protocol == "oidc"
-    assert providers["authentik"].discovery_url == "https://idp.example.com/.well-known/openid-configuration"
-
-
-def test_build_providers_still_adds_disabled_oidc_to_registry() -> None:
-    # The registry holds discovery info; enabled-ness is filtered separately
-    # by get_enabled_providers. So a disabled OIDC provider still appears in
-    # build_providers' result.
-    from backend.auth.providers import build_providers
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[OIDCProviderConfig(
-            slug="authentik", name="Authentik",
-            enabled=False, issuer_url="https://idp.example.com",
-        )],
-    )
-    providers = build_providers(settings)
-    assert "authentik" in providers
-
-
-def test_get_enabled_providers_excludes_disabled_oidc() -> None:
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[OIDCProviderConfig(
-            slug="authentik", name="Authentik", enabled=False,
-        )],
-    )
-    result = get_enabled_providers(settings)
-    assert "authentik" not in result
-
-
-def test_get_enabled_providers_multiple_oidc() -> None:
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[
-            OIDCProviderConfig(slug="authentik", name="Authentik", enabled=True),
-            OIDCProviderConfig(slug="keycloak", name="Keycloak", enabled=True),
-        ],
-    )
-    result = get_enabled_providers(settings)
-    assert "authentik" in result and "keycloak" in result
-
-
 def test_normalise_issuer_appends_path_if_missing() -> None:
     from backend.auth.providers import _normalise_issuer
     assert _normalise_issuer("https://idp.example.com") == "https://idp.example.com/.well-known/openid-configuration"
@@ -162,3 +101,51 @@ def test_normalise_issuer_idempotent() -> None:
     from backend.auth.providers import _normalise_issuer
     full = "https://idp.example.com/.well-known/openid-configuration"
     assert _normalise_issuer(full) == full
+
+
+# --- DB-backed tests ---
+
+
+def test_get_enabled_providers_reads_from_db(db):
+    _seed(db, "google", client_id="goog-id")
+    _seed(db, "github", enabled=False)
+    enabled = get_enabled_providers(db)
+    assert "google" in enabled
+    assert "github" not in enabled  # disabled
+    assert enabled["google"].client_id == "goog-id"
+
+
+def test_get_enabled_providers_includes_custom_oidc(db):
+    _seed(db, "pocketid", name="PocketID", issuer_url="https://id.example.org")
+    enabled = get_enabled_providers(db)
+    assert "pocketid" in enabled
+    assert enabled["pocketid"].issuer_url == "https://id.example.org"
+
+
+def test_build_providers_merges_db_oidc_with_fixed_registry(db):
+    _seed(db, "pocketid", name="PocketID", issuer_url="https://id.example.org")
+    providers = build_providers(db)
+    # Fixed providers still present:
+    for fixed_slug in ("google", "microsoft", "github"):
+        assert fixed_slug in providers
+        assert providers[fixed_slug] is FIXED_PROVIDERS[fixed_slug] or \
+               providers[fixed_slug].label == FIXED_PROVIDERS[fixed_slug].label
+    # Dynamic provider added:
+    assert "pocketid" in providers
+    assert providers["pocketid"].label == "PocketID"
+    assert providers["pocketid"].discovery_url.endswith("/.well-known/openid-configuration")
+
+
+def test_build_providers_returns_fixed_registry_when_db_empty(db):
+    providers = build_providers(db)
+    assert set(providers.keys()) == set(FIXED_PROVIDERS.keys())
+
+
+def test_disabled_provider_omitted_from_enabled(db):
+    _seed(db, "google", enabled=False)
+    assert "google" not in get_enabled_providers(db)
+
+
+def test_provider_with_empty_client_id_is_treated_as_disabled(db):
+    _seed(db, "google", enabled=True, client_id="", client_secret="")
+    assert "google" not in get_enabled_providers(db)

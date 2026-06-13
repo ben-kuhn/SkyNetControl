@@ -4,7 +4,7 @@ import urllib.parse
 
 import httpx
 import sqlalchemy as sa
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -17,7 +17,7 @@ from backend.auth.email import (
     notify_user_callsign_approved,
 )
 from backend.auth.models import User, UserRole
-from backend.auth.service import create_access_token
+from backend.auth.service import create_access_token, resolve_provider
 from backend.audit.service import log_action
 from backend.config import Settings
 
@@ -26,22 +26,27 @@ auth_router = APIRouter(tags=["auth"])
 CALLSIGN_PATTERN = re.compile(r"^[A-Z]{1,2}\d[A-Z]{1,4}$")
 
 
-def _get_provider_config(request: Request, provider: str) -> dict:
-    providers = request.app.state.providers
-    if provider not in providers:
-        raise HTTPException(status_code=404, detail=f"Unknown auth provider: {provider}")
-    return providers[provider]
-
-
 @auth_router.get("/providers")
-async def list_providers(request: Request):
-    providers = request.app.state.providers
-    return [{"name": name, "label": config["label"]} for name, config in providers.items()]
+async def list_providers(db: Session = Depends(get_db_session)):
+    from backend.auth.providers import get_enabled_providers, build_providers
+    enabled = get_enabled_providers(db)
+    registry = build_providers(db)
+    return [
+        {"name": slug, "label": registry[slug].label}
+        for slug in enabled
+        if slug in registry
+    ]
 
 
 @auth_router.get("/login/{provider}")
-async def login(provider: str, request: Request, app_settings: Settings = Depends(get_settings)):
-    config = _get_provider_config(request, provider)
+async def login(
+    provider: str,
+    db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
+):
+    config = await resolve_provider(db, provider)
+    if config is None:
+        raise HTTPException(status_code=404, detail=f"Unknown auth provider: {provider}")
 
     state = secrets.token_urlsafe(32)
     params = {
@@ -69,7 +74,6 @@ async def login(provider: str, request: Request, app_settings: Settings = Depend
 @auth_router.get("/callback/{provider}")
 async def callback(
     provider: str,
-    request: Request,
     code: str,
     state: str = "",
     oauth_state: str | None = Cookie(default=None),
@@ -80,7 +84,9 @@ async def callback(
     if not oauth_state or not secrets.compare_digest(oauth_state, expected_state):
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
-    config = _get_provider_config(request, provider)
+    config = await resolve_provider(db, provider)
+    if config is None:
+        raise HTTPException(status_code=404, detail=f"Unknown auth provider: {provider}")
     redirect_uri = f"{app_settings.app_base_url}/api/auth/callback/{provider}"
 
     async with httpx.AsyncClient() as client:

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Callable
 
-from backend.config import Settings, ProviderSettings, OIDCProviderConfig
+from backend.config_mgmt.oauth import OAuthProviderConfig, list_oauth_providers
 
 
 @dataclass
@@ -9,7 +9,7 @@ class ProviderConfig:
     protocol: str  # "oidc" or "oauth2"
     label: str
     scopes: str
-    # For OIDC providers, discovery_url is used to fetch endpoints at startup.
+    # For OIDC providers, discovery_url is used to fetch endpoints at login time.
     # For OAuth2 providers, authorize/token/userinfo URLs are hardcoded.
     discovery_url: str = ""
     authorize_url: str = ""
@@ -131,15 +131,22 @@ def _normalise_issuer(url: str) -> str:
     return f"{url}/.well-known/openid-configuration"
 
 
-def build_providers(settings: Settings) -> dict[str, ProviderConfig]:
-    """Return all registered providers, combining fixed entries with the dynamic OIDC list."""
+def build_providers(db) -> dict[str, ProviderConfig]:
+    """Return all known providers — the fixed registry plus any custom OIDC
+    providers configured in the AppConfig table — keyed by slug.
+
+    Disabled providers and fixed providers without DB rows still appear; the
+    set of *enabled* providers is exposed by `get_enabled_providers`.
+    """
     result = dict(FIXED_PROVIDERS)
-    for op in settings.auth_oidc_providers:
-        result[op.slug] = ProviderConfig(
+    for p in list_oauth_providers(db):
+        if p.slug in FIXED_PROVIDERS:
+            continue  # the fixed registry already has the right ProviderConfig
+        result[p.slug] = ProviderConfig(
             protocol="oidc",
-            label=op.name,
+            label=p.name or p.slug.title(),
             scopes="openid email profile",
-            discovery_url=_normalise_issuer(op.issuer_url) if op.issuer_url else "",
+            discovery_url=_normalise_issuer(p.issuer_url) if p.issuer_url else "",
             extract_subject=_oidc_extract_subject,
             extract_name=_oidc_extract_name,
             extract_email=_oidc_extract_email,
@@ -147,19 +154,15 @@ def build_providers(settings: Settings) -> dict[str, ProviderConfig]:
     return result
 
 
-def get_enabled_providers(settings: Settings) -> dict[str, ProviderSettings | OIDCProviderConfig]:
-    """Return enabled providers keyed by slug, with their per-provider credentials."""
-    fixed: dict[str, ProviderSettings] = {
-        "google": settings.auth_google,
-        "microsoft": settings.auth_microsoft,
-        "github": settings.auth_github,
-        "discord": settings.auth_discord,
-        "facebook": settings.auth_facebook,
-    }
-    enabled: dict[str, ProviderSettings | OIDCProviderConfig] = {
-        name: ps for name, ps in fixed.items() if ps.enabled
-    }
-    for op in settings.auth_oidc_providers:
-        if op.enabled:
-            enabled[op.slug] = op
+def get_enabled_providers(db) -> dict[str, OAuthProviderConfig]:
+    """Return enabled providers keyed by slug.
+
+    A provider is *enabled* if its DB row has enabled=true AND a non-empty
+    client_id. The client_id check matches the previous Pydantic behaviour
+    where an empty ProviderSettings was effectively unusable.
+    """
+    enabled: dict[str, OAuthProviderConfig] = {}
+    for p in list_oauth_providers(db):
+        if p.enabled and p.client_id:
+            enabled[p.slug] = p
     return enabled

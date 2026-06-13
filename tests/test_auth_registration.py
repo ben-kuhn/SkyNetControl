@@ -9,7 +9,7 @@ from backend.db.base import Base
 from backend.auth.models import User, UserRole
 from backend.auth.routes import auth_router
 from backend.auth.service import create_access_token
-from backend.config import Settings, ProviderSettings
+from backend.config import Settings
 
 
 @pytest.fixture
@@ -18,7 +18,6 @@ def test_settings():
         database_url="sqlite:///",
         jwt_secret_key="test-secret",
         jwt_expire_minutes=60,
-        auth_google=ProviderSettings(enabled=True, client_id="gid", client_secret="gsec"),
         app_base_url="http://localhost:8000",
     )
 
@@ -41,7 +40,6 @@ def test_app(test_settings, db_setup):
     app = FastAPI()
     app.state.session_factory = factory
     app.state.settings = test_settings
-    app.state.providers = {}
     app.include_router(auth_router, prefix="/api/auth")
     return app
 

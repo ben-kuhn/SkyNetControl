@@ -10,7 +10,8 @@ from backend.db.base import Base
 from backend.auth.models import User, UserRole
 from backend.auth.routes import auth_router
 from backend.auth.service import create_access_token
-from backend.config import Settings, ProviderSettings
+from backend.config import Settings
+from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
 
 
 @pytest.fixture
@@ -19,7 +20,6 @@ def test_settings():
         database_url="sqlite:///",
         jwt_secret_key="test-secret",
         jwt_expire_minutes=60,
-        auth_google=ProviderSettings(enabled=True, client_id="test-gid", client_secret="test-gsec"),
         app_base_url="http://localhost:8000",
     )
 
@@ -42,22 +42,18 @@ def test_app(test_settings, db_setup):
     app = FastAPI()
     app.state.session_factory = factory
     app.state.settings = test_settings
-    app.state.providers = {
-        "google": {
-            "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
-            "token_url": "https://oauth2.googleapis.com/token",
-            "userinfo_url": "https://openidconnect.googleapis.com/v1/userinfo",
-            "client_id": "test-gid",
-            "client_secret": "test-gsec",
-            "scopes": "openid email profile",
-            "label": "Google",
-            "protocol": "oidc",
-            "extract_subject": lambda d: str(d.get("sub", "")),
-            "extract_name": lambda d: d.get("name", "Unknown"),
-            "extract_email": lambda d: d.get("email", ""),
-        },
-    }
     app.include_router(auth_router, prefix="/api/auth")
+
+    # Seed google provider into the DB so list_providers and login work
+    with factory() as session:
+        upsert_oauth_provider(session, OAuthProviderConfig(
+            slug="google",
+            name="Google",
+            enabled=True,
+            client_id="test-gid",
+            client_secret="test-gsec",
+            issuer_url="",
+        ))
     return app
 
 
@@ -68,9 +64,26 @@ async def test_client(test_app):
         yield c
 
 
+_GOOGLE_CONFIG = {
+    "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "userinfo_url": "https://openidconnect.googleapis.com/v1/userinfo",
+    "client_id": "test-gid",
+    "client_secret": "test-gsec",
+    "scopes": "openid email profile",
+    "label": "Google",
+    "protocol": "oidc",
+    "extract_subject": lambda d: str(d.get("sub", "")),
+    "extract_name": lambda d: d.get("name", "Unknown"),
+    "extract_email": lambda d: d.get("email", ""),
+}
+
+
 @pytest.mark.asyncio
 async def test_providers_returns_enabled(test_client):
-    response = await test_client.get("/api/auth/providers")
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
+               return_value=_GOOGLE_CONFIG):
+        response = await test_client.get("/api/auth/providers")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
@@ -80,13 +93,16 @@ async def test_providers_returns_enabled(test_client):
 
 @pytest.mark.asyncio
 async def test_login_unknown_provider_404(test_client):
-    response = await test_client.get("/api/auth/login/unknown", follow_redirects=False)
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock, return_value=None):
+        response = await test_client.get("/api/auth/login/unknown", follow_redirects=False)
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_login_redirects_to_provider(test_client):
-    response = await test_client.get("/api/auth/login/google", follow_redirects=False)
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
+               return_value=_GOOGLE_CONFIG):
+        response = await test_client.get("/api/auth/login/google", follow_redirects=False)
     assert response.status_code in (302, 307)
     location = response.headers.get("location", "")
     assert "accounts.google.com" in location
@@ -113,29 +129,31 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
         "email": "test@example.com",
     }
 
-    with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_token_response
-        mock_client.get.return_value = mock_userinfo_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
+               return_value=_GOOGLE_CONFIG):
+        with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_token_response
+            mock_client.get.return_value = mock_userinfo_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
 
-        login_resp = await test_client.get("/api/auth/login/google", follow_redirects=False)
-        cookies = login_resp.cookies
+            login_resp = await test_client.get("/api/auth/login/google", follow_redirects=False)
+            cookies = login_resp.cookies
 
-        location = login_resp.headers.get("location", "")
-        import urllib.parse
+            location = login_resp.headers.get("location", "")
+            import urllib.parse
 
-        parsed = urllib.parse.urlparse(location)
-        params = urllib.parse.parse_qs(parsed.query)
-        state = params.get("state", [""])[0]
+            parsed = urllib.parse.urlparse(location)
+            params = urllib.parse.parse_qs(parsed.query)
+            state = params.get("state", [""])[0]
 
-        response = await test_client.get(
-            f"/api/auth/callback/google?code=authcode&state={state}",
-            cookies=cookies,
-            follow_redirects=False,
-        )
+            response = await test_client.get(
+                f"/api/auth/callback/google?code=authcode&state={state}",
+                cookies=cookies,
+                follow_redirects=False,
+            )
 
     assert response.status_code in (302, 307)
 
@@ -165,28 +183,30 @@ async def test_callback_existing_user_not_changed(test_client, test_app, db_setu
     mock_userinfo_response.status_code = 200
     mock_userinfo_response.json.return_value = {"sub": "existing-123", "name": "Existing", "email": "e@e.com"}
 
-    with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_token_response
-        mock_client.get.return_value = mock_userinfo_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
+               return_value=_GOOGLE_CONFIG):
+        with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_token_response
+            mock_client.get.return_value = mock_userinfo_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
 
-        login_resp = await test_client.get("/api/auth/login/google", follow_redirects=False)
-        cookies = login_resp.cookies
-        location = login_resp.headers.get("location", "")
-        import urllib.parse
+            login_resp = await test_client.get("/api/auth/login/google", follow_redirects=False)
+            cookies = login_resp.cookies
+            location = login_resp.headers.get("location", "")
+            import urllib.parse
 
-        parsed = urllib.parse.urlparse(location)
-        params = urllib.parse.parse_qs(parsed.query)
-        state = params.get("state", [""])[0]
+            parsed = urllib.parse.urlparse(location)
+            params = urllib.parse.parse_qs(parsed.query)
+            state = params.get("state", [""])[0]
 
-        response = await test_client.get(
-            f"/api/auth/callback/google?code=authcode&state={state}",
-            cookies=cookies,
-            follow_redirects=False,
-        )
+            response = await test_client.get(
+                f"/api/auth/callback/google?code=authcode&state={state}",
+                cookies=cookies,
+                follow_redirects=False,
+            )
 
     assert response.status_code in (302, 307)
 

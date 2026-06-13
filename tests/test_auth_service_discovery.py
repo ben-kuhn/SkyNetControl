@@ -1,12 +1,112 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from unittest.mock import patch, AsyncMock
 
-from backend.auth.service import fetch_oidc_discovery, init_providers
-from backend.config import Settings, ProviderSettings, OIDCProviderConfig
+from backend.auth.service import resolve_provider, _DISCOVERY_CACHE
+from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
+from backend.db.base import Base
+
+
+@pytest.fixture(autouse=True)
+def clear_discovery_cache():
+    _DISCOVERY_CACHE.clear()
+    yield
+    _DISCOVERY_CACHE.clear()
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as session:
+        yield session
+    engine.dispose()
 
 
 @pytest.mark.asyncio
+async def test_resolve_provider_returns_none_when_not_enabled(db):
+    upsert_oauth_provider(db, OAuthProviderConfig(
+        slug="google", name="Google", enabled=False,
+        client_id="c", client_secret="s", issuer_url="",
+    ))
+    assert await resolve_provider(db, "google") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_unknown_slug_returns_none(db):
+    assert await resolve_provider(db, "nonexistent") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_oauth2_no_discovery(db):
+    upsert_oauth_provider(db, OAuthProviderConfig(
+        slug="github", name="GitHub", enabled=True,
+        client_id="ghc", client_secret="ghs", issuer_url="",
+    ))
+    resolved = await resolve_provider(db, "github")
+    assert resolved is not None
+    assert resolved["client_id"] == "ghc"
+    assert resolved["protocol"] == "oauth2"
+    assert resolved["authorize_url"].startswith("https://github.com")
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_oidc_fetches_discovery(db):
+    upsert_oauth_provider(db, OAuthProviderConfig(
+        slug="google", name="Google", enabled=True,
+        client_id="gc", client_secret="gs", issuer_url="",
+    ))
+    with patch("backend.auth.service.fetch_oidc_discovery",
+               new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = {
+            "authorization_endpoint": "https://x/auth",
+            "token_endpoint": "https://x/token",
+            "userinfo_endpoint": "https://x/userinfo",
+        }
+        resolved = await resolve_provider(db, "google")
+    assert resolved is not None
+    assert resolved["authorize_url"] == "https://x/auth"
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_caches_oidc_discovery(db):
+    upsert_oauth_provider(db, OAuthProviderConfig(
+        slug="google", name="Google", enabled=True,
+        client_id="gc", client_secret="gs", issuer_url="",
+    ))
+    with patch("backend.auth.service.fetch_oidc_discovery",
+               new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = {
+            "authorization_endpoint": "https://x/auth",
+            "token_endpoint": "https://x/token",
+            "userinfo_endpoint": "https://x/userinfo",
+        }
+        await resolve_provider(db, "google")
+        await resolve_provider(db, "google")
+    assert mock_fetch.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_returns_none_when_discovery_fails(db):
+    upsert_oauth_provider(db, OAuthProviderConfig(
+        slug="google", name="Google", enabled=True,
+        client_id="gc", client_secret="gs", issuer_url="",
+    ))
+    with patch("backend.auth.service.fetch_oidc_discovery",
+               new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = None
+        assert await resolve_provider(db, "google") is None
+
+
+# Keep the fetch_oidc_discovery tests from the old file — these are still valid
+
+@pytest.mark.asyncio
 async def test_fetch_oidc_discovery_success():
+    from unittest.mock import MagicMock
+    import backend.auth.service as svc
+
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
@@ -22,7 +122,7 @@ async def test_fetch_oidc_discovery_success():
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = await fetch_oidc_discovery("https://example.com/.well-known/openid-configuration")
+        result = await svc.fetch_oidc_discovery("https://example.com/.well-known/openid-configuration")
 
     assert result["authorization_endpoint"] == "https://example.com/authorize"
     assert result["token_endpoint"] == "https://example.com/token"
@@ -31,6 +131,8 @@ async def test_fetch_oidc_discovery_success():
 
 @pytest.mark.asyncio
 async def test_fetch_oidc_discovery_failure_returns_none():
+    import backend.auth.service as svc
+
     with patch("backend.auth.service.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.get.side_effect = Exception("Connection refused")
@@ -38,147 +140,6 @@ async def test_fetch_oidc_discovery_failure_returns_none():
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = await fetch_oidc_discovery("https://bad.example.com/.well-known/openid-configuration")
+        result = await svc.fetch_oidc_discovery("https://bad.example.com/.well-known/openid-configuration")
 
     assert result is None
-
-
-@pytest.mark.asyncio
-async def test_init_providers_with_google():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_google=ProviderSettings(enabled=True, client_id="gid", client_secret="gsec"),
-    )
-
-    mock_discovery = {
-        "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-        "token_endpoint": "https://oauth2.googleapis.com/token",
-        "userinfo_endpoint": "https://openidconnect.googleapis.com/v1/userinfo",
-    }
-
-    with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock, return_value=mock_discovery):
-        providers = await init_providers(settings)
-
-    assert "google" in providers
-    assert providers["google"]["authorize_url"] == "https://accounts.google.com/o/oauth2/v2/auth"
-    assert providers["google"]["client_id"] == "gid"
-    assert providers["google"]["client_secret"] == "gsec"
-
-
-@pytest.mark.asyncio
-async def test_init_providers_with_github():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_github=ProviderSettings(enabled=True, client_id="ghid", client_secret="ghsec"),
-    )
-
-    providers = await init_providers(settings)
-
-    assert "github" in providers
-    assert providers["github"]["authorize_url"] == "https://github.com/login/oauth/authorize"
-    assert providers["github"]["client_id"] == "ghid"
-
-
-@pytest.mark.asyncio
-async def test_init_providers_with_generic_oidc():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[OIDCProviderConfig(
-            slug="authentik", name="Authentik",
-            enabled=True, client_id="oid", client_secret="osec",
-            issuer_url="https://idp.example.com",
-        )],
-    )
-
-    mock_discovery = {
-        "authorization_endpoint": "https://idp.example.com/authorize",
-        "token_endpoint": "https://idp.example.com/token",
-        "userinfo_endpoint": "https://idp.example.com/userinfo",
-    }
-
-    with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock, return_value=mock_discovery):
-        providers = await init_providers(settings)
-
-    assert "authentik" in providers
-    assert providers["authentik"]["authorize_url"] == "https://idp.example.com/authorize"
-
-
-@pytest.mark.asyncio
-async def test_init_providers_skips_failed_oidc_discovery():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_google=ProviderSettings(enabled=True, client_id="gid", client_secret="gsec"),
-        auth_github=ProviderSettings(enabled=True, client_id="ghid", client_secret="ghsec"),
-    )
-
-    with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock, return_value=None):
-        providers = await init_providers(settings)
-
-    # Google (OIDC) should be skipped, GitHub (OAuth2) should still be there
-    assert "google" not in providers
-    assert "github" in providers
-
-
-@pytest.mark.asyncio
-async def test_init_providers_none_enabled_raises():
-    settings = Settings(database_url="sqlite:///")
-
-    with pytest.raises(RuntimeError, match="No auth providers"):
-        await init_providers(settings)
-
-
-@pytest.mark.asyncio
-async def test_init_providers_all_fail_raises():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_google=ProviderSettings(enabled=True, client_id="gid", client_secret="gsec"),
-    )
-
-    with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock, return_value=None):
-        with pytest.raises(RuntimeError, match="No auth providers"):
-            await init_providers(settings)
-
-
-@pytest.mark.asyncio
-async def test_init_providers_with_two_oidc():
-    settings = Settings(
-        database_url="sqlite:///",
-        auth_oidc_providers=[
-            OIDCProviderConfig(
-                slug="authentik", name="Authentik", enabled=True,
-                client_id="ca", client_secret="sa",
-                issuer_url="https://a.example.com",
-            ),
-            OIDCProviderConfig(
-                slug="keycloak", name="Keycloak", enabled=True,
-                client_id="ck", client_secret="sk",
-                issuer_url="https://k.example.com",
-            ),
-        ],
-    )
-
-    discoveries = {
-        "https://a.example.com/.well-known/openid-configuration": {
-            "authorization_endpoint": "https://a.example.com/authorize",
-            "token_endpoint": "https://a.example.com/token",
-            "userinfo_endpoint": "https://a.example.com/userinfo",
-        },
-        "https://k.example.com/.well-known/openid-configuration": {
-            "authorization_endpoint": "https://k.example.com/authorize",
-            "token_endpoint": "https://k.example.com/token",
-            "userinfo_endpoint": "https://k.example.com/userinfo",
-        },
-    }
-
-    async def fake_discover(url):
-        return discoveries.get(url)
-
-    with patch("backend.auth.service.fetch_oidc_discovery", new_callable=AsyncMock,
-               side_effect=fake_discover):
-        providers = await init_providers(settings)
-
-    assert "authentik" in providers and "keycloak" in providers
-    assert providers["authentik"]["authorize_url"] == "https://a.example.com/authorize"
-    assert providers["keycloak"]["authorize_url"] == "https://k.example.com/authorize"
-    assert providers["authentik"]["label"] == "Authentik"
-    assert providers["keycloak"]["label"] == "Keycloak"
