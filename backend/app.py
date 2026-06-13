@@ -24,6 +24,7 @@ from backend.integrations.scanner.routes import scanner_router
 from backend.privacy.routes import privacy_router
 from backend.config_mgmt.oauth_routes import oauth_router
 from backend.config_mgmt.smtp_routes import smtp_router
+from backend.config_mgmt.test_routes import test_router
 
 
 _DEFAULT_JWT_SECRET = "change-me-in-production"
@@ -107,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(privacy_router, prefix="/api/privacy")
     app.include_router(oauth_router, prefix="/api/admin")
     app.include_router(smtp_router, prefix="/api/admin")
+    app.include_router(test_router, prefix="/api/admin")
 
     # Serve frontend static files if the directory exists
     if os.path.isdir(settings.static_dir):
