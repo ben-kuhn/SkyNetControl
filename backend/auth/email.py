@@ -4,86 +4,89 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 
+from sqlalchemy.orm import Session
+
 from backend.auth.models import User
-from backend.config import Settings
+from backend.config import settings  # module singleton — only app_base_url is read
+from backend.config_mgmt.smtp import SmtpConfig, get_smtp_config
 
 logger = logging.getLogger(__name__)
 
 
-async def send_email(to: str, subject: str, body: str, settings: Settings) -> None:
+async def send_email(db: Session, to: str, subject: str, body: str) -> None:
     """Send an email via SMTP. Fire-and-forget — never raises."""
-    if not settings.smtp.host:
+    smtp = get_smtp_config(db)
+    if smtp is None:
         logger.debug("SMTP not configured, skipping email to %s", to)
         return
-
     try:
-        await asyncio.to_thread(_send_email_sync, to, subject, body, settings)
+        await asyncio.to_thread(_send_email_sync, smtp, to, subject, body)
     except Exception:
         logger.exception("Failed to send email to %s", to)
 
 
-def _send_email_sync(to: str, subject: str, body: str, settings: Settings) -> None:
+def _send_email_sync(smtp: SmtpConfig, to: str, subject: str, body: str) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = settings.smtp.from_address
+    msg["From"] = smtp.from_address
     msg["To"] = to
     msg.set_content(body)
 
-    with smtplib.SMTP(settings.smtp.host, settings.smtp.port) as server:
-        if settings.smtp.use_tls:
+    with smtplib.SMTP(smtp.host, smtp.port) as server:
+        if smtp.use_tls:
             server.starttls(context=ssl.create_default_context())
-        if settings.smtp.username:
-            server.login(settings.smtp.username, settings.smtp.password)
+        if smtp.username:
+            server.login(smtp.username, smtp.password)
         server.send_message(msg)
 
 
-async def notify_admins_new_registration(admins: list[User], new_user: User, settings: Settings) -> None:
-    """Notify admins that a new user has registered."""
+async def notify_admins_new_registration(db: Session, admins: list[User], new_user: User) -> None:
+    base_url = settings.app_base_url
     for admin in admins:
         if admin.email:
             await send_email(
+                db,
                 admin.email,
                 f"[SkyNetControl] New registration: {new_user.callsign}",
                 f"{new_user.name} has registered as {new_user.callsign} and is awaiting approval. "
-                f"Review pending users at {settings.app_base_url}.",
-                settings,
+                f"Review pending users at {base_url}.",
             )
 
 
-async def notify_admins_callsign_change(admins: list[User], user: User, new_callsign: str, settings: Settings) -> None:
-    """Notify admins that a user has requested a callsign change."""
+async def notify_admins_callsign_change(db: Session, admins: list[User], user: User, new_callsign: str) -> None:
+    base_url = settings.app_base_url
     for admin in admins:
         if admin.email:
             await send_email(
+                db,
                 admin.email,
                 f"[SkyNetControl] Callsign change request: {user.callsign} -> {new_callsign}",
                 f"{user.name} ({user.callsign}) has requested a callsign change to {new_callsign}. "
-                f"Review at {settings.app_base_url}.",
-                settings,
+                f"Review at {base_url}.",
             )
 
 
-async def notify_user_approved(user: User, settings: Settings) -> None:
-    """Notify a user that their account has been approved."""
+async def notify_user_approved(db: Session, user: User) -> None:
     if not user.email:
         return
+    base_url = settings.app_base_url
     await send_email(
+        db,
         user.email,
         "[SkyNetControl] Your account has been approved",
         f"Your account ({user.callsign}) has been approved as {user.role.value}. "
-        f"You can now access SkyNetControl at {settings.app_base_url}.",
-        settings,
+        f"You can now access SkyNetControl at {base_url}.",
     )
 
 
-async def notify_user_callsign_approved(user: User, old_callsign: str, settings: Settings) -> None:
-    """Notify a user that their callsign change has been approved."""
+async def notify_user_callsign_approved(db: Session, user: User, old_callsign: str) -> None:
     if not user.email:
         return
+    base_url = settings.app_base_url
     await send_email(
+        db,
         user.email,
         "[SkyNetControl] Your callsign change has been approved",
         f"Your callsign has been changed from {old_callsign} to {user.callsign}. "
-        f"Access SkyNetControl at {settings.app_base_url}.",
-        settings,
+        f"Access SkyNetControl at {base_url}.",
     )

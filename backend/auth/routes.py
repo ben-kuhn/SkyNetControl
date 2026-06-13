@@ -185,7 +185,6 @@ async def register(
     body: RegisterRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
-    app_settings: Settings = Depends(get_settings),
 ):
     if not user.callsign.startswith("PENDING-"):
         raise HTTPException(status_code=409, detail="User already registered")
@@ -209,7 +208,7 @@ async def register(
 
     # Notify admins (fire-and-forget)
     admins = db.query(User).filter(User.role == UserRole.ADMIN).all()
-    await notify_admins_new_registration(admins, user, app_settings)
+    await notify_admins_new_registration(db, admins, user)
 
     return {
         "callsign": user.callsign,
@@ -229,7 +228,6 @@ async def update_me(
     body: CallsignChangeRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
-    app_settings: Settings = Depends(get_settings),
 ):
     callsign = body.callsign.upper()
     if not CALLSIGN_PATTERN.match(callsign):
@@ -245,7 +243,7 @@ async def update_me(
 
     # Notify admins (fire-and-forget)
     admins = db.query(User).filter(User.role == UserRole.ADMIN).all()
-    await notify_admins_callsign_change(admins, user, callsign, app_settings)
+    await notify_admins_callsign_change(db, admins, user, callsign)
 
     return {
         "callsign": user.callsign,
@@ -284,7 +282,6 @@ async def update_user_role(
     body: UserRoleUpdate,
     user: User = Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db_session),
-    app_settings: Settings = Depends(get_settings),
 ):
     target_user = db.get(User, callsign)
     if target_user is None:
@@ -302,7 +299,7 @@ async def update_user_role(
         details={"from": old_role, "to": body.role.value},
     )
     if was_pending and target_user.role != UserRole.PENDING:
-        await notify_user_approved(target_user, app_settings)
+        await notify_user_approved(db, target_user)
     return {
         "callsign": target_user.callsign,
         "name": target_user.name,
@@ -317,7 +314,6 @@ async def approve_callsign(
     callsign: str,
     user: User = Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db_session),
-    app_settings: Settings = Depends(get_settings),
 ):
     target_user = db.get(User, callsign)
     if target_user is None:
@@ -345,7 +341,7 @@ async def approve_callsign(
     )
 
     updated_user = db.get(User, new_callsign)
-    await notify_user_callsign_approved(updated_user, callsign, app_settings)
+    await notify_user_callsign_approved(db, updated_user, callsign)
     return {
         "callsign": updated_user.callsign,
         "name": updated_user.name,
