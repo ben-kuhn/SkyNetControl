@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useToast } from "../context/ToastContext";
 import { fetchConfig, setConfigValue } from "../api/config";
 import { Button } from "../components/Button";
+import { OAuthProviderList } from "../components/OAuthProviderList";
 import { Spinner } from "../components/Spinner";
 
 type ConfigFieldType = "text" | "boolean" | "multiselect";
@@ -305,6 +306,8 @@ export function ConfigPage() {
       <h1 className="text-xl font-bold text-text-primary mb-6">
         Configuration
       </h1>
+
+      <OAuthProviderList />
 
       {GROUPS.map((group) => {
         const visibleFields = CONFIG_FIELDS.filter(
