@@ -81,9 +81,10 @@ _GOOGLE_CONFIG = {
 
 @pytest.mark.asyncio
 async def test_providers_returns_enabled(test_client):
-    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
-               return_value=_GOOGLE_CONFIG):
-        response = await test_client.get("/api/auth/providers")
+    # /providers calls get_enabled_providers + build_providers directly
+    # against the DB (no resolve_provider involvement) — the test_app
+    # fixture has seeded `google` so the real code path returns it.
+    response = await test_client.get("/api/auth/providers")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
