@@ -31,13 +31,26 @@ def _row(db: Session, key: str) -> str | None:
 
 
 def get_smtp_config(db: Session) -> SmtpConfig | None:
-    """Return the configured SMTP settings, or None if `smtp.host` is unset."""
+    """Return the configured SMTP settings, or None if host or port are missing or invalid.
+
+    A missing/blank/unparseable `smtp.port` is treated as "not configured"
+    rather than silently coerced to 0 — port 0 would later produce an
+    obscure SMTP connection failure that's harder to diagnose than a
+    no-op email send.
+    """
     host = _row(db, "smtp.host")
     if not host:
         return None
+    port_raw = _row(db, "smtp.port")
+    if not port_raw:
+        return None
+    try:
+        port = int(port_raw)
+    except ValueError:
+        return None
     return SmtpConfig(
         host=host,
-        port=int(_row(db, "smtp.port") or "0"),
+        port=port,
         username=_row(db, "smtp.username") or "",
         password=_row(db, "smtp.password") or "",
         from_address=_row(db, "smtp.from_address") or "",

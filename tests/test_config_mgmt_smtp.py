@@ -103,3 +103,21 @@ def test_use_tls_parses_truthy_strings(db: Session):
     db.commit()
     got = get_smtp_config(db)
     assert got is not None and got.use_tls is True
+
+
+def test_get_returns_none_when_port_missing(db: Session):
+    db.add(AppConfig(key="smtp.host", value="smtp.example.org"))
+    # No smtp.port row.
+    db.commit()
+    assert get_smtp_config(db) is None
+
+
+def test_get_returns_none_when_port_unparseable(db: Session):
+    db.add(AppConfig(key="smtp.host", value="smtp.example.org"))
+    db.add(AppConfig(key="smtp.port", value="not-a-number"))
+    db.add(AppConfig(key="smtp.username", value=""))
+    db.add(AppConfig(key="smtp.password", value=""))
+    db.add(AppConfig(key="smtp.from_address", value=""))
+    db.add(AppConfig(key="smtp.use_tls", value="false"))
+    db.commit()
+    assert get_smtp_config(db) is None

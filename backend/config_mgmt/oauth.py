@@ -1,8 +1,26 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
+from backend.auth.oidc_slug import RESERVED_SLUGS, validate_slug
 from backend.config_mgmt.models import AppConfig
+
+
+_FIXED_SLUGS = RESERVED_SLUGS - {"oidc"}  # all fixed providers; "oidc" stays reserved
+
+
+def _check_slug(slug: str) -> None:
+    # Fixed-provider slugs must round-trip through storage (the migration
+    # writes them; the wizard edits them). They are in RESERVED_SLUGS only to
+    # block user-chosen OIDC slugs from colliding — so we bypass validate_slug
+    # here and accept them. Note: this bypass also skips the format regex; if
+    # validate_slug ever grows additional checks that should apply to fixed
+    # slugs too (e.g. a length cap), this branch must be revisited.
+    if slug in _FIXED_SLUGS:
+        return
+    err = validate_slug(slug)
+    if err is not None:
+        raise ValueError(f"invalid OAuth provider slug {slug!r}: {err}")
 
 
 @dataclass(frozen=True)
@@ -11,7 +29,7 @@ class OAuthProviderConfig:
     name: str
     enabled: bool
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
     issuer_url: str  # empty string for non-OIDC providers
 
 
@@ -41,10 +59,10 @@ def _build(slug: str, rows: dict[str, str]) -> OAuthProviderConfig:
 def get_oauth_provider(db: Session, slug: str) -> OAuthProviderConfig | None:
     """Return the provider configured under `oauth.<slug>.*`, or None if no rows exist."""
     rows: dict[str, str] = {}
-    for field in _FIELDS:
-        value = _row(db, _key(slug, field))
+    for field_name in _FIELDS:
+        value = _row(db, _key(slug, field_name))
         if value is not None:
-            rows[field] = value
+            rows[field_name] = value
     if not rows:
         return None
     return _build(slug, rows)
@@ -63,15 +81,21 @@ def list_oauth_providers(db: Session) -> list[OAuthProviderConfig]:
         parts = row.key.split(".", 2)
         if len(parts) != 3:
             continue
-        _, slug, field = parts
-        if field not in _FIELDS:
+        _, slug, field_name = parts
+        if field_name not in _FIELDS:
             continue
-        by_slug.setdefault(slug, {})[field] = row.value
+        by_slug.setdefault(slug, {})[field_name] = row.value
     return [_build(slug, rows) for slug, rows in sorted(by_slug.items())]
 
 
 def upsert_oauth_provider(db: Session, provider: OAuthProviderConfig) -> None:
-    """Write every field of `provider` to app_config, overwriting existing rows."""
+    """Write every field of `provider` to app_config, overwriting existing rows.
+
+    Raises ValueError if the slug fails `_check_slug` — slugs become parts
+    of LIKE patterns in `delete_oauth_provider` / `list_oauth_providers`, so
+    they must match the existing OIDC-slug whitelist.
+    """
+    _check_slug(provider.slug)
     values = {
         "name": provider.name,
         "enabled": "true" if provider.enabled else "false",
@@ -79,8 +103,8 @@ def upsert_oauth_provider(db: Session, provider: OAuthProviderConfig) -> None:
         "client_secret": provider.client_secret,
         "issuer_url": provider.issuer_url,
     }
-    for field, value in values.items():
-        key = _key(provider.slug, field)
+    for field_name, value in values.items():
+        key = _key(provider.slug, field_name)
         obj = db.get(AppConfig, key)
         if obj is None:
             db.add(AppConfig(key=key, value=value))

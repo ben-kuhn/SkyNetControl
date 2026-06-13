@@ -146,3 +146,44 @@ def test_enabled_defaults_to_false(db: Session):
     db.commit()
     got = get_oauth_provider(db, "x")
     assert got is not None and got.enabled is False
+
+
+def test_repr_does_not_leak_client_secret():
+    p = OAuthProviderConfig(
+        slug="x", name="X", enabled=True,
+        client_id="public-id", client_secret="DO-NOT-LEAK",
+        issuer_url="",
+    )
+    assert "DO-NOT-LEAK" not in repr(p)
+
+
+def test_upsert_rejects_invalid_slug(db: Session):
+    bad = OAuthProviderConfig(
+        slug="Bad Slug!",  # spaces + uppercase + punctuation: all illegal
+        name="X", enabled=True, client_id="a", client_secret="b", issuer_url="",
+    )
+    with pytest.raises(ValueError, match="slug"):
+        upsert_oauth_provider(db, bad)
+    # And nothing was written:
+    leftover = db.query(AppConfig).filter(AppConfig.key.like("oauth.%")).all()
+    assert leftover == []
+
+
+@pytest.mark.parametrize("slug", ["google", "microsoft", "github", "discord", "facebook"])
+def test_upsert_accepts_fixed_provider_slugs(db: Session, slug: str):
+    upsert_oauth_provider(
+        db,
+        OAuthProviderConfig(slug=slug, name=slug.title(), enabled=True,
+                            client_id="a", client_secret="b", issuer_url=""),
+    )
+    got = get_oauth_provider(db, slug)
+    assert got is not None and got.slug == slug
+
+
+def test_upsert_rejects_literal_oidc_slug(db: Session):
+    with pytest.raises(ValueError, match="reserved"):
+        upsert_oauth_provider(
+            db,
+            OAuthProviderConfig(slug="oidc", name="X", enabled=True,
+                                client_id="a", client_secret="b", issuer_url=""),
+        )
