@@ -19,10 +19,12 @@ import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
 import { ActivitiesPage } from "./pages/ActivitiesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProtectedRoute } from "./ProtectedRoute";
+import { SetupGate } from "./components/SetupGate";
 import type { UserRole } from "./types";
 
 function AppRoutes() {
   return (
+    <SetupGate>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
@@ -78,6 +80,7 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to="/schedule" replace />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    </SetupGate>
   );
 }
 
