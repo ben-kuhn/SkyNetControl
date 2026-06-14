@@ -103,6 +103,44 @@ async def test_start_returns_authorize_url_with_state(admin_client):
     assert "github.com" in url
 
 
+# Stored-secret fallback: empty client_secret + saved provider → use stored secret
+@pytest.mark.asyncio
+async def test_start_falls_back_to_stored_secret(admin_client, test_app):
+    """When body.client_secret == "" and a provider is saved, use its stored secret."""
+    from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
+    from backend.config_mgmt.test_routes import _TEST_SESSIONS
+
+    client, token = admin_client
+    with test_app.state.session_factory() as db:
+        upsert_oauth_provider(db, OAuthProviderConfig(
+            slug="github", name="GitHub", enabled=True,
+            client_id="cid", client_secret="STORED-SECRET", issuer_url="",
+        ))
+
+    resp = await client.post(
+        "/api/admin/test/oauth/github/start",
+        json={"client_id": "cid", "client_secret": "", "issuer_url": "", "name": "GitHub"},
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    state = next(iter(_TEST_SESSIONS))
+    assert _TEST_SESSIONS[state].client_secret == "STORED-SECRET"
+
+
+# Stored-secret fallback: empty client_secret + no saved provider → 400
+@pytest.mark.asyncio
+async def test_start_empty_secret_without_stored_returns_400(admin_client):
+    """When body.client_secret == "" and nothing is saved, return 400 instead of silently using empty."""
+    client, token = admin_client
+    resp = await client.post(
+        "/api/admin/test/oauth/github/start",
+        json={"client_id": "cid", "client_secret": "", "issuer_url": "", "name": "GitHub"},
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 400
+    assert "client_secret" in resp.text.lower()
+
+
 # ---------------------------------------------------------------------------
 # Test 2: callback with unknown state returns 404
 # ---------------------------------------------------------------------------

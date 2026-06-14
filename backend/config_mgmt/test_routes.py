@@ -10,14 +10,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_db_session, require_role
+from backend.auth.dependencies import get_db_session, get_settings, require_role
+from backend.auth.email import _send_email_sync
 from backend.auth.models import User, UserRole
 from backend.auth.providers import FIXED_PROVIDERS, _normalise_issuer
 from backend.auth.service import _get_discovery
-from backend.config_mgmt.smtp import SmtpConfig, get_smtp_config
-from backend.auth.email import _send_email_sync
-from backend.auth.dependencies import get_settings
 from backend.config import Settings
+from backend.config_mgmt.oauth import get_oauth_provider
+from backend.config_mgmt.smtp import SmtpConfig, get_smtp_config
 
 test_router = APIRouter(prefix="/test", tags=["admin-test"])
 
@@ -39,6 +39,11 @@ class _TestSession:
 
 
 # Keyed by `state` — the unguessable OAuth state parameter used as the lookup key.
+#
+# This dict is process-local. The current NixOS deployment runs a single uvicorn
+# worker, so the callback always lands in the worker that issued the state. A
+# multi-worker deployment would need a shared store (Redis, DB row with TTL)
+# because the provider's redirect could land in any worker.
 _TEST_SESSIONS: dict[str, _TestSession] = {}
 
 
@@ -79,12 +84,18 @@ async def start_oauth_test(
     body: OAuthTestStart,
     _: User = Depends(require_role(UserRole.ADMIN)),
     app_settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db_session),
 ) -> dict:
     """Kick off a real OAuth test flow against unsaved credentials.
 
     Builds an authorize URL using the same registry logic as resolve_provider
     (FIXED_PROVIDERS for known slugs; OIDC discovery for custom slugs).
     Returns {test_session_id, authorize_url}.
+
+    Stored-secret fallback: when body.client_secret is "" (the same sentinel
+    the CRUD upsert uses to mean "preserve existing"), look up the stored
+    provider's client_secret and use it. This lets an admin click "Test
+    sign-in" on a saved row without re-typing the secret.
     """
     # Determine authorize URL via the same logic as resolve_provider
     provider_config = FIXED_PROVIDERS.get(slug)
@@ -108,6 +119,19 @@ async def start_oauth_test(
         authorize_url = discovery.get("authorization_endpoint", "")
         scopes = "openid email profile"
 
+    # Stored-secret fallback (mirrors SMTP test): empty client_secret means
+    # "use the saved one." Required for the Test-sign-in button on saved rows
+    # where the frontend never receives the real secret.
+    client_secret = body.client_secret
+    if client_secret == "":
+        stored = get_oauth_provider(db, slug)
+        if stored is None or not stored.client_secret:
+            raise HTTPException(
+                status_code=400,
+                detail="client_secret is required (no stored secret to fall back to)",
+            )
+        client_secret = stored.client_secret
+
     state = secrets.token_urlsafe(32)
     test_session_id = secrets.token_urlsafe(32)
 
@@ -126,7 +150,7 @@ async def start_oauth_test(
         state=state,
         slug=slug,
         client_id=body.client_id,
-        client_secret=body.client_secret,
+        client_secret=client_secret,
         issuer_url=body.issuer_url,
         expires_at=datetime.now(timezone.utc) + _SESSION_TTL,
     )
