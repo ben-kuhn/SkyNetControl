@@ -1,12 +1,16 @@
-import { useCallback, useRef, useState } from "react";
+import { useState } from "react";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
-import { OAuthTestButton } from "../components/OAuthTestButton";
-import { TestResultBanner } from "../components/TestResultBanner";
-import type { TestResult } from "../components/TestResultBanner";
-import { deriveSlug } from "../api/oauth";
 import { startSetupClaim } from "../api/setup";
 import type { SmtpUpsert } from "../api/smtp";
+
+// Mirror of `backend/auth/oidc_slug.py:slugify` — kept client-side so the
+// wizard doesn't depend on the admin-only /api/admin/oauth/providers/slug/derive
+// endpoint. Backend revalidates the slug at /api/setup/claim/start anyway, so
+// this is a UX preview only.
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Provider definitions
@@ -167,20 +171,13 @@ function Step1({ form, setForm, onNext }: Step1Props) {
 interface Step2Props {
   form: WizardFormState;
   setForm: React.Dispatch<React.SetStateAction<WizardFormState>>;
-  oauthTested: boolean;
-  setOauthTested: (v: boolean) => void;
   onBack: () => void;
   onNext: () => void;
 }
 
-function Step2({ form, setForm, oauthTested, setOauthTested, onBack, onNext }: Step2Props) {
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [slugLoading, setSlugLoading] = useState(false);
-  const deriveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+function Step2({ form, setForm, onBack, onNext }: Step2Props) {
   // When provider type changes, update slug + name (for fixed providers)
   const handleProviderType = (type: ProviderType) => {
-    setOauthTested(false);
     if (type !== "custom_oidc") {
       setForm((f) => ({
         ...f,
@@ -200,45 +197,25 @@ function Step2({ form, setForm, oauthTested, setOauthTested, onBack, onNext }: S
     }
   };
 
-  // Debounced slug derivation for custom OIDC name
-  const handleCustomName = useCallback(
-    (name: string) => {
-      setOauthTested(false);
-      setForm((f) => ({ ...f, oauth_name: name }));
-      if (deriveTimer.current) clearTimeout(deriveTimer.current);
-      if (!name.trim()) {
-        setForm((f) => ({ ...f, oauth_slug: "" }));
-        return;
-      }
-      deriveTimer.current = setTimeout(async () => {
-        setSlugLoading(true);
-        try {
-          const result = await deriveSlug(name);
-          setForm((f) => ({ ...f, oauth_slug: result.slug }));
-        } finally {
-          setSlugLoading(false);
-        }
-      }, 400);
-    },
-    [setForm, setOauthTested],
-  );
+  const handleCustomName = (name: string) => {
+    setForm((f) => ({ ...f, oauth_name: name, oauth_slug: slugify(name) }));
+  };
 
   const handleOAuthField = <K extends "oauth_client_id" | "oauth_client_secret" | "oauth_issuer_url">(
     field: K,
     value: string,
   ) => {
-    setOauthTested(false);
     setForm((f) => ({ ...f, [field]: value }));
   };
 
-  const handleTestResult = (r: TestResult) => {
-    setTestResult(r);
-    if (r.ok) setOauthTested(true);
-  };
-
   const isCustomOidc = form.provider_type === "custom_oidc";
+  // Note: `oauthTested` is NOT in the canAdvance check. The "Test sign-in"
+  // popup hits /api/admin/test/oauth/*, which is admin-gated — and during
+  // setup there is no admin yet. Gating Next on a test that can't succeed
+  // would brick the wizard. The actual claim flow at Step 4 IS the test;
+  // if the credentials are wrong, the wizard re-renders with an error
+  // page and the user can come back here to fix them.
   const canAdvance =
-    oauthTested &&
     form.oauth_client_id.trim().length > 0 &&
     form.oauth_client_secret.trim().length > 0 &&
     form.oauth_slug.trim().length > 0 &&
@@ -295,11 +272,7 @@ function Step2({ form, setForm, oauthTested, setOauthTested, onBack, onNext }: S
           />
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted">Slug:</span>
-            {slugLoading ? (
-              <span className="text-xs text-text-muted">deriving…</span>
-            ) : (
-              <span className="text-xs font-mono text-text-secondary">{form.oauth_slug || "—"}</span>
-            )}
+            <span className="text-xs font-mono text-text-secondary">{form.oauth_slug || "—"}</span>
           </div>
           <Input
             label="Issuer URL"
@@ -331,33 +304,18 @@ function Step2({ form, setForm, oauthTested, setOauthTested, onBack, onNext }: S
         required
       />
 
-      {testResult && (
-        <TestResultBanner result={testResult} onDismiss={() => setTestResult(null)} />
-      )}
+      {/* The "Test sign-in" mechanism from /config (admin-only) is intentionally
+          omitted here — see the comment on canAdvance above. The Step 4 claim
+          IS the test; a bad credential surfaces as an error page and bounces
+          the admin back to the wizard. */}
 
-      {oauthTested && (
-        <p className="text-xs text-green-400">Sign-in verified. You can proceed to the next step.</p>
-      )}
-
-      <div className="flex items-center justify-between mt-2 gap-2">
-        <OAuthTestButton
-          slug={form.oauth_slug || "_setup_preview"}
-          formValues={{
-            client_id: form.oauth_client_id,
-            client_secret: form.oauth_client_secret,
-            issuer_url: form.oauth_issuer_url,
-            name: form.oauth_name,
-          }}
-          onResult={handleTestResult}
-        />
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" onClick={onBack}>
-            Back
-          </Button>
-          <Button type="submit" disabled={!canAdvance}>
-            Next
-          </Button>
-        </div>
+      <div className="flex items-center justify-end mt-2 gap-2">
+        <Button type="button" variant="secondary" onClick={onBack}>
+          Back
+        </Button>
+        <Button type="submit" disabled={!canAdvance}>
+          Next
+        </Button>
       </div>
     </form>
   );
@@ -589,7 +547,6 @@ function Step4({ form, onBack }: Step4Props) {
 export function SetupPage() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [form, setForm] = useState<WizardFormState>(INITIAL_FORM);
-  const [oauthTested, setOauthTested] = useState(false);
 
   const stepTitles: Record<1 | 2 | 3 | 4, string> = {
     1: "Net basics",
@@ -629,8 +586,6 @@ export function SetupPage() {
             <Step2
               form={form}
               setForm={setForm}
-              oauthTested={oauthTested}
-              setOauthTested={setOauthTested}
               onBack={() => setStep(1)}
               onNext={() => setStep(3)}
             />
