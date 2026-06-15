@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from backend.auth.models import AdminRecoveryToken
@@ -80,6 +81,40 @@ def mark_used(db: Session, row: AdminRecoveryToken) -> None:
     if row.used_at is None:
         row.used_at = _now()
         db.commit()
+
+
+def claim_token(db: Session, plaintext: str) -> AdminRecoveryToken | None:
+    """Atomically verify + mark-used in one round-trip.
+
+    Returns the matching row iff the claim succeeded. Returns None if the
+    token was unknown, already used, or expired.
+
+    Uses a single UPDATE statement with the unused-and-unexpired check in
+    the WHERE clause, so concurrent claims of the same token can't both
+    win — one will update the row and the other will see rowcount=0.
+    Robust across SQLite (process-level write serialization) and
+    PostgreSQL (row-level locking via the UPDATE).
+    """
+    token_hash = _hash(plaintext)
+    now = _now()
+    # SQLite stores DateTime(timezone=True) as naive UTC strings; use naive
+    # for the WHERE comparison so it matches whatever the DB has.
+    now_naive = now.replace(tzinfo=None)
+    result = db.execute(
+        update(AdminRecoveryToken)
+        .where(AdminRecoveryToken.token_hash == token_hash)
+        .where(AdminRecoveryToken.used_at.is_(None))
+        .where(AdminRecoveryToken.expires_at > now_naive)
+        .values(used_at=now)
+    )
+    db.commit()
+    if result.rowcount != 1:
+        return None
+    return (
+        db.query(AdminRecoveryToken)
+        .filter(AdminRecoveryToken.token_hash == token_hash)
+        .one()
+    )
 
 
 def list_outstanding(db: Session) -> list[AdminRecoveryToken]:

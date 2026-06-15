@@ -223,3 +223,47 @@ def test_recovery_jwt_wrong_type_rejected(test_settings):
     user_token = create_access_token("W0NE", "admin", test_settings)
     result = decode_recovery_token(user_token, test_settings)
     assert result is None
+
+
+# ── claim_token (atomic verify + mark-used) ─────────────────────────────────
+
+
+def test_claim_token_returns_row_and_marks_used(db):
+    from backend.auth.recovery import claim_token
+
+    plaintext, _ = mint_token(db)
+    row = claim_token(db, plaintext)
+    assert row is not None
+    assert row.used_at is not None
+
+
+def test_claim_token_second_call_returns_none(db):
+    """The atomic UPDATE means only the first claim wins."""
+    from backend.auth.recovery import claim_token
+
+    plaintext, _ = mint_token(db)
+    first = claim_token(db, plaintext)
+    assert first is not None
+    second = claim_token(db, plaintext)
+    assert second is None
+
+
+def test_claim_token_unknown_returns_none(db):
+    from backend.auth.recovery import claim_token
+
+    assert claim_token(db, "not-a-real-token") is None
+
+
+def test_claim_token_expired_returns_none(db):
+    from backend.auth.recovery import claim_token
+    import backend.auth.recovery as mod
+
+    past = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    original = mod._now
+    mod._now = lambda: past
+    try:
+        plaintext, _ = mint_token(db)
+    finally:
+        mod._now = original
+    # Token expired in 2020; claim now should fail.
+    assert claim_token(db, plaintext) is None

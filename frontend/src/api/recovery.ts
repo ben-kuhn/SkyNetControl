@@ -15,8 +15,9 @@ export function claimRecoveryToken(token: string): Promise<{ ok: true }> {
   });
 }
 
-// Clears the recovery cookie by setting it to expire immediately. The browser
-// won't send it on the next request.
-export function clearRecoveryCookie(): void {
-  document.cookie = "recovery_token=; path=/; max-age=0; samesite=lax";
+// Asks the server to expire the recovery cookie. The cookie is HttpOnly so
+// JavaScript can't clear it directly — the server has to send a Set-Cookie
+// header with max-age=0.
+export function clearRecoveryCookie(): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>("/recovery/logout", { method: "POST" });
 }

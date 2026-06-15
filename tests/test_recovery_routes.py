@@ -218,3 +218,19 @@ async def test_claim_is_single_use(test_app, db_setup):
         second = await client.post("/api/recovery/claim", json={"token": plaintext})
     assert first.status_code == 200
     assert second.status_code == 400
+
+
+# 10 — logout endpoint clears the cookie (HttpOnly cookies can't be cleared from JS)
+@pytest.mark.asyncio
+async def test_logout_clears_recovery_cookie(test_app):
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/recovery/logout")
+    assert resp.status_code == 200
+    # Find the Set-Cookie header that clears recovery_token
+    set_cookies = [h for h in resp.headers.raw if h[0].lower() == b"set-cookie"]
+    cleared = [v for _, v in set_cookies if b"recovery_token=" in v]
+    assert cleared, "expected a Set-Cookie clearing recovery_token"
+    # Either max-age=0 OR an explicit past expiry indicates deletion
+    blob = b"; ".join(cleared).lower()
+    assert b"max-age=0" in blob or b"expires=" in blob

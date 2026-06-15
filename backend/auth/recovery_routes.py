@@ -14,11 +14,10 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_db_session, get_settings
 from backend.auth.recovery import (
+    claim_token,
     cookie_ttl_seconds,
     list_outstanding,
     make_recovery_token,
-    mark_used,
-    verify_token,
 )
 from backend.config import Settings
 
@@ -45,11 +44,13 @@ def recovery_claim(
     """Validate token, mark used, set recovery cookie, return 200.
 
     Returns 400 if the token is invalid, already used, or expired.
+
+    Atomicity: `claim_token` does the verify + mark-used in a single
+    UPDATE so two simultaneous claims of the same token can't both win.
     """
-    row = verify_token(db, body.token)
+    row = claim_token(db, body.token)
     if row is None:
         raise HTTPException(status_code=400, detail="invalid, used, or expired token")
-    mark_used(db, row)
     cookie_value = make_recovery_token(hash_prefix=row.token_hash[:8], settings=settings)
     is_secure = settings.app_base_url.startswith("https://")
     response.set_cookie(
@@ -60,4 +61,15 @@ def recovery_claim(
         samesite="lax",
         max_age=cookie_ttl_seconds(),
     )
+    return {"ok": True}
+
+
+@recovery_router.post("/logout")
+def recovery_logout(response: Response) -> dict:
+    """Clear the recovery_token cookie.
+
+    The cookie is HttpOnly, so the frontend can't clear it from JavaScript —
+    it has to ask the server to send a max_age=0 Set-Cookie header back.
+    """
+    response.delete_cookie(key="recovery_token", path="/")
     return {"ok": True}

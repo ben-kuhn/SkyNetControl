@@ -613,9 +613,15 @@ function Step4({ form, onBack, recoveryMode, oauthEdited }: Step4Props) {
     }
   };
 
-  const handleRecoveryDone = () => {
-    clearRecoveryCookie();
-    window.location.href = "/";
+  const handleRecoveryDone = async () => {
+    try {
+      await clearRecoveryCookie();
+    } finally {
+      // Even if the server-side logout fails, redirect to / so the SetupGate
+      // gets a chance to re-check status. If the cookie was somehow not cleared,
+      // it'll expire on its own in 30 minutes.
+      window.location.href = "/";
+    }
   };
 
   const handleRecoveryVerify = () => {
