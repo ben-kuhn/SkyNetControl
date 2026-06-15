@@ -18,69 +18,84 @@ import { RosterPage } from "./pages/RosterPage";
 import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
 import { ActivitiesPage } from "./pages/ActivitiesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { RecoveryPage } from "./pages/RecoveryPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { SetupGate } from "./components/SetupGate";
 import type { UserRole } from "./types";
 
-function AppRoutes() {
+// Routes wrapped by SetupGate (all normal app routes)
+function GatedRoutes() {
   return (
     <SetupGate>
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
 
-      <Route
-        path="/register"
-        element={
-          <ProtectedRoute allowPending pendingOnly>
-            <RegisterPage />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/pending"
-        element={
-          <ProtectedRoute allowPending>
-            <PendingPage />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* Public routes that share the AppShell chrome */}
-      <Route element={<AppShell />}>
-        <Route path="/checkins" element={<CheckInsPage />} />
-      </Route>
-
-      {/* Authenticated routes */}
-      <Route
-        element={
-          <ProtectedRoute>
-            <AppShell />
-          </ProtectedRoute>
-        }
-      >
-        <Route path="/schedule" element={<SchedulePage />} />
         <Route
-          path="/profile"
+          path="/register"
           element={
-            <ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}>
-              <ProfilePage />
+            <ProtectedRoute allowPending pendingOnly>
+              <RegisterPage />
             </ProtectedRoute>
           }
         />
-        <Route path="/members" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><MembersPage /></ProtectedRoute>} />
-        <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><RemindersPage /></ProtectedRoute>} />
-        <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><RosterPage /></ProtectedRoute>} />
-        <Route path="/activities" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><ActivitiesPage /></ProtectedRoute>} />
-        <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><UsersPage /></ProtectedRoute>} />
-        <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><ConfigPage /></ProtectedRoute>} />
-        <Route path="/privacy" element={<PrivacyPolicyPage />} />
-      </Route>
 
-      <Route path="/" element={<Navigate to="/schedule" replace />} />
-      <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+        <Route
+          path="/pending"
+          element={
+            <ProtectedRoute allowPending>
+              <PendingPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Public routes that share the AppShell chrome */}
+        <Route element={<AppShell />}>
+          <Route path="/checkins" element={<CheckInsPage />} />
+        </Route>
+
+        {/* Authenticated routes */}
+        <Route
+          element={
+            <ProtectedRoute>
+              <AppShell />
+            </ProtectedRoute>
+          }
+        >
+          <Route path="/schedule" element={<SchedulePage />} />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/members" element={<ProtectedRoute minRole={["viewer", "net_control", "admin"] as UserRole[]}><MembersPage /></ProtectedRoute>} />
+          <Route path="/reminders" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><RemindersPage /></ProtectedRoute>} />
+          <Route path="/roster" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><RosterPage /></ProtectedRoute>} />
+          <Route path="/activities" element={<ProtectedRoute minRole={["net_control", "admin"] as UserRole[]}><ActivitiesPage /></ProtectedRoute>} />
+          <Route path="/users" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><UsersPage /></ProtectedRoute>} />
+          <Route path="/config" element={<ProtectedRoute minRole={["admin"] as UserRole[]}><ConfigPage /></ProtectedRoute>} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        </Route>
+
+        <Route path="/" element={<Navigate to="/schedule" replace />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
     </SetupGate>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      {/* Recovery page is outside SetupGate so it's always reachable, even
+          when recovery_mode=true would cause SetupGate to redirect elsewhere. */}
+      <Route path="/recovery" element={<RecoveryPage />} />
+
+      {/* All other routes go through SetupGate */}
+      <Route path="*" element={<GatedRoutes />} />
+    </Routes>
   );
 }
 

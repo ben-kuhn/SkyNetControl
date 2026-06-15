@@ -3,6 +3,7 @@ import type { SmtpUpsert } from "./smtp";
 
 export interface SetupStatus {
   setup_completed: boolean;
+  recovery_mode: boolean;
 }
 
 export interface SetupClaimStart {

@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { startSetupClaim } from "../api/setup";
+import { fetchConfig, setConfigValue } from "../api/config";
+import { listOAuthProviders, upsertOAuthProvider } from "../api/oauth";
+import { getSmtp, upsertSmtp, clearSmtp } from "../api/smtp";
+import { clearRecoveryCookie } from "../api/recovery";
 import type { SmtpUpsert } from "../api/smtp";
 
 // Mirror of `backend/auth/oidc_slug.py:slugify` — kept client-side so the
@@ -111,19 +115,43 @@ interface Step1Props {
   form: WizardFormState;
   setForm: React.Dispatch<React.SetStateAction<WizardFormState>>;
   onNext: () => void;
+  recoveryMode: boolean;
 }
 
-function Step1({ form, setForm, onNext }: Step1Props) {
+function Step1({ form, setForm, onNext, recoveryMode }: Step1Props) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const canAdvance =
     form.default_net_control.trim().length > 0 &&
     form.net_address.trim().length > 0 &&
     form.app_base_url.trim().length > 0;
 
+  const handleNext = async () => {
+    if (!canAdvance) return;
+    if (recoveryMode) {
+      setSaving(true);
+      setError(null);
+      try {
+        await setConfigValue("default_net_control", form.default_net_control.trim());
+        await setConfigValue("net_address", form.net_address.trim());
+        await setConfigValue("app_base_url", form.app_base_url.trim());
+        onNext();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to save. Please try again.");
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      onNext();
+    }
+  };
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (canAdvance) onNext();
+        handleNext();
       }}
       className="flex flex-col gap-4"
     >
@@ -155,8 +183,9 @@ function Step1({ form, setForm, onNext }: Step1Props) {
       <p className="text-xs text-text-muted">
         The base URL is used for OAuth redirect URIs. It is pre-filled from your browser's address.
       </p>
+      {error && <p className="text-sm text-danger">{error}</p>}
       <div className="flex justify-end mt-2">
-        <Button type="submit" disabled={!canAdvance}>
+        <Button type="submit" disabled={!canAdvance || saving} loading={saving}>
           Next
         </Button>
       </div>
@@ -173,11 +202,22 @@ interface Step2Props {
   setForm: React.Dispatch<React.SetStateAction<WizardFormState>>;
   onBack: () => void;
   onNext: () => void;
+  recoveryMode: boolean;
+  setOauthEdited: (edited: boolean) => void;
 }
 
-function Step2({ form, setForm, onBack, onNext }: Step2Props) {
+function Step2({ form, setForm, onBack, onNext, recoveryMode, setOauthEdited }: Step2Props) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Track any change in Step 2 inputs to set oauthEdited
+  const markEdited = () => {
+    if (recoveryMode) setOauthEdited(true);
+  };
+
   // When provider type changes, update slug + name (for fixed providers)
   const handleProviderType = (type: ProviderType) => {
+    markEdited();
     if (type !== "custom_oidc") {
       setForm((f) => ({
         ...f,
@@ -198,6 +238,7 @@ function Step2({ form, setForm, onBack, onNext }: Step2Props) {
   };
 
   const handleCustomName = (name: string) => {
+    markEdited();
     setForm((f) => ({ ...f, oauth_name: name, oauth_slug: slugify(name) }));
   };
 
@@ -205,6 +246,7 @@ function Step2({ form, setForm, onBack, onNext }: Step2Props) {
     field: K,
     value: string,
   ) => {
+    markEdited();
     setForm((f) => ({ ...f, [field]: value }));
   };
 
@@ -217,15 +259,40 @@ function Step2({ form, setForm, onBack, onNext }: Step2Props) {
   // page and the user can come back here to fix them.
   const canAdvance =
     form.oauth_client_id.trim().length > 0 &&
-    form.oauth_client_secret.trim().length > 0 &&
     form.oauth_slug.trim().length > 0 &&
-    (!isCustomOidc || (form.oauth_issuer_url.trim().length > 0 && form.oauth_name.trim().length > 0));
+    (!isCustomOidc || (form.oauth_issuer_url.trim().length > 0 && form.oauth_name.trim().length > 0)) &&
+    // In recovery mode, secret can be empty (means preserve); in first-boot it's required
+    (recoveryMode || form.oauth_client_secret.trim().length > 0);
+
+  const handleNext = async () => {
+    if (!canAdvance) return;
+    if (recoveryMode) {
+      setSaving(true);
+      setError(null);
+      try {
+        await upsertOAuthProvider(form.oauth_slug, {
+          name: form.oauth_name,
+          enabled: true,
+          client_id: form.oauth_client_id.trim(),
+          client_secret: form.oauth_client_secret, // "" = preserve; user types new value to replace
+          issuer_url: form.oauth_issuer_url.trim(),
+        });
+        onNext();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to save OAuth provider. Please try again.");
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      onNext();
+    }
+  };
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (canAdvance) onNext();
+        handleNext();
       }}
       className="flex flex-col gap-4"
     >
@@ -299,9 +366,9 @@ function Step2({ form, setForm, onBack, onNext }: Step2Props) {
         type="password"
         value={form.oauth_client_secret}
         onChange={(e) => handleOAuthField("oauth_client_secret", e.target.value)}
-        placeholder="your-client-secret"
+        placeholder={recoveryMode ? "(unchanged — leave blank to keep existing secret)" : "your-client-secret"}
         mono
-        required
+        required={!recoveryMode}
       />
 
       {/* The "Test sign-in" mechanism from /config (admin-only) is intentionally
@@ -309,11 +376,13 @@ function Step2({ form, setForm, onBack, onNext }: Step2Props) {
           IS the test; a bad credential surfaces as an error page and bounces
           the admin back to the wizard. */}
 
+      {error && <p className="text-sm text-danger">{error}</p>}
+
       <div className="flex items-center justify-end mt-2 gap-2">
         <Button type="button" variant="secondary" onClick={onBack}>
           Back
         </Button>
-        <Button type="submit" disabled={!canAdvance}>
+        <Button type="submit" disabled={!canAdvance || saving} loading={saving}>
           Next
         </Button>
       </div>
@@ -331,9 +400,14 @@ interface Step3Props {
   onBack: () => void;
   onSkip: () => void;
   onNext: () => void;
+  recoveryMode: boolean;
+  hadExistingSmtp: boolean;
 }
 
-function Step3({ form, setForm, onBack, onSkip, onNext }: Step3Props) {
+function Step3({ form, setForm, onBack, onSkip, onNext, recoveryMode, hadExistingSmtp }: Step3Props) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const smtp = form.smtp ?? { host: "", port: "587", username: "", password: "", from_address: "", use_tls: true };
 
   const setSmtp = (updater: (prev: SmtpFormState) => SmtpFormState) => {
@@ -344,11 +418,55 @@ function Step3({ form, setForm, onBack, onSkip, onNext }: Step3Props) {
     smtp.host.trim().length > 0 &&
     smtp.from_address.trim().length > 0;
 
+  const handleSkip = async () => {
+    if (recoveryMode && hadExistingSmtp) {
+      setSaving(true);
+      setError(null);
+      try {
+        await clearSmtp();
+        setForm((f) => ({ ...f, smtp: null }));
+        onSkip();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to clear SMTP. Please try again.");
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      setForm((f) => ({ ...f, smtp: null }));
+      onSkip();
+    }
+  };
+
+  const handleNext = async () => {
+    if (!canAdvance) return;
+    if (recoveryMode) {
+      setSaving(true);
+      setError(null);
+      try {
+        await upsertSmtp({
+          host: smtp.host.trim(),
+          port: parseInt(smtp.port, 10) || 587,
+          username: smtp.username.trim(),
+          password: smtp.password, // "" = preserve; user types new value to replace
+          from_address: smtp.from_address.trim(),
+          use_tls: smtp.use_tls,
+        });
+        onNext();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to save SMTP. Please try again.");
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      onNext();
+    }
+  };
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (canAdvance) onNext();
+        handleNext();
       }}
       className="flex flex-col gap-4"
     >
@@ -387,7 +505,7 @@ function Step3({ form, setForm, onBack, onSkip, onNext }: Step3Props) {
         type="password"
         value={smtp.password}
         onChange={(e) => setSmtp((s) => ({ ...s, password: e.target.value }))}
-        placeholder="app password or SMTP password"
+        placeholder={recoveryMode ? "(unchanged — leave blank to keep existing password)" : "app password or SMTP password"}
       />
 
       <Input
@@ -419,22 +537,22 @@ function Step3({ form, setForm, onBack, onSkip, onNext }: Step3Props) {
         SMTP can be tested from the admin config page after setup completes.
       </p>
 
+      {error && <p className="text-sm text-danger">{error}</p>}
+
       <div className="flex items-center justify-between mt-2 gap-2">
-        <Button type="button" variant="secondary" onClick={onBack}>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={saving}>
           Back
         </Button>
         <div className="flex gap-2">
           <Button
             type="button"
             variant="secondary"
-            onClick={() => {
-              setForm((f) => ({ ...f, smtp: null }));
-              onSkip();
-            }}
+            onClick={handleSkip}
+            disabled={saving}
           >
             Skip
           </Button>
-          <Button type="submit" disabled={!canAdvance}>
+          <Button type="submit" disabled={!canAdvance || saving} loading={saving}>
             Next
           </Button>
         </div>
@@ -444,15 +562,17 @@ function Step3({ form, setForm, onBack, onSkip, onNext }: Step3Props) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 4: Claim admin
+// Step 4: Claim admin (first-boot) / Review (recovery)
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Step4Props {
   form: WizardFormState;
   onBack: () => void;
+  recoveryMode: boolean;
+  oauthEdited: boolean;
 }
 
-function Step4({ form, onBack }: Step4Props) {
+function Step4({ form, onBack, recoveryMode, oauthEdited }: Step4Props) {
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -492,6 +612,70 @@ function Step4({ form, onBack }: Step4Props) {
       setError(e instanceof Error ? e.message : "Failed to start setup. Please try again.");
     }
   };
+
+  const handleRecoveryDone = () => {
+    clearRecoveryCookie();
+    window.location.href = "/";
+  };
+
+  const handleRecoveryVerify = () => {
+    window.location.href = `/api/auth/login/${form.oauth_slug}`;
+  };
+
+  if (recoveryMode) {
+    return (
+      <div className="flex flex-col gap-5">
+        <div className="rounded-lg border border-border bg-bg-elevated p-4 flex flex-col gap-2 text-sm">
+          <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-1">Summary</h3>
+          <div className="flex gap-3">
+            <span className="text-text-muted w-36 shrink-0">Net control</span>
+            <span className="text-text-primary font-mono">{form.default_net_control}</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-text-muted w-36 shrink-0">Net address</span>
+            <span className="text-text-primary font-mono">{form.net_address}</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-text-muted w-36 shrink-0">Base URL</span>
+            <span className="text-text-primary font-mono">{form.app_base_url}</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-text-muted w-36 shrink-0">OAuth provider</span>
+            <span className="text-text-primary">{providerLabel}</span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-text-muted w-36 shrink-0">SMTP</span>
+            <span className={form.smtp ? "text-text-primary" : "text-text-muted italic"}>
+              {form.smtp ? form.smtp.host : "skipped"}
+            </span>
+          </div>
+        </div>
+
+        <p className="text-sm text-text-secondary">
+          {oauthEdited
+            ? `Changes saved. Sign in with ${providerLabel} to verify the updated credentials.`
+            : "Changes saved. Click Done to exit recovery mode."}
+        </p>
+
+        {error && <p className="text-sm text-danger">{error}</p>}
+
+        <div className="flex items-center justify-between gap-2">
+          <Button type="button" variant="secondary" onClick={onBack}>
+            Back
+          </Button>
+          {oauthEdited ? (
+            <Button onClick={handleRecoveryVerify}>
+              Sign in to verify {providerLabel}
+            </Button>
+          ) : (
+            <Button onClick={handleRecoveryDone}>
+              Done
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -544,15 +728,88 @@ function Step4({ form, onBack }: Step4Props) {
 // Main wizard component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function SetupPage() {
+interface SetupPageProps {
+  recoveryMode?: boolean;
+}
+
+export function SetupPage({ recoveryMode = false }: SetupPageProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [form, setForm] = useState<WizardFormState>(INITIAL_FORM);
+  const [oauthEdited, setOauthEdited] = useState(false);
+  const [hadExistingSmtp, setHadExistingSmtp] = useState(false);
+
+  // Pre-fill from existing config when in recovery mode
+  useEffect(() => {
+    if (!recoveryMode) return;
+
+    async function prefill() {
+      try {
+        // Step 1: net basics from flat config
+        const config = await fetchConfig();
+        setForm((f) => ({
+          ...f,
+          default_net_control: config["default_net_control"] ?? f.default_net_control,
+          net_address: config["net_address"] ?? f.net_address,
+          app_base_url: config["app_base_url"] ?? f.app_base_url,
+        }));
+      } catch {
+        // ignore; form keeps defaults
+      }
+
+      try {
+        // Step 2: OAuth — pre-fill from first enabled provider
+        const providers = await listOAuthProviders();
+        const first = providers.find((p) => p.enabled) ?? providers[0];
+        if (first) {
+          const providerType: ProviderType = (Object.keys(FIXED_PROVIDERS) as FixedProvider[]).includes(
+            first.slug as FixedProvider,
+          )
+            ? (first.slug as FixedProvider)
+            : "custom_oidc";
+          setForm((f) => ({
+            ...f,
+            provider_type: providerType,
+            oauth_slug: first.slug,
+            oauth_name: first.name,
+            oauth_client_id: first.client_id,
+            oauth_client_secret: "", // server returns "***" or ""; keep empty = preserve
+            oauth_issuer_url: first.issuer_url,
+          }));
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        // Step 3: SMTP
+        const smtp = await getSmtp();
+        if (smtp) {
+          setHadExistingSmtp(true);
+          setForm((f) => ({
+            ...f,
+            smtp: {
+              host: smtp.host,
+              port: String(smtp.port),
+              username: smtp.username,
+              password: "", // server returns "***" or ""; keep empty = preserve
+              from_address: smtp.from_address,
+              use_tls: smtp.use_tls,
+            },
+          }));
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    prefill();
+  }, [recoveryMode]);
 
   const stepTitles: Record<1 | 2 | 3 | 4, string> = {
     1: "Net basics",
     2: "OAuth provider",
     3: "Email (SMTP)",
-    4: "Claim admin",
+    4: recoveryMode ? "Review & finish" : "Claim admin",
   };
 
   return (
@@ -561,11 +818,20 @@ export function SetupPage() {
         {/* App name / logo area */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-text-primary">SkyNetControl</h1>
-          <p className="text-sm text-text-muted mt-1">First-boot setup wizard</p>
+          <p className="text-sm text-text-muted mt-1">
+            {recoveryMode ? "Recovery mode" : "First-boot setup wizard"}
+          </p>
         </div>
 
         {/* Card */}
         <div className="bg-bg-surface border border-border rounded-xl shadow-lg p-8">
+          {/* Recovery mode banner */}
+          {recoveryMode && (
+            <div className="mb-5 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+              Recovery mode — editing the existing configuration. Changes save per step.
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-semibold text-text-primary">
               Step {step} of 4 — {stepTitles[step]}
@@ -579,6 +845,7 @@ export function SetupPage() {
               form={form}
               setForm={setForm}
               onNext={() => setStep(2)}
+              recoveryMode={recoveryMode}
             />
           )}
 
@@ -588,6 +855,8 @@ export function SetupPage() {
               setForm={setForm}
               onBack={() => setStep(1)}
               onNext={() => setStep(3)}
+              recoveryMode={recoveryMode}
+              setOauthEdited={setOauthEdited}
             />
           )}
 
@@ -598,6 +867,8 @@ export function SetupPage() {
               onBack={() => setStep(2)}
               onSkip={() => setStep(4)}
               onNext={() => setStep(4)}
+              recoveryMode={recoveryMode}
+              hadExistingSmtp={hadExistingSmtp}
             />
           )}
 
@@ -605,6 +876,8 @@ export function SetupPage() {
             <Step4
               form={form}
               onBack={() => setStep(3)}
+              recoveryMode={recoveryMode}
+              oauthEdited={oauthEdited}
             />
           )}
         </div>
