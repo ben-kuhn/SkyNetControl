@@ -1,10 +1,11 @@
-from typing import Callable
+from typing import Callable, Union
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from backend.auth.models import User, UserRole
 from backend.auth.pat_service import authenticate_token
+from backend.auth.recovery import RecoveryPrincipal, decode_recovery_token
 from backend.auth.service import decode_access_token
 from backend.config import Settings
 
@@ -139,6 +140,47 @@ def optional_user_with_scope(*scopes: str) -> Callable:
         return user
 
     return dependency
+
+
+# Union type for endpoints that admit either an admin or a recovery session.
+# Both branches expose `.callsign` for audit-log call sites.
+Principal = Union[User, RecoveryPrincipal]
+
+
+def require_admin_or_recovery(
+    request: Request,
+    access_token: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
+) -> Principal:
+    """Accept either a normal admin user OR a valid recovery cookie.
+
+    Recovery is tried first; if the cookie is present and valid, we return
+    immediately (no user-JWT lookup required). Otherwise we fall through to
+    the normal admin check.
+
+    Audit-log calls in wrapped handlers should use ``principal.callsign`` —
+    for an admin that's their callsign; for a recovery session it's
+    ``recovery:<hash-prefix>``.
+    """
+    recovery_cookie = request.cookies.get("recovery_token")
+    if recovery_cookie:
+        principal = decode_recovery_token(recovery_cookie, app_settings)
+        if principal is not None:
+            return principal
+
+    # Fall back to normal admin check by re-using the existing helpers.
+    user = get_current_user(
+        request=request,
+        access_token=access_token,
+        authorization=authorization,
+        db=db,
+        app_settings=app_settings,
+    )
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
 
 
 def require_scope(*scopes: str) -> Callable:

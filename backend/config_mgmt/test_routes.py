@@ -10,9 +10,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_db_session, get_settings, require_role
+from backend.auth.dependencies import Principal, get_db_session, get_settings, require_admin_or_recovery
 from backend.auth.email import _send_email_sync
-from backend.auth.models import User, UserRole
 from backend.auth.providers import FIXED_PROVIDERS, _normalise_issuer
 from backend.auth.service import _get_discovery
 from backend.config import Settings
@@ -82,7 +81,7 @@ class OAuthTestStart(BaseModel):
 async def start_oauth_test(
     slug: str,
     body: OAuthTestStart,
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
     app_settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db_session),
 ) -> dict:
@@ -280,7 +279,7 @@ def _autoclose_html(test_session_id: str, status: str, target_origin: str) -> HT
 @test_router.get("/oauth/{test_session_id}/result")
 def get_oauth_test_result(
     test_session_id: str,
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
 ) -> dict:
     """Poll fallback — returns the current status of a test session by test_session_id."""
     for session in _TEST_SESSIONS.values():
@@ -312,7 +311,7 @@ class SmtpTestBody(BaseModel):
 @test_router.post("/smtp")
 async def smtp_test(
     body: SmtpTestBody,
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> dict:
     """Send a test email using the supplied (unsaved) SMTP settings.

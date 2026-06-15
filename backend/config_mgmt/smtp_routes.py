@@ -3,8 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.audit.service import log_action
-from backend.auth.dependencies import get_db_session, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import Principal, get_db_session, require_admin_or_recovery
 from backend.config_mgmt.smtp import SmtpConfig, clear_smtp_config, get_smtp_config, upsert_smtp_config
 
 smtp_router = APIRouter(prefix="/smtp", tags=["admin-smtp"])
@@ -46,7 +45,7 @@ def _to_response(cfg: SmtpConfig) -> SmtpResponse:
 
 @smtp_router.get("")
 def get_smtp(
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> SmtpResponse:
     cfg = get_smtp_config(db)
@@ -58,7 +57,7 @@ def get_smtp(
 @smtp_router.put("")
 def upsert_smtp(
     body: SmtpUpsert,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    principal: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> SmtpResponse:
     existing = get_smtp_config(db)
@@ -82,7 +81,7 @@ def upsert_smtp(
     upsert_smtp_config(db, cfg)
     log_action(
         db,
-        actor=user.callsign,
+        actor=principal.callsign,
         action="smtp.upserted",
         details={
             "host": body.host,
@@ -98,13 +97,13 @@ def upsert_smtp(
 
 @smtp_router.delete("", status_code=204)
 def delete_smtp(
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    principal: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> None:
     clear_smtp_config(db)
     log_action(
         db,
-        actor=user.callsign,
+        actor=principal.callsign,
         action="smtp.cleared",
         details={},
     )

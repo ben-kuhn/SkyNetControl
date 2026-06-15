@@ -3,8 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.audit.service import log_action
-from backend.auth.dependencies import get_db_session, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import Principal, get_db_session, require_admin_or_recovery
 from backend.auth.oidc_slug import slugify, validate_slug
 from backend.config_mgmt.oauth import (
     OAuthProviderConfig,
@@ -49,7 +48,7 @@ def _to_response(p: OAuthProviderConfig) -> OAuthProviderResponse:
 
 @oauth_router.get("")
 def list_providers(
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> list[OAuthProviderResponse]:
     return [_to_response(p) for p in list_oauth_providers(db)]
@@ -58,7 +57,7 @@ def list_providers(
 @oauth_router.get("/{slug}")
 def get_provider(
     slug: str,
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> OAuthProviderResponse:
     p = get_oauth_provider(db, slug)
@@ -71,7 +70,7 @@ def get_provider(
 def upsert_provider(
     slug: str,
     body: OAuthProviderUpsert,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    principal: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> OAuthProviderResponse:
     existing = get_oauth_provider(db, slug)
@@ -99,7 +98,7 @@ def upsert_provider(
         raise HTTPException(400, detail=str(e))
     log_action(
         db,
-        actor=user.callsign,
+        actor=principal.callsign,
         action="oauth.provider.upserted",
         details={
             "slug": slug,
@@ -116,13 +115,13 @@ def upsert_provider(
 @oauth_router.delete("/{slug}", status_code=204)
 def delete_provider(
     slug: str,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    principal: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ) -> None:
     delete_oauth_provider(db, slug)
     log_action(
         db,
-        actor=user.callsign,
+        actor=principal.callsign,
         action="oauth.provider.deleted",
         details={"slug": slug},
     )
@@ -131,7 +130,7 @@ def delete_provider(
 @oauth_router.post("/slug/derive")
 def derive_slug(
     name: str,
-    _: User = Depends(require_role(UserRole.ADMIN)),
+    _: Principal = Depends(require_admin_or_recovery),
 ) -> dict:
     slug = slugify(name)
     err = validate_slug(slug)

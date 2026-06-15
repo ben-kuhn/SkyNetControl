@@ -103,7 +103,9 @@ async def test_status_returns_false_when_unset(test_app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/setup/status")
     assert resp.status_code == 200
-    assert resp.json() == {"setup_completed": False}
+    body = resp.json()
+    assert body["setup_completed"] is False
+    assert body["recovery_mode"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +123,9 @@ async def test_status_returns_true_after_completion(test_app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/setup/status")
     assert resp.status_code == 200
-    assert resp.json() == {"setup_completed": True}
+    body = resp.json()
+    assert body["setup_completed"] is True
+    assert body["recovery_mode"] is False
 
 
 # ---------------------------------------------------------------------------

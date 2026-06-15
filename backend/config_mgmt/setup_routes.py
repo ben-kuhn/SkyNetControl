@@ -5,12 +5,13 @@ from datetime import datetime, timedelta, timezone
 from html import escape as html_escape
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_db_session, get_settings
+from backend.auth.recovery import decode_recovery_token
 from backend.auth.models import User, UserRole
 from backend.auth.providers import (
     FIXED_PROVIDERS,
@@ -89,9 +90,20 @@ def _error_html(title: str, message: str) -> HTMLResponse:
 
 
 @setup_router.get("/status")
-def setup_status(db: Session = Depends(get_db_session)) -> dict:
-    """Always returns {setup_completed: bool}. No auth required."""
-    return {"setup_completed": is_setup_completed(db)}
+def setup_status(
+    request: Request,
+    db: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Always returns {setup_completed, recovery_mode}. No auth required.
+
+    recovery_mode is true iff the request carries a valid recovery cookie.
+    """
+    cookie = request.cookies.get("recovery_token")
+    in_recovery = False
+    if cookie:
+        in_recovery = decode_recovery_token(cookie, settings) is not None
+    return {"setup_completed": is_setup_completed(db), "recovery_mode": in_recovery}
 
 
 # ---------------------------------------------------------------------------
