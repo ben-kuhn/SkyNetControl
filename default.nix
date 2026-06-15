@@ -59,6 +59,10 @@ python.pkgs.buildPythonApplication {
     # Database-copy CLI for cross-engine / host-to-host migrations.
     printf '%s\n' '#!${python}/bin/python' 'import sys' 'from backend.cli.db_copy import main' 'sys.exit(main())' > $out/bin/skynetcontrol-db-copy
     chmod +x $out/bin/skynetcontrol-db-copy
+
+    # Recovery CLI for breaking back in after a misconfigured save.
+    printf '%s\n' '#!${python}/bin/python' 'import sys' 'from backend.cli.recovery import main' 'sys.exit(main())' > $out/bin/skynetcontrol-recovery
+    chmod +x $out/bin/skynetcontrol-recovery
   '';
 
   # Set SKYNET_STATIC_DIR on all wrapped programs. Also point ALEMBIC_CONFIG
