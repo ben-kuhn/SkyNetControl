@@ -55,6 +55,20 @@ class _SetupSession:
 _SETUP_SESSIONS: dict[str, _SetupSession] = {}  # keyed by `state`
 
 
+def _sweep_expired() -> None:
+    """Drop expired entries from _SETUP_SESSIONS.
+
+    Sessions are otherwise cleaned up only when accessed by state in the
+    callback, so abandoned wizards would otherwise accumulate in memory.
+    Called at the start of each /claim/start — O(n) over the small set
+    of in-flight wizards, which is fine at single-deployment scale.
+    """
+    now = datetime.now(timezone.utc)
+    expired = [state for state, s in _SETUP_SESSIONS.items() if now >= s.expires_at]
+    for state in expired:
+        del _SETUP_SESSIONS[state]
+
+
 class SetupClaimStart(BaseModel):
     default_net_control: str
     net_address: str
@@ -123,6 +137,8 @@ async def setup_claim_start(
     """
     if is_setup_completed(db):
         raise HTTPException(status_code=410, detail="Setup already completed")
+
+    _sweep_expired()
 
     # Validate slug
     try:

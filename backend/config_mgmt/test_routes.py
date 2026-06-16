@@ -46,6 +46,20 @@ class _TestSession:
 _TEST_SESSIONS: dict[str, _TestSession] = {}
 
 
+def _sweep_expired() -> None:
+    """Drop expired entries from _TEST_SESSIONS.
+
+    Sessions are otherwise cleaned up only when accessed by state via
+    _get_live_session, so abandoned wizards would otherwise accumulate
+    in memory. Called at the start of each new test-session creation —
+    O(n) over the small in-flight set, which is fine at single-admin scale.
+    """
+    now = datetime.now(timezone.utc)
+    expired = [state for state, s in _TEST_SESSIONS.items() if now >= s.expires_at]
+    for state in expired:
+        del _TEST_SESSIONS[state]
+
+
 def _get_live_session(state: str) -> _TestSession | None:
     """Look up a session by state for callback handling.
 
@@ -96,6 +110,7 @@ async def start_oauth_test(
     provider's client_secret and use it. This lets an admin click "Test
     sign-in" on a saved row without re-typing the secret.
     """
+    _sweep_expired()
     # Determine authorize URL via the same logic as resolve_provider
     provider_config = FIXED_PROVIDERS.get(slug)
     if provider_config is not None:
