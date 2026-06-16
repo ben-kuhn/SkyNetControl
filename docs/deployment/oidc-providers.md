@@ -152,7 +152,7 @@ Callback URLs to register in each IdP, for `APP_BASE_URL=https://net.example.org
 - Authentik: `https://net.example.org/api/auth/callback/authentik`
 - Keycloak: `https://net.example.org/api/auth/callback/keycloak`
 
-The setup wizard (`skynetcontrol-setup`) prompts for friendly name + slug per provider and prints the per-provider redirect URI as you go — recommended over editing env files by hand.
+For first-boot, the in-app wizard at `/setup` prompts for friendly name + slug per provider and shows the redirect URI as you go. After setup, add additional providers via the Authentication group on the `/config` page.
 
 ### Breaking change (2026-06-04)
 

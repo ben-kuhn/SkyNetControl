@@ -13,13 +13,20 @@ If you're not on Nix, you can install the deps manually — Python 3.12, Node.js
 
 ## First-time setup
 
-### Setup wizard
+### First-boot setup wizard
 
-For a fresh deployment (your own or a friend's), the `skynetcontrol-setup`
-console script (installed by `pip install -e .`, also shipped in the OCI image)
-is an interactive prompt_toolkit wizard that produces `skynetcontrol.env` plus a
-`docker-compose.yml` or `skynetcontrol.nix` module snippet. It pre-fills from
-any existing env file so re-running it to edit a single provider is safe.
+For a fresh deployment, point a browser at the running app — if `setup_completed`
+is absent from AppConfig, every route redirects to `/setup` and the in-app
+wizard walks the operator through net basics, one OAuth provider (with a
+"Test sign-in" round-trip), optional SMTP, and an OAuth claim that becomes
+the first admin user. Atomic commit at step 4: nothing writes to AppConfig
+until the OAuth round-trip succeeds.
+
+To recover from a misconfigured save (e.g. a fat-fingered OAuth secret that
+locks everyone out), run `skynetcontrol-recovery mint-admin-token` on the
+host and paste the printed URL into a browser. The recovery cookie lifts
+the `setup_completed` gate so the wizard re-renders in edit-existing mode
+against the current AppConfig.
 
 ### 1. Enter the dev shell
 

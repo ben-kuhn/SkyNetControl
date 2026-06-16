@@ -12,22 +12,13 @@ A reproducible OCI image is published on every push to `main`:
 
 **`ghcr.io/ben-kuhn/skynetcontrol:latest`**
 
-1. Create an env file with secrets. The fastest way is the interactive setup wizard bundled in the image — it can also generate your `docker-compose.yml` (or a NixOS module snippet). Run it in the directory where you want the files to land:
+1. Create an env file with the three bootstrap secrets. Everything else (OAuth providers, SMTP, net basics) is configured through the first-boot wizard at `/setup` after the container is running.
 
 ```bash
-docker run --rm -it -v "$PWD:/work" -w /work \
-  ghcr.io/ben-kuhn/skynetcontrol:latest skynetcontrol-setup
-```
-
-The wizard walks you through JWT secret generation, OIDC provider credentials, optional SMTP, and the deployment artifact format. See [docs/deployment/secrets.md](docs/deployment/secrets.md) and [docs/deployment/oidc-providers.md](docs/deployment/oidc-providers.md) for the full list of variables if you prefer to write the file by hand:
-
-```bash
-cat > skynetcontrol.env <<'EOF'
-SKYNET_JWT_SECRET_KEY=replace-with-openssl-rand-hex-32
+cat > skynetcontrol.env <<EOF
+SKYNET_DATABASE_URL=sqlite:////data/skynetcontrol.db
+SKYNET_JWT_SECRET_KEY=$(openssl rand -hex 32)
 SKYNET_APP_BASE_URL=https://net.example.org
-SKYNET_AUTH_GITHUB__ENABLED=true
-SKYNET_AUTH_GITHUB__CLIENT_ID=Iv1.xxxxxxxx
-SKYNET_AUTH_GITHUB__CLIENT_SECRET=xxxxxxxx
 EOF
 ```
 
@@ -61,11 +52,11 @@ with a plain `docker compose up -d`. If you ever need to run alembic
 manually (e.g. to inspect history or downgrade), the wrapper is on PATH:
 `docker compose run --rm --entrypoint skynetcontrol-alembic skynetcontrol history`.
 
-Front it with nginx / Caddy / Traefik for TLS. Visit your `APP_BASE_URL`, sign in via the OAuth provider you configured, and the first user becomes admin automatically.
+Front it with nginx / Caddy / Traefik for TLS. Visit your `APP_BASE_URL` — the first-boot wizard at `/setup` walks you through net basics, one OAuth provider (with a Test sign-in), optional SMTP, and then a sign-in that creates the first admin user with the callsign you entered. After setup completes, the wizard route 410's and the app is fully usable.
 
-For configuration of OAuth providers (GitHub, Google, Microsoft, Authentik, Keycloak…), see **[docs/deployment/oidc-providers.md](docs/deployment/oidc-providers.md)**.
+For ongoing configuration (OAuth providers, SMTP, PAT mailbox, scanner, delivery backends, Claude API key…), use the `/config` page once you're signed in as admin. See **[docs/deployment/app-config-keys.md](docs/deployment/app-config-keys.md)** for the full list of AppConfig keys.
 
-For the in-app runtime settings (net address, PAT mailbox path, Claude API key, delivery backends), see **[docs/deployment/app-config-keys.md](docs/deployment/app-config-keys.md)** — these are set via the `/config` page once you're signed in.
+If you ever lock yourself out of OAuth, `docker compose exec skynetcontrol skynetcontrol-recovery mint-admin-token` prints a one-time URL that bypasses the broken auth so you can edit the OAuth settings via the `/setup` wizard in recovery mode.
 
 ### Production (NixOS)
 

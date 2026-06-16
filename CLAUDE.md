@@ -20,14 +20,15 @@ Common commands:
 | Lint | `nix-shell --run "ruff check"` |
 | Dev servers (backend + Vite) | `./run-dev.sh` |
 | Frontend prod build | `cd frontend && nix-shell -p nodejs_22 --run "npm run build"` |
-| Run wizard locally | `.venv/bin/skynetcontrol-setup` (after `pip install -e .` in the venv) |
+| Run setup wizard | Browser at `http://localhost:5173/setup` (first-boot only; reset with `rm skynetcontrol.db` then restart) |
+| Mint admin recovery token | `.venv/bin/skynetcontrol-recovery mint-admin-token` |
 
 ## Coding conventions
 
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`). Scope when it clarifies (`feat(setup):`, `fix(ci):`).
 - **Ruff**: line-length 120, `select = ["E", "F"]`. Tests have permissive per-file ignores; production code does not. CI runs `ruff check` and will fail the build — match it locally before pushing.
-- **`prompt_toolkit` imports** in `backend/cli/setup.py` stay inside function bodies, not at module top, so the module is importable without that dep (tests rely on this).
-- **Pydantic-settings tests**: `Settings()` reads `os.environ` at construction time. Tests that exercise env-derived fields must `monkeypatch.delenv` / `setenv` to isolate from the host environment. The `auth_oidc_providers` validator additionally treats an explicit `auth_oidc_providers=[…]` kwarg as authoritative (env scan skipped), so direct-construction tests are deterministic.
+- **Config is unified** across DB-via-AppConfig (everything operator/admin-tunable: OAuth providers, SMTP, net basics, scanner, callbook, delivery routing) and env (bootstrap-only: `SKYNET_DATABASE_URL`, `SKYNET_JWT_SECRET_KEY`, `SKYNET_APP_BASE_URL`, plus `SKYNET_DEBUG` / `SKYNET_STATIC_DIR`). The first-boot web wizard at `/setup` and the recovery wizard (`skynetcontrol-recovery mint-admin-token` → `/recovery` → recovery-mode wizard) own everything else.
+- **Pydantic-settings tests**: `Settings()` reads `os.environ` at construction time. Tests that exercise env-derived fields must `monkeypatch.delenv` / `setenv` to isolate from the host environment.
 - **UI lists**: no pagination, no infinite scroll. Net data is small (hundreds of members, dozens of sessions); load all rows and use client-side filter/sort. Only add pagination if a dataset legitimately exceeds browser comfort.
 
 ## Workflow
