@@ -4,8 +4,16 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from jose import JWTError, jwt
 
-from backend.auth.providers import build_providers, get_enabled_providers
+from backend.auth.providers import (
+    FIXED_PROVIDERS,
+    ProviderConfig,
+    _normalise_issuer,
+    _oidc_extract_email,
+    _oidc_extract_name,
+    _oidc_extract_subject,
+)
 from backend.config import Settings
+from backend.config_mgmt.oauth import get_oauth_provider
 
 logger = logging.getLogger(__name__)
 
@@ -65,24 +73,36 @@ async def _get_discovery(discovery_url: str) -> dict | None:
 async def resolve_provider(db, slug: str) -> dict | None:
     """Lazily resolve a single provider for a login flow.
 
-    Reads the provider's credentials from the AppConfig table (Phase 1),
-    merges with the static provider registry (FIXED_PROVIDERS or the
-    dynamic OIDC entry from build_providers), and — for OIDC — fetches
-    or reads from the discovery cache.
+    Reads the provider's credentials from the AppConfig table (Phase 1) for
+    just this slug, merges with the static provider registry
+    (FIXED_PROVIDERS) or builds a dynamic OIDC entry from the stored
+    issuer_url, and — for OIDC — fetches or reads from the discovery cache.
 
     Returns the resolved auth-flow dict (with authorize/token/userinfo
     URLs filled in), or None if the provider is unknown, disabled,
     has no client_id, or — for OIDC — discovery failed.
     """
-    enabled = get_enabled_providers(db)
-    provider_settings = enabled.get(slug)
-    if provider_settings is None:
+    # Single targeted read (5 PK gets via the Phase 1 accessor) instead of
+    # the previous get_enabled_providers + build_providers pair, which each
+    # ran a `SELECT * FROM app_config WHERE key LIKE 'oauth.%'` scan and
+    # fetched every provider just to discard all but one.
+    provider_settings = get_oauth_provider(db, slug)
+    if provider_settings is None or not provider_settings.enabled or not provider_settings.client_id:
         return None
 
-    registry = build_providers(db)
-    config = registry.get(slug)
+    config = FIXED_PROVIDERS.get(slug)
     if config is None:
-        return None
+        # Custom OIDC provider — build the ProviderConfig from the stored
+        # issuer_url + display name.
+        config = ProviderConfig(
+            protocol="oidc",
+            label=provider_settings.name or slug.title(),
+            scopes="openid email profile",
+            discovery_url=_normalise_issuer(provider_settings.issuer_url) if provider_settings.issuer_url else "",
+            extract_subject=_oidc_extract_subject,
+            extract_name=_oidc_extract_name,
+            extract_email=_oidc_extract_email,
+        )
 
     if config.protocol == "oidc":
         discovery = await _get_discovery(config.discovery_url) if config.discovery_url else None
