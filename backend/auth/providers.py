@@ -159,7 +159,7 @@ def get_enabled_providers(db) -> dict[str, OAuthProviderConfig]:
 
     A provider is *enabled* if its DB row has enabled=true AND a non-empty
     client_id. The client_id check matches the previous Pydantic behaviour
-    where an empty ProviderSettings was effectively unusable.
+    where a provider with no credentials was effectively unusable.
     """
     enabled: dict[str, OAuthProviderConfig] = {}
     for p in list_oauth_providers(db):

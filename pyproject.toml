@@ -30,7 +30,6 @@ dev = [
 ]
 
 [project.scripts]
-skynetcontrol-setup = "backend.cli.setup:main"
 skynetcontrol-db-copy = "backend.cli.db_copy:main"
 
 [tool.setuptools.packages.find]
