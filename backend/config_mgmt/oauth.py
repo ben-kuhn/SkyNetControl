@@ -11,14 +11,12 @@ _FIXED_SLUGS = RESERVED_SLUGS - {"oidc"}  # all fixed providers; "oidc" stays re
 
 def _check_slug(slug: str) -> None:
     # Fixed-provider slugs must round-trip through storage (the migration
-    # writes them; the wizard edits them). They are in RESERVED_SLUGS only to
-    # block user-chosen OIDC slugs from colliding — so we bypass validate_slug
-    # here and accept them. Note: this bypass also skips the format regex; if
-    # validate_slug ever grows additional checks that should apply to fixed
-    # slugs too (e.g. a length cap), this branch must be revisited.
-    if slug in _FIXED_SLUGS:
-        return
-    err = validate_slug(slug)
+    # writes them; the wizard edits them). They're in RESERVED_SLUGS only to
+    # block user-chosen OIDC slugs from colliding — so we pass
+    # allow_reserved=True for them. The format regex in validate_slug always
+    # runs, so any future format check (length cap, character set change) is
+    # enforced uniformly.
+    err = validate_slug(slug, allow_reserved=slug in _FIXED_SLUGS)
     if err is not None:
         raise ValueError(f"invalid OAuth provider slug {slug!r}: {err}")
 

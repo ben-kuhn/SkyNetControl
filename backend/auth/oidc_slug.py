@@ -21,14 +21,19 @@ def slugify(name: str) -> str:
     return s
 
 
-def validate_slug(slug: str) -> str | None:
-    """Return None if slug is valid, else a human-readable error message."""
+def validate_slug(slug: str, *, allow_reserved: bool = False) -> str | None:
+    """Return None if slug is valid, else a human-readable error message.
+
+    `allow_reserved=True` skips the RESERVED_SLUGS rejection (so the format
+    regex still applies). Used by storage-layer callers that legitimately
+    write the fixed-provider slugs into AppConfig.
+    """
     if not _SLUG_OK.match(slug):
         return (
             "must be lowercase letters, digits, and single dashes between groups "
             "(no leading/trailing dash, no consecutive dashes)"
         )
-    if slug in RESERVED_SLUGS:
+    if not allow_reserved and slug in RESERVED_SLUGS:
         return f"'{slug}' is reserved; pick a different slug"
     return None
 
