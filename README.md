@@ -73,19 +73,14 @@ For NixOS hosts, use the `services.skynetcontrol` module from `module.nix`. It h
 
 ```nix
 services.skynetcontrol = {
-  enable = true;
-  host = "127.0.0.1";
-  port = 8000;
-  settings = {
-    APP_BASE_URL = "https://net.example.org";
-    AUTH_GITHUB_ENABLED = "true";
-    AUTH_GITHUB_CLIENT_ID = "Iv1.xxxxxxxx";
-  };
+  enable        = true;
+  host          = "127.0.0.1";
+  port          = 8040;
+  stateDir      = "/storage/skynetcontrol";
+  appBaseUrl    = "https://net.example.org";
+  jwtSecretFile = config.age.secrets.skynetcontrol-jwt.path;  # via agenix or sops-nix
 };
-
-systemd.services.skynetcontrol.serviceConfig.EnvironmentFile = [
-  "/run/secrets/skynetcontrol-env"  # via sops-nix or agenix
-];
+users.users.skynetcontrol.extraGroups = [ "pat" ];
 ```
 
 #### Database storage

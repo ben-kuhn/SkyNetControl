@@ -35,13 +35,25 @@ in
       description = "SQLAlchemy database URL. Defaults to SQLite in stateDir.";
     };
 
-    settings = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
-      default = {};
-      description = "Additional environment variables (SKYNET_ prefix added automatically if missing).";
-      example = {
-        DEBUG = "true";
-      };
+    appBaseUrl = lib.mkOption {
+      type = lib.types.str;
+      example = "https://skynetcontrol.example.org";
+      description = ''
+        Externally-visible base URL of the running app. Used to construct
+        OAuth provider redirect URIs and to compose links in transactional
+        emails. Must match the host the user's browser hits (including
+        scheme and any non-default port).
+      '';
+    };
+
+    jwtSecretFile = lib.mkOption {
+      type = lib.types.path;
+      description = ''
+        Path to a file containing the JWT signing secret on disk. The file
+        should be readable only by root; the unit reads it via systemd's
+        LoadCredential mechanism, so the secret never appears in the Nix
+        store. Generate with e.g. `openssl rand -hex 32 > /etc/skynetcontrol-jwt`.
+      '';
     };
   };
 
@@ -68,12 +80,8 @@ in
 
       environment = {
         SKYNET_DATABASE_URL = cfg.databaseUrl;
-      } // lib.mapAttrs' (name: value:
-        let
-          envName = if lib.hasPrefix "SKYNET_" name then name else "SKYNET_${name}";
-        in
-        lib.nameValuePair envName value
-      ) cfg.settings;
+        SKYNET_APP_BASE_URL = cfg.appBaseUrl;
+      };
 
       serviceConfig = {
         Type = "simple";
@@ -83,7 +91,16 @@ in
         # postInstall alongside skynetcontrol-server; wrapPythonPrograms sets the
         # correct PYTHONPATH so alembic can find the migrations package.
         ExecStartPre = "${skynetcontrol}/bin/skynetcontrol-alembic -c ${skynetcontrol}/share/skynetcontrol/alembic.ini upgrade head";
-        ExecStart = "${skynetcontrol}/bin/skynetcontrol-server backend.app:create_app --factory --host ${cfg.host} --port ${toString cfg.port}";
+        # Pipe the JWT secret through LoadCredential so it never lands in the
+        # Nix store. The systemd-managed credential file is referenced as
+        # $CREDENTIALS_DIRECTORY/jwt inside the unit; ExecStart wraps the
+        # server in a small shell that reads it.
+        LoadCredential = [ "jwt:${cfg.jwtSecretFile}" ];
+        ExecStart = ''
+          ${pkgs.bash}/bin/bash -c '\
+            export SKYNET_JWT_SECRET_KEY="$(cat $CREDENTIALS_DIRECTORY/jwt)" && \
+            exec ${skynetcontrol}/bin/skynetcontrol-server backend.app:create_app --factory --host ${cfg.host} --port ${toString cfg.port}'
+        '';
         WorkingDirectory = cfg.stateDir;
         Restart = "on-failure";
         RestartSec = 5;

@@ -34,28 +34,34 @@ The build produces two binaries:
 In your NixOS flake or configuration, import `module.nix`:
 
 ```nix
-{ inputs, ... }:
+{ inputs, config, ... }:
 {
   imports = [
     (import "${inputs.skynetcontrol}/module.nix")
   ];
 
   services.skynetcontrol = {
-    enable = true;
-    host = "127.0.0.1";   # bind localhost; front with nginx for TLS
-    port = 8000;
-    settings = {
-      APP_BASE_URL = "https://net.example.org";
-      JWT_SECRET_KEY = "$JWT_SECRET";  # see "Secrets" below
-      AUTH_GITHUB_ENABLED = "true";
-      AUTH_GITHUB_CLIENT_ID = "Iv1.abcdef0123456789";
-      AUTH_GITHUB_CLIENT_SECRET = "$GH_CLIENT_SECRET";
-    };
+    enable        = true;
+    host          = "127.0.0.1";   # bind localhost; front with nginx for TLS
+    port          = 8040;
+    stateDir      = "/storage/skynetcontrol";
+    appBaseUrl    = "https://skynetcontrol.example.org";
+    jwtSecretFile = config.age.secrets.skynetcontrol-jwt.path;
   };
+  users.users.skynetcontrol.extraGroups = [ "pat" ];
 }
 ```
 
 (Without flakes: clone the repo to `/etc/nixos/skynetcontrol`, then `imports = [ /etc/nixos/skynetcontrol/module.nix ];`.)
+
+`jwtSecretFile` must point to a file containing the raw JWT signing secret (no trailing newline needed). Generate it once:
+
+```bash
+openssl rand -hex 32 | sudo tee /etc/skynetcontrol-jwt > /dev/null
+sudo chmod 400 /etc/skynetcontrol-jwt
+```
+
+The unit reads it via systemd `LoadCredential`, so it is never visible in the Nix store or in `systemctl show`.
 
 ### What the module does
 
@@ -75,48 +81,54 @@ In your NixOS flake or configuration, import `module.nix`:
 | `host` | `127.0.0.1` | Bind address. Use `0.0.0.0` if you're not fronting with a reverse proxy. |
 | `stateDir` | `/var/lib/skynetcontrol` | Service state. The default database URL points inside here. |
 | `databaseUrl` | `sqlite:///${stateDir}/skynetcontrol.db` | Defaults inside `stateDir`. Override to point at PostgreSQL. |
-| `settings` | `{}` | Attrset of additional env vars. Any `SKYNET_*` setting from `backend/config.py` can be set here. Keys are uppercased and prefixed with `SKYNET_` automatically (so `JWT_SECRET_KEY` becomes `SKYNET_JWT_SECRET_KEY`). |
+| `appBaseUrl` | *(required)* | Externally-visible URL the user's browser hits (including scheme and any non-default port). Used for OAuth redirect URIs and email links. |
+| `jwtSecretFile` | *(required)* | Path to a file containing the JWT signing secret. Read via systemd `LoadCredential` — never lands in the Nix store. |
+
+### After upgrading from a pre-Phase-5 release
+
+If you previously set `services.skynetcontrol.settings.AUTH_*`, `settings.SMTP__*`, or
+`settings.PAT_MAILBOX_PATH`, those values were imported into the AppConfig table by
+the one-time `import_env_to_app_config` Alembic migration shipped in the earlier release.
+You can now manage them via the `/config` admin page (after signing in) or via the
+first-boot wizard at `/setup`. Removing the `settings.*` lines from your NixOS config
+is the only required step; the values keep working from the database.
+
+You **will** need to add the two new required options (`appBaseUrl` and `jwtSecretFile`)
+before the next `nixos-rebuild switch`.
 
 ### Secrets
 
-`services.skynetcontrol.settings` is plain text — fine for non-secret values like client IDs, but **do not put secrets there**. Wire them in via systemd `EnvironmentFile`:
-
-```nix
-# /etc/nixos/configuration.nix
-systemd.services.skynetcontrol.serviceConfig.EnvironmentFile = [
-  "/run/skynetcontrol/env"
-];
-```
-
-Then populate `/run/skynetcontrol/env` from your secret store:
-
-```nix
-# Using sops-nix
-sops.secrets."skynetcontrol-env" = {
-  owner = "root";
-  group = "root";
-  mode = "0400";
-  path = "/run/skynetcontrol/env";
-};
-```
+The only secret that belongs in `module.nix` is `jwtSecretFile`. Point it at a file managed by your secret store of choice:
 
 ```nix
 # Using agenix
-age.secrets.skynetcontrol-env = {
-  file = ../secrets/skynetcontrol-env.age;
-  path = "/run/skynetcontrol/env";
+age.secrets.skynetcontrol-jwt = {
+  file = ../secrets/skynetcontrol-jwt.age;
 };
+services.skynetcontrol.jwtSecretFile = config.age.secrets.skynetcontrol-jwt.path;
 ```
 
-The env file is just `KEY=value` lines, e.g.:
-
+```nix
+# Using sops-nix
+sops.secrets."skynetcontrol-jwt" = {
+  owner = "root";
+  mode = "0400";
+};
+services.skynetcontrol.jwtSecretFile = config.sops.secrets."skynetcontrol-jwt".path;
 ```
-SKYNET_JWT_SECRET_KEY=hex-string-here
-SKYNET_AUTH_GITHUB_CLIENT_SECRET=actual-secret
-SKYNET_SMTP_PASSWORD=app-password
+
+Or, for a simple self-managed installation, generate a file outside the Nix store and make it root-readable:
+
+```bash
+openssl rand -hex 32 | sudo tee /etc/skynetcontrol-jwt > /dev/null
+sudo chmod 400 /etc/skynetcontrol-jwt
 ```
 
-See [secrets.md](secrets.md) for the full list of secret-bearing variables.
+```nix
+services.skynetcontrol.jwtSecretFile = "/etc/skynetcontrol-jwt";
+```
+
+All other previously-secret values (OAuth client secrets, SMTP passwords, etc.) are stored in the AppConfig table and managed via the `/config` admin page — no env vars needed.
 
 ### Reverse proxy with TLS
 
@@ -139,7 +151,7 @@ security.acme.acceptTerms = true;
 security.acme.defaults.email = "you@example.org";
 ```
 
-Remember to set `SKYNET_APP_BASE_URL=https://net.example.org` so OAuth callbacks use the public URL.
+Remember to set `appBaseUrl = "https://net.example.org"` in `services.skynetcontrol` so OAuth callbacks use the public URL.
 
 ### PostgreSQL
 
@@ -375,10 +387,6 @@ SkyNetControl reads check-ins out of a PAT mailbox directory but does not fetch 
 
   # Let the skynetcontrol user read the pat-owned mailbox.
   users.users.skynetcontrol.extraGroups = [ "pat" ];
-
-  # Tell SkyNetControl where the mailbox lives. Replace W0NE with your callsign.
-  services.skynetcontrol.settings.PAT_MAILBOX_PATH =
-    "/var/lib/pat/.local/share/pat/mailbox/W0NE";
 }
 ```
 
@@ -396,7 +404,7 @@ Then in SkyNetControl's `/config` page, enable **Auto-Scanner** and set **Scan I
 Two notes:
 
 - **Transport.** `telnet` reaches Winlink's CMS over the internet — no radio needed. Swap for `ax25`, `ardop`, or `vara` if you're pulling over RF, and accept that those transports usually want a tighter loop (or a long-running `pat http` service) instead of an hourly oneshot.
-- **Mailbox path matches the user.** PAT writes to `~/.local/share/pat/mailbox/<CALLSIGN>` — the `~` resolves to `/var/lib/pat` because that's what `users.users.pat.home` is set to. If you move that home, update the `PAT_MAILBOX_PATH` setting and the tmpfiles rules together.
+- **Mailbox path matches the user.** PAT writes to `~/.local/share/pat/mailbox/<CALLSIGN>` — the `~` resolves to `/var/lib/pat` because that's what `users.users.pat.home` is set to. If you move that home, update the **PAT Mailbox Path** in the `/config` admin page and the tmpfiles rules together.
 
 ### Updating
 
