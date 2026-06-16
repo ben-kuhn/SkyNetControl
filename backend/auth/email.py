@@ -13,9 +13,24 @@ from backend.config_mgmt.smtp import SmtpConfig, get_smtp_config
 logger = logging.getLogger(__name__)
 
 
-async def send_email(db: Session, to: str, subject: str, body: str) -> None:
-    """Send an email via SMTP. Fire-and-forget — never raises."""
-    smtp = get_smtp_config(db)
+async def send_email(
+    db: Session,
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    smtp: SmtpConfig | None = None,
+) -> None:
+    """Send an email via SMTP. Fire-and-forget — never raises.
+
+    Callers that send many messages in a single operation (admin
+    notifications looping over multiple recipients) should fetch the
+    SMTP config once and pass it via `smtp=` to avoid the per-send
+    DB hit. The identity-map cache makes the repeated fetch cheap
+    today, but it's fragile under future session-scoping changes.
+    """
+    if smtp is None:
+        smtp = get_smtp_config(db)
     if smtp is None:
         logger.debug("SMTP not configured, skipping email to %s", to)
         return
@@ -41,6 +56,9 @@ def _send_email_sync(smtp: SmtpConfig, to: str, subject: str, body: str) -> None
 
 
 async def notify_admins_new_registration(db: Session, admins: list[User], new_user: User) -> None:
+    smtp = get_smtp_config(db)
+    if smtp is None:
+        return
     base_url = settings.app_base_url
     for admin in admins:
         if admin.email:
@@ -50,10 +68,14 @@ async def notify_admins_new_registration(db: Session, admins: list[User], new_us
                 f"[SkyNetControl] New registration: {new_user.callsign}",
                 f"{new_user.name} has registered as {new_user.callsign} and is awaiting approval. "
                 f"Review pending users at {base_url}.",
+                smtp=smtp,
             )
 
 
 async def notify_admins_callsign_change(db: Session, admins: list[User], user: User, new_callsign: str) -> None:
+    smtp = get_smtp_config(db)
+    if smtp is None:
+        return
     base_url = settings.app_base_url
     for admin in admins:
         if admin.email:
@@ -63,6 +85,7 @@ async def notify_admins_callsign_change(db: Session, admins: list[User], user: U
                 f"[SkyNetControl] Callsign change request: {user.callsign} -> {new_callsign}",
                 f"{user.name} ({user.callsign}) has requested a callsign change to {new_callsign}. "
                 f"Review at {base_url}.",
+                smtp=smtp,
             )
 
 
