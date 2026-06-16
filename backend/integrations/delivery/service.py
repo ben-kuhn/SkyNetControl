@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from backend.config_mgmt.service import get_config_value
+from backend.config_mgmt.smtp import get_smtp_config
 from backend.integrations.delivery.backends import get_backend
 from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
 
@@ -17,14 +18,16 @@ def _build_config(db: Session, backend_name: str) -> dict:
 
     if backend_name == "email":
         config["to_address"] = get_config_value(db, "delivery.email.to_address", "")
-        from backend.config import settings
-
-        config["smtp_host"] = settings.smtp.host
-        config["smtp_port"] = settings.smtp.port
-        config["smtp_username"] = settings.smtp.username
-        config["smtp_password"] = settings.smtp.password
-        config["smtp_use_tls"] = settings.smtp.use_tls
-        config["smtp_from_address"] = settings.smtp.from_address
+        smtp = get_smtp_config(db)
+        if smtp is not None:
+            config["smtp_host"] = smtp.host
+            config["smtp_port"] = smtp.port
+            config["smtp_username"] = smtp.username
+            config["smtp_password"] = smtp.password
+            config["smtp_use_tls"] = smtp.use_tls
+            config["smtp_from_address"] = smtp.from_address
+        # If SMTP isn't configured, leave the smtp_* keys absent — the
+        # EmailBackend.send already short-circuits on a missing host.
 
     elif backend_name == "groupsio":
         config["api_key"] = get_config_value(db, "delivery.groupsio.api_key", "")
