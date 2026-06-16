@@ -8,8 +8,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 import backend.auth.recovery as recovery_mod
+from backend.auth.models import AdminRecoveryToken
 from backend.auth.recovery import (
     RecoveryPrincipal,
+    _hash,
+    _now,
     decode_recovery_token,
     list_outstanding,
     make_recovery_token,
@@ -267,3 +270,66 @@ def test_claim_token_expired_returns_none(db):
         mod._now = original
     # Token expired in 2020; claim now should fail.
     assert claim_token(db, plaintext) is None
+
+
+# ── revoke_by_prefix hex validation ─────────────────────────────────────────
+
+
+def test_revoke_by_prefix_rejects_non_hex(db):
+    from backend.auth.recovery import revoke_by_prefix
+
+    for bad in ["abc%", "_abcd", "ZZZZ", "abc-1234", "abc def", ""]:
+        try:
+            revoke_by_prefix(db, bad)
+        except ValueError as exc:
+            assert "hex" in str(exc).lower() or "prefix" in str(exc).lower()
+        else:
+            raise AssertionError(f"prefix {bad!r} should have been rejected")
+
+
+def test_revoke_by_prefix_accepts_valid_hex(db):
+    from backend.auth.recovery import revoke_by_prefix
+
+    plaintext, _ = mint_token(db)
+    hash_prefix = _hash(plaintext)[:8]
+    revoked = revoke_by_prefix(db, hash_prefix)
+    assert revoked == 1
+
+
+# ── mint_token purges used + expired rows ──────────────────────────────────
+
+
+def test_mint_token_purges_used_tokens(db):
+    """Calling mint_token after a token has been used should remove the used row."""
+    import backend.auth.recovery as mod
+
+    # Round 1: mint and claim a token; the row is now marked used_at != None
+    plaintext_a, _ = mint_token(db)
+    assert mod.claim_token(db, plaintext_a) is not None
+    assert db.query(AdminRecoveryToken).count() == 1
+
+    # Round 2: mint a fresh token — the purge should drop the used row
+    mint_token(db, ttl=timedelta(minutes=10))
+    rows = db.query(AdminRecoveryToken).all()
+    assert len(rows) == 1
+    assert rows[0].used_at is None  # only the new unused row survives
+
+
+def test_mint_token_purges_expired_rows(db):
+    """Expired-but-unused tokens shouldn't accumulate either."""
+    import backend.auth.recovery as mod
+
+    past = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    original = mod._now
+    mod._now = lambda: past
+    try:
+        mint_token(db)  # this row will be "expired" by now
+    finally:
+        mod._now = original
+    assert db.query(AdminRecoveryToken).count() == 1
+
+    mint_token(db)
+    rows = db.query(AdminRecoveryToken).all()
+    assert len(rows) == 1
+    assert rows[0].used_at is None
+    assert rows[0].expires_at > _now().replace(tzinfo=None)

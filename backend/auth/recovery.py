@@ -8,6 +8,7 @@ Provides:
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -43,12 +44,38 @@ def _hash(plaintext: str) -> str:
     return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
 
 
+def _purge_expired_unused(db: Session) -> int:
+    """Delete every used token plus every unused-but-expired token.
+
+    Called from mint_token so the table can't grow unbounded over the
+    lifetime of a deployment. Returns the number of rows removed.
+    Tokens that are still pending (unused AND unexpired) are preserved.
+    """
+    now_naive = _now().replace(tzinfo=None)
+    deleted = (
+        db.query(AdminRecoveryToken)
+        .filter(
+            (AdminRecoveryToken.used_at.isnot(None))
+            | (AdminRecoveryToken.expires_at <= now_naive)
+        )
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    # synchronize_session=False leaves any deleted rows in the session's
+    # identity map; expire them so the next insert (which may reuse a row id
+    # on SQLite) doesn't collide with a stale cached object.
+    db.expire_all()
+    return deleted
+
+
 def mint_token(db: Session, ttl: timedelta = _TOKEN_TTL) -> tuple[str, datetime]:
     """Generate a fresh single-use admin-recovery token.
 
     Returns (plaintext, expires_at). The plaintext is shown once and never
-    stored; only its sha256 hash is persisted.
+    stored; only its sha256 hash is persisted. Opportunistically purges
+    used + expired rows so the table doesn't grow unboundedly.
     """
+    _purge_expired_unused(db)
     plaintext = secrets.token_urlsafe(32)
     expires_at = _now() + ttl
     db.add(AdminRecoveryToken(token_hash=_hash(plaintext), expires_at=expires_at))
@@ -131,11 +158,19 @@ def list_outstanding(db: Session) -> list[AdminRecoveryToken]:
     )
 
 
+_HEX_RE = re.compile(r"^[0-9a-f]+$")
+
+
 def revoke_by_prefix(db: Session, prefix: str) -> int:
     """Mark all unused tokens whose token_hash starts with ``prefix`` as used.
 
-    Returns the number of tokens revoked.
+    Returns the number of tokens revoked. Raises ValueError if ``prefix``
+    contains characters outside [0-9a-f] — token hashes are sha256 hex,
+    so any other character is either user error or an attempt to inject
+    LIKE wildcards (``%`` or ``_``).
     """
+    if not prefix or not _HEX_RE.match(prefix):
+        raise ValueError(f"prefix must be lowercase hex (sha256 token hash), got {prefix!r}")
     rows = (
         db.query(AdminRecoveryToken)
         .filter(AdminRecoveryToken.used_at.is_(None))

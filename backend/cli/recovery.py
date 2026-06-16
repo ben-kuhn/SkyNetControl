@@ -85,7 +85,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.cmd == "revoke":
-            count = revoke_by_prefix(db, args.prefix)
+            try:
+                count = revoke_by_prefix(db, args.prefix)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
             print(f"Revoked {count} token(s) matching prefix {args.prefix!r}.")
             return 0
 
