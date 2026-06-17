@@ -114,17 +114,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(setup_router, prefix="/api/setup")
     app.include_router(recovery_router, prefix="/api")
 
-    # Serve frontend static files if the directory exists
+    # Serve frontend static files if the directory exists. index.html must
+    # revalidate every load (it points at content-hashed asset filenames that
+    # change every build); the hashed files under /assets/ are safe to cache
+    # forever. Nix-store files have a 1970 mtime, so without explicit
+    # Cache-Control headers browsers apply heuristic freshness measured in
+    # years and hold onto stale HTML across redeploys.
     if os.path.isdir(settings.static_dir):
         assets_dir = os.path.join(settings.static_dir, "assets")
         if os.path.isdir(assets_dir):
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+            class _ImmutableAssets(StaticFiles):
+                async def get_response(self, path, scope):
+                    response = await super().get_response(path, scope)
+                    if response.status_code == 200:
+                        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                    return response
+
+            app.mount("/assets", _ImmutableAssets(directory=assets_dir), name="assets")
+
+        _NO_CACHE = {"Cache-Control": "no-cache"}
 
         @app.get("/{path:path}")
         async def serve_frontend(path: str):
             file_path = os.path.join(settings.static_dir, path)
             if path and os.path.isfile(file_path):
-                return FileResponse(file_path)
-            return FileResponse(os.path.join(settings.static_dir, "index.html"))
+                return FileResponse(file_path, headers=_NO_CACHE)
+            return FileResponse(os.path.join(settings.static_dir, "index.html"), headers=_NO_CACHE)
 
     return app
