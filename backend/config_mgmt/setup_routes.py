@@ -183,7 +183,11 @@ async def setup_claim_start(
         scopes = "openid email profile"
 
     state = secrets.token_urlsafe(32)
-    redirect_uri = f"{body.app_base_url}/api/setup/claim/callback"
+    # Same callback URI as everyday sign-in (`/api/auth/callback/{slug}`).
+    # The state lookup in _SETUP_SESSIONS is what tells that handler this
+    # is a setup-completion flow vs. a normal sign-in. Reusing the URI means
+    # operators register exactly one redirect URI at the IdP.
+    redirect_uri = f"{body.app_base_url}/api/auth/callback/{body.oauth_slug}"
     params = {
         "client_id": body.oauth_client_id,
         "redirect_uri": redirect_uri,
@@ -224,34 +228,35 @@ async def setup_claim_start(
 
 
 # ---------------------------------------------------------------------------
-# GET /api/setup/claim/callback
+# Setup-completion helper invoked from /api/auth/callback/{slug}
 # ---------------------------------------------------------------------------
 
 
-@setup_router.get("/claim/callback")
-async def setup_claim_callback(
-    state: str = "",
-    code: str = "",
-    error: str = "",
-    db: Session = Depends(get_db_session),
-    app_settings: Settings = Depends(get_settings),
+async def try_complete_setup(
+    state: str,
+    code: str,
+    error: str,
+    db: Session,
+    app_settings: Settings,
 ):
-    """State-validated OAuth callback. No auth — secured by unguessable state token.
+    """If `state` matches a live setup session, finalize setup and return the response.
 
-    On success, commits all wizard inputs, creates the first admin user,
-    issues a JWT cookie, and redirects to /.
-    Returns 410 if setup is already complete.
+    Returns None when no setup is in flight for this state — the caller should
+    fall through to the normal sign-in path. The state token is 32 bytes of
+    `secrets.token_urlsafe`, so a collision with a normal sign-in state is
+    negligible; the in-memory `_SETUP_SESSIONS` lookup IS the authentication
+    here (same model the old /api/setup/claim/callback used).
     """
     if is_setup_completed(db):
-        raise HTTPException(status_code=410, detail="Setup already completed")
+        # No live setup possible. Fall through to normal sign-in.
+        return None
 
-    # Look up and validate session
     session = _SETUP_SESSIONS.get(state)
     if session is None:
-        raise HTTPException(status_code=404, detail="Setup session not found or expired")
+        return None
     if datetime.now(timezone.utc) >= session.expires_at:
         del _SETUP_SESSIONS[state]
-        raise HTTPException(status_code=404, detail="Setup session not found or expired")
+        return None
 
     # Provider sent an error
     if error:
@@ -287,7 +292,7 @@ async def setup_claim_callback(
         extract_name = _oidc_extract_name
         extract_email = _oidc_extract_email
 
-    redirect_uri = f"{session.app_base_url}/api/setup/claim/callback"
+    redirect_uri = f"{session.app_base_url}/api/auth/callback/{slug}"
 
     try:
         async with httpx.AsyncClient() as client:

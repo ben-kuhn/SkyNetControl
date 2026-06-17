@@ -74,12 +74,27 @@ async def login(
 @auth_router.get("/callback/{provider}")
 async def callback(
     provider: str,
-    code: str,
+    code: str = "",
     state: str = "",
+    error: str = "",
     oauth_state: str | None = Cookie(default=None),
     db: Session = Depends(get_db_session),
     app_settings: Settings = Depends(get_settings),
 ):
+    # First-boot setup uses this same callback URL with a state token that
+    # was minted by /api/setup/claim/start and stashed in _SETUP_SESSIONS.
+    # If the state matches a live setup session, finalize setup here and
+    # return; otherwise fall through to the everyday sign-in path. Reusing
+    # the URI means the IdP only needs one redirect URI registered.
+    from backend.config_mgmt.setup_routes import try_complete_setup
+
+    setup_response = await try_complete_setup(state, code, error, db, app_settings)
+    if setup_response is not None:
+        return setup_response
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
     expected_state = f"{provider}:{state}"
     if not oauth_state or not secrets.compare_digest(oauth_state, expected_state):
         raise HTTPException(status_code=400, detail="Invalid OAuth state")

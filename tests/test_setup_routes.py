@@ -1,4 +1,10 @@
-"""Tests for the first-boot setup wizard backend (status / claim/start / claim/callback)."""
+"""Tests for the first-boot setup wizard backend.
+
+Setup-completion uses the unified `/api/auth/callback/{slug}` URI dispatched
+on a state lookup in `_SETUP_SESSIONS`. There is no longer a separate
+`/api/setup/claim/callback` route — the wizard's Step 4 OAuth redirect
+lands on the same endpoint as everyday sign-in.
+"""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -146,6 +152,9 @@ async def test_claim_start_returns_authorize_url_with_state(test_app):
     assert "state=" in url
     assert "my-client-id" in url
     assert "github.com" in url
+    # The unified redirect URI matches everyday sign-in — operators register
+    # exactly one URI at the IdP. Old /api/setup/claim/callback is gone.
+    assert "redirect_uri=http%3A%2F%2Ftestserver%2Fapi%2Fauth%2Fcallback%2Fgithub" in url
 
 
 # ---------------------------------------------------------------------------
@@ -196,13 +205,13 @@ async def test_claim_start_rejects_blank_secret(test_app):
 
 
 # ---------------------------------------------------------------------------
-# Test 7: claim/callback happy path — admin user, appconfig, JWT cookie
+# Test 7: unified callback happy path — admin user, appconfig, JWT cookie
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_claim_callback_creates_admin_and_marks_complete(test_app):
-    """Full happy path: start → callback (mocked) → User + AppConfig rows + JWT cookie."""
+async def test_unified_callback_creates_admin_and_marks_complete(test_app):
+    """Full happy path: start → /api/auth/callback/{slug} (mocked) → User + AppConfig rows + JWT cookie."""
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test", follow_redirects=False) as client:
         # 1) Start
@@ -210,14 +219,15 @@ async def test_claim_callback_creates_admin_and_marks_complete(test_app):
         assert start_resp.status_code == 200
         state = next(iter(_SETUP_SESSIONS))
 
-        # 2) Callback with mocked OAuth provider
+        # 2) Callback hits the unified everyday-sign-in URI; setup-dispatch
+        # is via the state lookup, not a separate route.
         mock_client = _make_mock_http_client(
             token_resp_data={"access_token": "tok123"},
             userinfo_resp_data={"id": 42, "login": "testuser", "name": "Test User", "email": "test@example.com"},
         )
         with patch("backend.config_mgmt.setup_routes.httpx.AsyncClient", return_value=mock_client):
             cb_resp = await client.get(
-                "/api/setup/claim/callback",
+                "/api/auth/callback/github",
                 params={"state": state, "code": "auth-code-xyz"},
             )
 
@@ -249,43 +259,32 @@ async def test_claim_callback_creates_admin_and_marks_complete(test_app):
 
 
 # ---------------------------------------------------------------------------
-# Test 8: claim/callback 410 after setup complete
+# Test 8: unknown state on the unified callback falls through to normal sign-in
+# (which rejects with 400 — no oauth_state cookie, no provider in DB).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_claim_callback_410_after_setup_complete(test_app):
-    """GET callback after setup is complete → 410."""
-    with test_app.state.session_factory() as db:
-        mark_setup_completed(db)
-
+async def test_unified_callback_unknown_state_rejects(test_app):
+    """No setup session + no oauth_state cookie → normal-flow rejection."""
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/setup/claim/callback", params={"state": "whatever", "code": "x"})
-    assert resp.status_code == 410
+        resp = await client.get(
+            "/api/auth/callback/github",
+            params={"state": "no-such-state", "code": "x"},
+        )
+    # Normal flow rejects: either bad state (400) or unknown provider (404
+    # if it gets that far). Either way it's not a 2xx.
+    assert resp.status_code in (400, 404)
 
 
 # ---------------------------------------------------------------------------
-# Test 9: claim/callback unknown state returns 404
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_claim_callback_unknown_state_returns_404(test_app):
-    """GET callback with unknown state → 404."""
-    transport = ASGITransport(app=test_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/setup/claim/callback", params={"state": "no-such-state", "code": "x"})
-    assert resp.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# Test 10: token exchange failure does not commit
+# Test 9: token exchange failure does not commit
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_claim_callback_token_exchange_failure_does_not_commit(test_app):
+async def test_callback_token_exchange_failure_does_not_commit(test_app):
     """When token exchange returns no access_token, nothing is committed to the DB."""
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -298,7 +297,7 @@ async def test_claim_callback_token_exchange_failure_does_not_commit(test_app):
         )
         with patch("backend.config_mgmt.setup_routes.httpx.AsyncClient", return_value=mock_client):
             cb_resp = await client.get(
-                "/api/setup/claim/callback",
+                "/api/auth/callback/github",
                 params={"state": state, "code": "bad-code"},
             )
 
@@ -315,9 +314,9 @@ async def test_claim_callback_token_exchange_failure_does_not_commit(test_app):
         assert db.query(User).count() == 0
 
 
-# 11 — XSS hardening: provider-controlled `?error` param is HTML-escaped
+# 10 — XSS hardening: provider-controlled `?error` param is HTML-escaped
 @pytest.mark.asyncio
-async def test_claim_callback_escapes_provider_error_in_html(test_app):
+async def test_callback_escapes_provider_error_in_html(test_app):
     """A provider sending ?error=<script>... must not produce un-escaped HTML."""
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -326,7 +325,7 @@ async def test_claim_callback_escapes_provider_error_in_html(test_app):
         state = next(iter(_SETUP_SESSIONS))
 
         cb_resp = await client.get(
-            "/api/setup/claim/callback",
+            "/api/auth/callback/github",
             params={"state": state, "error": "<script>alert(1)</script>"},
         )
     assert cb_resp.status_code == 400

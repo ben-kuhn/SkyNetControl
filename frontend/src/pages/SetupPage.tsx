@@ -211,12 +211,11 @@ function Step2({ form, setForm, onBack, onNext, recoveryMode, setOauthEdited }: 
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  // Strip trailing slash so the rendered URIs are clean even if the user
+  // Strip trailing slash so the rendered URI is clean even if the user
   // typed "https://example.com/" on Step 1.
   const baseUrl = form.app_base_url.trim().replace(/\/+$/, "");
   const slug = form.oauth_slug.trim();
   const signInUri = baseUrl && slug ? `${baseUrl}/api/auth/callback/${slug}` : "";
-  const claimUri = baseUrl ? `${baseUrl}/api/setup/claim/callback` : "";
 
   const copy = async (uri: string) => {
     try {
@@ -389,33 +388,19 @@ function Step2({ form, setForm, onBack, onNext, recoveryMode, setOauthEdited }: 
         required={!recoveryMode}
       />
 
-      {/* Redirect URIs to register at the IdP. The persistent sign-in URI is
-          what matters in the long term; the wizard's claim URI is single-use
-          but the IdP still has to accept it during Step 4. Surfacing both
-          here prevents the "wizard finished but everyday sign-in 4xxs"
-          failure mode where an old IdP registration only covers one path. */}
-      {signInUri && claimUri && (
+      {/* The redirect URI to register at the IdP. The wizard's Step 4 claim
+          uses this same URI (dispatched on the in-memory setup-session
+          state), so operators only need to register one. */}
+      {signInUri && (
         <div className="rounded-lg border border-border bg-bg-elevated p-3 flex flex-col gap-2 text-sm">
           <div className="text-xs font-medium text-text-muted uppercase tracking-wider">
-            Register these redirect URIs at your provider
+            Redirect URI to register at your provider
           </div>
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <code className="flex-1 break-all font-mono text-xs text-text-primary">{signInUri}</code>
-              <Button type="button" size="sm" variant="secondary" onClick={() => copy(signInUri)}>
-                {copied === signInUri ? "Copied" : "Copy"}
-              </Button>
-            </div>
-            <p className="text-xs text-text-muted">Everyday sign-in. This is the URI that matters after setup.</p>
-            <div className="flex items-center gap-2 mt-1">
-              <code className="flex-1 break-all font-mono text-xs text-text-primary">{claimUri}</code>
-              <Button type="button" size="sm" variant="secondary" onClick={() => copy(claimUri)}>
-                {copied === claimUri ? "Copied" : "Copy"}
-              </Button>
-            </div>
-            <p className="text-xs text-text-muted">
-              Used once by this wizard to claim the first admin account. Register both.
-            </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 break-all font-mono text-xs text-text-primary">{signInUri}</code>
+            <Button type="button" size="sm" variant="secondary" onClick={() => copy(signInUri)}>
+              {copied === signInUri ? "Copied" : "Copy"}
+            </Button>
           </div>
         </div>
       )}
