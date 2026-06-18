@@ -201,7 +201,11 @@ async def register(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
-    if not user.callsign.startswith("PENDING-"):
+    # Two gates here: the callsign-prefix check + the role check. The role
+    # check is the load-bearing one ("only PENDING accounts may claim a
+    # callsign"); the prefix check defends against a future code path that
+    # somehow leaves a PENDING-named row in a non-PENDING role.
+    if user.role != UserRole.PENDING or not user.callsign.startswith("PENDING-"):
         raise HTTPException(status_code=409, detail="User already registered")
 
     callsign = body.callsign.upper()
