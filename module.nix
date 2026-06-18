@@ -55,6 +55,20 @@ in
         store. Generate with e.g. `openssl rand -hex 32 > /etc/skynetcontrol-jwt`.
       '';
     };
+
+    secretsKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        Optional path to a file containing the AES key material for at-rest
+        encryption of OAuth client secrets and SMTP passwords in the
+        AppConfig table. When unset, the JWT signing secret is reused —
+        convenient, but it means rotating the JWT secret also invalidates
+        every encrypted credential. Set this to a separate file (same shape
+        as jwtSecretFile, also LoadCredential-fed) when you want the two
+        rotation cadences to be independent.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -94,11 +108,17 @@ in
         # Pipe the JWT secret through LoadCredential so it never lands in the
         # Nix store. The systemd-managed credential file is referenced as
         # $CREDENTIALS_DIRECTORY/jwt inside the unit; ExecStart wraps the
-        # server in a small shell that reads it.
-        LoadCredential = [ "jwt:${cfg.jwtSecretFile}" ];
+        # server in a small shell that reads it. When secretsKeyFile is
+        # configured, we also pipe a separate at-rest encryption key.
+        LoadCredential =
+          [ "jwt:${cfg.jwtSecretFile}" ]
+          ++ lib.optional (cfg.secretsKeyFile != null) "secrets:${cfg.secretsKeyFile}";
         ExecStart = ''
           ${pkgs.bash}/bin/bash -c '\
             export SKYNET_JWT_SECRET_KEY="$(cat $CREDENTIALS_DIRECTORY/jwt)" && \
+            ${if cfg.secretsKeyFile != null
+              then "export SKYNET_SECRETS_KEY=\"$(cat $CREDENTIALS_DIRECTORY/secrets)\" && "
+              else ""} \
             exec ${skynetcontrol}/bin/skynetcontrol-server backend.app:create_app --factory --host ${cfg.host} --port ${toString cfg.port}'
         '';
         WorkingDirectory = cfg.stateDir;

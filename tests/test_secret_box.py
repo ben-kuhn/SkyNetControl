@@ -1,5 +1,40 @@
 """Tests for the AEAD envelope used to protect AppConfig secrets at rest."""
+import os
+
 from backend.auth.secret_box import _PREFIX, decrypt, encrypt, install_key_material
+
+
+def test_create_app_prefers_secrets_key_over_jwt_secret(monkeypatch, tmp_path):
+    """install_key_material is called with settings.secrets_key when set,
+    otherwise jwt_secret_key. Rotating the JWT signing key without
+    SKYNET_SECRETS_KEY should NOT invalidate encrypted rows.
+    """
+    monkeypatch.setenv("SKYNET_JWT_SECRET_KEY", "jwt-key-A")
+    monkeypatch.setenv("SKYNET_SECRETS_KEY", "secrets-key-A")
+    monkeypatch.setenv("SKYNET_DATABASE_URL", f"sqlite:///{tmp_path}/a.db")
+
+    # Reload Settings so the test envvars take effect.
+    from backend.config import Settings
+
+    from backend.app import create_app
+
+    s = Settings()
+    assert s.secrets_key == "secrets-key-A"
+    create_app(settings=s)
+    # The box was bound to secrets-key-A; ciphertext from this point is
+    # decryptable with secrets-key-A.
+    ct = encrypt("hello")
+    # Now rotate ONLY the JWT secret and rebuild Settings — secrets_key stays.
+    monkeypatch.setenv("SKYNET_JWT_SECRET_KEY", "jwt-key-B")
+    s2 = Settings()
+    create_app(settings=s2)
+    # Ciphertext from the previous rotation still decrypts.
+    assert decrypt(ct) == "hello"
+
+    # Cleanup any env leaks.
+    for k in ("SKYNET_JWT_SECRET_KEY", "SKYNET_SECRETS_KEY", "SKYNET_DATABASE_URL"):
+        os.environ.pop(k, None)
+    install_key_material("test-secret")
 
 
 def test_round_trip():

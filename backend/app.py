@@ -44,11 +44,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Bind the AEAD key used by backend.auth.secret_box for at-rest
     # encryption of OAuth client secrets and SMTP password in app_config.
-    # Derived from the JWT secret via HKDF; rotating the JWT secret invalidates
-    # encrypted rows (operator re-enters via the wizard's preserve sentinel).
+    # Prefers a dedicated SKYNET_SECRETS_KEY when set; falls back to the
+    # JWT secret so an installation that doesn't care about independent
+    # rotation works with one env var. Rotating SKYNET_SECRETS_KEY without
+    # SKYNET_JWT_SECRET_KEY (or vice versa) is now possible.
     from backend.auth.secret_box import install_key_material
 
-    install_key_material(settings.jwt_secret_key)
+    install_key_material(settings.secrets_key or settings.jwt_secret_key)
 
     engine = create_engine_from_url(settings.database_url)
     session_factory = create_session_factory(engine)

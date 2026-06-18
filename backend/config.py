@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440  # 24 hours
 
+    # AES-GCM key material for the at-rest secret box (see auth/secret_box.py).
+    # When empty, falls back to jwt_secret_key — convenient for installs that
+    # don't care about independent rotation. Setting this lets operators
+    # rotate the JWT signing key without invalidating encrypted OAuth/SMTP
+    # credentials, and vice versa.
+    secrets_key: str = ""
+
     # App
     app_base_url: str = "http://localhost:8000"
 
