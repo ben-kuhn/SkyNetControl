@@ -1,5 +1,8 @@
+import ipaddress
 import logging
+import socket
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import httpx
 from jose import JWTError, jwt
@@ -40,8 +43,44 @@ def decode_access_token(token: str, settings: Settings) -> dict | None:
         return None
 
 
+def _ssrf_guard_discovery_url(url: str) -> None:
+    """Raise ValueError if `url` is unsafe to fetch from the server side.
+
+    `issuer_url` reaches this function from admin-supplied form input (and,
+    pre-setup, from any unauthenticated POST to /api/setup/claim/start).
+    Without a guard, an attacker can point us at http://169.254.169.254/
+    (cloud metadata), http://127.0.0.1:<internal-port>, or any internal
+    HTTP service and read the response body via _error_html on failure.
+
+    The check resolves the hostname once and rejects non-https schemes
+    plus any address that isn't globally routable. There's a TOCTOU gap
+    between this resolve and httpx's own resolve at fetch time; closing
+    that fully needs a custom DNS resolver. A pre-fetch check still
+    blocks the trivial misconfigurations (http://, localhost, AWS metadata).
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"OIDC issuer URL must use https:// scheme (got {parsed.scheme or '(none)'})")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("OIDC issuer URL has no hostname")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"OIDC issuer host could not be resolved: {host}") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ValueError(f"OIDC issuer host {host} resolves to a non-global IP ({ip})")
+
+
 async def fetch_oidc_discovery(discovery_url: str) -> dict | None:
     """Fetch OIDC discovery document and return endpoint URLs, or None on failure."""
+    try:
+        _ssrf_guard_discovery_url(discovery_url)
+    except ValueError as exc:
+        logger.error("Rejecting unsafe OIDC discovery URL %s: %s", discovery_url, exc)
+        return None
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(discovery_url, timeout=10)
@@ -52,21 +91,32 @@ async def fetch_oidc_discovery(discovery_url: str) -> dict | None:
         return None
 
 
-# Module-level cache: discovery_url -> resolved discovery dict.
-# Phase 2a accepts no TTL: cache lives for the process lifetime. OIDC
-# providers rotate endpoints rarely enough that a restart suffices. If
-# this becomes a problem the cache can grow a TTL or an invalidation hook
-# tied to upsert_oauth_provider.
-_DISCOVERY_CACHE: dict[str, dict] = {}
+# Module-level cache: discovery_url -> (fetched_at, discovery dict).
+# A bounded TTL (1 h) plus a max-size cap stops a one-shot MITM during
+# cache fill from permanently corrupting the process, and prevents an
+# attacker who can spin up many distinct issuer_urls from exhausting
+# memory through the cache.
+_DISCOVERY_CACHE: dict[str, tuple[datetime, dict]] = {}
+_DISCOVERY_CACHE_TTL = timedelta(hours=1)
+_DISCOVERY_CACHE_MAX = 64
 
 
 async def _get_discovery(discovery_url: str) -> dict | None:
+    now = datetime.now(timezone.utc)
     cached = _DISCOVERY_CACHE.get(discovery_url)
     if cached is not None:
-        return cached
+        fetched_at, doc = cached
+        if now - fetched_at < _DISCOVERY_CACHE_TTL:
+            return doc
+        del _DISCOVERY_CACHE[discovery_url]
     discovery = await fetch_oidc_discovery(discovery_url)
     if discovery is not None:
-        _DISCOVERY_CACHE[discovery_url] = discovery
+        if len(_DISCOVERY_CACHE) >= _DISCOVERY_CACHE_MAX:
+            # Evict the oldest entry. Dict iteration order is insertion-order
+            # in CPython 3.7+, so popitem(last=False)-style works via next().
+            oldest = next(iter(_DISCOVERY_CACHE))
+            del _DISCOVERY_CACHE[oldest]
+        _DISCOVERY_CACHE[discovery_url] = (now, discovery)
     return discovery
 
 

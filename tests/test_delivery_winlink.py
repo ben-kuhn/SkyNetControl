@@ -89,3 +89,37 @@ def test_winlink_b2f_format():
         assert "Body" in header_keys
 
         assert "Line 1\nLine 2" in content
+
+
+def test_winlink_strips_crlf_in_subject_blocks_b2f_header_injection():
+    """B2F header-injection guard.
+
+    Subject is rendered from Jinja2 templates that may interpolate user
+    text (e.g. a check-in comment). The .b2f format is line-oriented, so
+    a Subject containing \\r\\n would inject additional headers. The
+    backend must strip CR/LF from header-bound values.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "target_address": "NET@winlink.org",
+            "mailbox_path": tmpdir,
+            "callsign": "W0NE",
+        }
+        WinlinkBackend().send(
+            "Roster\nCc: attacker@evil.invalid\nX-Injected: yes",
+            "body",
+            config,
+        )
+        b2f = list((Path(tmpdir) / "out").glob("*.b2f"))[0].read_text()
+        # The header block (everything before the blank line) must contain
+        # no extra header *lines* introduced by the injection — the injected
+        # tokens fold into the Subject line as inert text instead.
+        header_lines = b2f.split("\n\n", 1)[0].splitlines()
+        # Subject line is exactly one line containing all the injected text.
+        subject_lines = [line for line in header_lines if line.startswith("Subject:")]
+        assert len(subject_lines) == 1
+        assert "Cc: attacker" in subject_lines[0]  # folded into Subject, not a new header
+        # No header line starts with the injected names.
+        for line in header_lines:
+            assert not line.startswith("Cc:")
+            assert not line.startswith("X-Injected:")

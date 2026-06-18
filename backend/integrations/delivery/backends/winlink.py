@@ -5,6 +5,18 @@ from pathlib import Path
 from backend.integrations.delivery.backends.base import DeliveryResult
 
 
+def _strip_b2f_header_chars(value: str) -> str:
+    """Strip CR/LF (and surrounding whitespace) from a B2F header value.
+
+    Header injection guard: the .b2f format is line-oriented, so a value
+    containing \\r or \\n would split into additional headers. `subject` is
+    rendered from Jinja2 reminder/roster templates that may interpolate
+    user-supplied comment text from check-ins; without this strip, a
+    crafted comment could inject To:/Cc:/etc. and redirect the message.
+    """
+    return value.replace("\r", " ").replace("\n", " ").strip()
+
+
 class WinlinkBackend:
     """Write a .b2f file to PAT's out/ directory for delivery on next sync."""
 
@@ -13,8 +25,9 @@ class WinlinkBackend:
         if not mailbox_path:
             return DeliveryResult(success=False, error="Winlink mailbox path not configured")
 
-        target_address = config.get("target_address", "")
-        callsign = config.get("callsign", "")
+        target_address = _strip_b2f_header_chars(config.get("target_address", ""))
+        callsign = _strip_b2f_header_chars(config.get("callsign", ""))
+        subject = _strip_b2f_header_chars(subject)
 
         try:
             out_dir = Path(mailbox_path) / "out"

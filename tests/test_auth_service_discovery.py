@@ -130,6 +130,55 @@ async def test_fetch_oidc_discovery_success():
 
 
 @pytest.mark.asyncio
+async def test_fetch_oidc_discovery_rejects_http_scheme():
+    """SSRF guard: non-https issuer URLs must be refused before any fetch."""
+    import backend.auth.service as svc
+
+    with patch("backend.auth.service.httpx.AsyncClient") as mock_client_cls:
+        result = await svc.fetch_oidc_discovery("http://example.com/.well-known/openid-configuration")
+
+    assert result is None
+    # Crucially: no HTTP fetch was even attempted.
+    mock_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_oidc_discovery_rejects_loopback_host():
+    """SSRF guard: localhost / 127.x must not be fetchable as an OIDC issuer."""
+    import backend.auth.service as svc
+
+    with patch("backend.auth.service.httpx.AsyncClient") as mock_client_cls:
+        result = await svc.fetch_oidc_discovery("https://127.0.0.1/.well-known/openid-configuration")
+
+    assert result is None
+    mock_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_oidc_discovery_rejects_link_local_metadata_ip():
+    """SSRF guard: AWS metadata IP 169.254.169.254 (link-local) must be refused."""
+    import backend.auth.service as svc
+
+    with patch("backend.auth.service.httpx.AsyncClient") as mock_client_cls:
+        result = await svc.fetch_oidc_discovery("https://169.254.169.254/.well-known/openid-configuration")
+
+    assert result is None
+    mock_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_oidc_discovery_rejects_private_rfc1918():
+    """SSRF guard: 10.x / 192.168.x / 172.16-31.x must be refused."""
+    import backend.auth.service as svc
+
+    for host in ("10.0.0.1", "192.168.1.1", "172.20.0.1"):
+        with patch("backend.auth.service.httpx.AsyncClient") as mock_client_cls:
+            result = await svc.fetch_oidc_discovery(f"https://{host}/.well-known/openid-configuration")
+        assert result is None
+        mock_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_fetch_oidc_discovery_failure_returns_none():
     import backend.auth.service as svc
 

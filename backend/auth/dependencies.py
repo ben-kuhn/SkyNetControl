@@ -185,24 +185,29 @@ def require_admin_or_recovery(
 
 def require_scope(*scopes: str) -> Callable:
     def dependency(request: Request, user: User = Depends(get_current_user)) -> User:
-        token_scopes = getattr(request.state, "token_scopes", None)
-        if token_scopes is None:
-            return user  # cookie auth = full access
         from backend.auth.scopes import SCOPES, _ROLE_RANK
 
         user_rank = _ROLE_RANK[user.role]
+        token_scopes = getattr(request.state, "token_scopes", None)
         for scope in scopes:
-            if scope not in token_scopes:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Token missing required scope: {scope}",
-                )
-            # Role intersection: check user's current role still permits this scope
+            # Cookie auth: no token-scopes set, but the user must still meet
+            # the scope's min_role. Previously this branch returned the user
+            # unconditionally — a future endpoint guarded by
+            # require_scope("users:write") would have admitted any logged-in
+            # viewer via the cookie path. The intent of require_scope is
+            # "this endpoint needs scope X, and X's min_role"; cookies
+            # bypass the per-scope grant check (since cookies aren't issued
+            # with scopes) but never the role floor.
             scope_min_rank = _ROLE_RANK[SCOPES[scope]["min_role"]]
             if user_rank < scope_min_rank:
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Your role no longer permits scope: {scope}",
+                    detail=f"Your role does not permit scope: {scope}",
+                )
+            if token_scopes is not None and scope not in token_scopes:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Token missing required scope: {scope}",
                 )
         return user
 

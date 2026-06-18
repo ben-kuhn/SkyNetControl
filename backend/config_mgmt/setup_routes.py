@@ -1,3 +1,4 @@
+import logging
 import secrets
 import urllib.parse
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ from backend.config_mgmt.smtp import SmtpConfig, upsert_smtp_config
 from backend.config_mgmt.smtp_routes import SmtpUpsert
 
 setup_router = APIRouter(tags=["setup"])
+logger = logging.getLogger(__name__)
 
 _SESSION_TTL = timedelta(minutes=30)
 
@@ -53,6 +55,12 @@ class _SetupSession:
 
 
 _SETUP_SESSIONS: dict[str, _SetupSession] = {}  # keyed by `state`
+# Hard cap to bound memory if a pre-setup attacker spams /claim/start
+# (the endpoint has no auth before the setup_completed sentinel is set —
+# anyone who can reach the listener can mint a session). Far above any
+# legitimate workload: only one operator runs the wizard at a time, and
+# stale entries get swept on every call.
+_SETUP_SESSIONS_MAX = 32
 
 
 def _sweep_expired() -> None:
@@ -139,6 +147,12 @@ async def setup_claim_start(
         raise HTTPException(status_code=410, detail="Setup already completed")
 
     _sweep_expired()
+
+    # Hard cap to deny pre-auth memory-exhaustion DoS. After sweep, if the
+    # live count is still at the cap, the attacker is the only thing keeping
+    # entries fresh — refuse rather than evict legitimate in-flight wizards.
+    if len(_SETUP_SESSIONS) >= _SETUP_SESSIONS_MAX:
+        raise HTTPException(status_code=503, detail="Too many setup sessions in flight; try again shortly")
 
     # Validate slug
     try:
@@ -323,8 +337,17 @@ async def try_complete_setup(
             )
             userinfo = userinfo_response.json()
     except Exception as exc:
+        # Log the full exception server-side; show a generic message to the
+        # caller. Pre-setup this page is reachable unauthenticated, and
+        # `exc` typically carries httpx connection details (target IPs,
+        # internal hostnames if the issuer was misconfigured) that
+        # shouldn't be echoed back to the browser.
+        logger.exception("OAuth completion failed in setup wizard: %s", exc)
         del _SETUP_SESSIONS[state]
-        return _error_html("OAuth Error", f"An error occurred during the OAuth flow: {exc}")
+        return _error_html(
+            "OAuth Error",
+            "An error occurred during the OAuth flow. Check the server logs and try again.",
+        )
 
     extracted_sub = extract_subject(userinfo)
     extracted_name = extract_name(userinfo)
