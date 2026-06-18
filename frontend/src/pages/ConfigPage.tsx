@@ -60,6 +60,14 @@ const CONFIG_FIELDS: ConfigField[] = [
       "Winlink address used for check-in message parsing and as {{ net_address }} in templates",
   },
   {
+    key: "registration_open",
+    label: "Open Registration",
+    group: "Net Operations",
+    type: "boolean",
+    helpText:
+      "When off, new OAuth sign-ins are refused (existing users still sign in). Turn off to prevent drive-by sign-ups from filling the database with pending rows.",
+  },
+  {
     key: "pat_mailbox_path",
     label: "PAT Mailbox Path",
     group: "PAT",

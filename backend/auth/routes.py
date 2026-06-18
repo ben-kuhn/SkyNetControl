@@ -144,6 +144,22 @@ async def callback(
         # count==0 and both insert as ADMIN. SQLite serializes writes
         # so this is a no-op there.
         user_count = db.query(User).with_for_update().count()
+
+        # Registration gate. The first signup always wins (that's how the
+        # admin claim works); subsequent signups require registration_open
+        # to be true. Default is "true" (status quo); admins can flip it
+        # from /config to stop drive-by OAuth flows from filling the DB
+        # with PENDING rows. Reading via get_config_value avoids a hard
+        # dependency on the AppConfig row existing.
+        if user_count > 0:
+            from backend.config_mgmt.service import get_config_value
+
+            if get_config_value(db, "registration_open", "true").lower() != "true":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Registration is closed. Contact the net administrator.",
+                )
+
         role = UserRole.ADMIN if user_count == 0 else UserRole.PENDING
 
         placeholder_callsign = f"PENDING-{oidc_subject[:12]}"

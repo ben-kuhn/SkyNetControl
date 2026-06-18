@@ -168,6 +168,54 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
 
 
 @pytest.mark.asyncio
+async def test_callback_registration_closed_blocks_new_user(test_client, test_app, db_setup):
+    """When registration_open=false, OAuth callback for an unknown subject 403s.
+
+    Existing users (oidc_subject already in DB) still sign in. First-signup
+    still works (a separate test covers that). This is the headline gate
+    against unauthenticated DB-row spam.
+    """
+    _, factory = db_setup
+
+    # Pre-seed an admin AND close registration via AppConfig.
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", role=UserRole.ADMIN))
+        from backend.config_mgmt.service import set_config_value
+        set_config_value(session, "registration_open", "false")
+        session.commit()
+
+    mock_token_response = MagicMock()
+    mock_token_response.json.return_value = {"access_token": "fake-token", "token_type": "Bearer"}
+    mock_userinfo_response = MagicMock()
+    mock_userinfo_response.json.return_value = {"sub": "stranger", "name": "Drive-By", "email": "x@y.z"}
+
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock, return_value=_GOOGLE_CONFIG):
+        with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_token_response
+            mock_client.get.return_value = mock_userinfo_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            login_resp = await test_client.get("/api/auth/login/google", follow_redirects=False)
+            cookies = login_resp.cookies
+            import urllib.parse
+            parsed = urllib.parse.urlparse(login_resp.headers.get("location", ""))
+            state = urllib.parse.parse_qs(parsed.query).get("state", [""])[0]
+
+            response = await test_client.get(
+                f"/api/auth/callback/google?code=authcode&state={state}",
+                cookies=cookies,
+                follow_redirects=False,
+            )
+
+    assert response.status_code == 403
+    with factory() as session:
+        assert session.query(User).filter(User.oidc_subject == "google:stranger").first() is None
+
+
+@pytest.mark.asyncio
 async def test_callback_existing_user_not_changed(test_client, test_app, db_setup):
     _, factory = db_setup
 
