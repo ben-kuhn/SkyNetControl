@@ -109,8 +109,9 @@ Hacking on the code? See **[docs/development.md](docs/development.md)** for the 
 
 | Doc | Audience |
 |-----|----------|
+| [docs/deployment/operations.md](docs/deployment/operations.md) | Day-to-day operations: first boot, recovery, key rotation, behind-proxy, backups |
 | [docs/deployment/oidc-providers.md](docs/deployment/oidc-providers.md) | Register OAuth/OIDC apps for sign-in |
-| [docs/deployment/secrets.md](docs/deployment/secrets.md) | Environment variables and secret management |
+| [docs/deployment/secrets.md](docs/deployment/secrets.md) | Bootstrap env vars and at-rest encryption model |
 | [docs/deployment/app-config-keys.md](docs/deployment/app-config-keys.md) | DB-stored runtime configuration (set via `/config`) |
 | [docs/deployment/nix.md](docs/deployment/nix.md) | Production deployment via Nix (NixOS module, OCI image, overlay) |
 | [docs/development.md](docs/development.md) | Local development setup |
