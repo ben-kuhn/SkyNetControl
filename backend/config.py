@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # App
     app_base_url: str = "http://localhost:8000"
 
+    # Comma-separated IP allowlist for proxies whose Forwarded headers we
+    # trust. Empty (the default) means "don't trust any" — request.client.host
+    # is taken verbatim. When set, the rate limiter accepts the right-most
+    # value of `CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For` as the
+    # true client IP IF the connecting peer is in this list. Typical value
+    # for a Cloudflare deployment: "127.0.0.1,::1" (the cloudflared sidecar
+    # / cloudflare tunnel endpoint). Operators behind a different proxy
+    # populate this with the proxy's egress IP(s).
+    trusted_proxies: str = ""
+
     model_config = {"env_prefix": "SKYNET_"}
 
 

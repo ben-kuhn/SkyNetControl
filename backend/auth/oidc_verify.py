@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from jose import JWTError, jwt
 
-from backend.auth.service import _ssrf_guard_discovery_url
+from backend.auth.service import _ssrf_guard_discovery_url_async
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ async def _fetch_jwks(jwks_uri: str) -> list[dict] | None:
     discovery cache could otherwise point us at an internal URL.
     """
     try:
-        _ssrf_guard_discovery_url(jwks_uri)
+        await _ssrf_guard_discovery_url_async(jwks_uri)
     except ValueError as exc:
         logger.error("Rejecting unsafe JWKS URI %s: %s", jwks_uri, exc)
         return None
@@ -77,6 +77,10 @@ async def _get_jwks(jwks_uri: str) -> list[dict] | None:
     if cached is not None:
         fetched_at, keys = cached
         if now - fetched_at < _JWKS_CACHE_TTL:
+            # LRU touch (see _get_discovery): otherwise an attacker
+            # rotating distinct jwks_uris evicts the legit entry.
+            del _JWKS_CACHE[jwks_uri]
+            _JWKS_CACHE[jwks_uri] = (fetched_at, keys)
             return keys
         del _JWKS_CACHE[jwks_uri]
     keys = await _fetch_jwks(jwks_uri)

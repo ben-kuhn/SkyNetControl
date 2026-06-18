@@ -29,10 +29,51 @@ _MAX_BUCKETS = 10_000
 _BUCKET_TTL_SEC = 600.0
 
 
+def _trusted_proxies(request: Request) -> set[str]:
+    """Read the trusted-proxy allowlist from app.state.settings.
+
+    Cached per-request via attribute lookup so we don't re-split on every
+    bucket check. Empty allowlist disables proxy-header trust entirely
+    (the safe default — without an allowlist, anyone can spoof
+    X-Forwarded-For)."""
+    try:
+        raw = request.app.state.settings.trusted_proxies
+    except AttributeError:
+        return set()
+    if not raw:
+        return set()
+    return {ip.strip() for ip in raw.split(",") if ip.strip()}
+
+
 def _client_ip(request: Request) -> str:
+    """Return the IP we'll bucket on.
+
+    When the connecting peer is in the trusted-proxy allowlist, consult
+    proxy-set headers in this order: CF-Connecting-IP (Cloudflare's
+    canonical), X-Real-IP (nginx convention), X-Forwarded-For (rightmost
+    public entry). Otherwise, ignore those headers — they're trivially
+    spoofable when the peer isn't actually a proxy. Behind Cloudflare,
+    this is the difference between a single shared bucket for every
+    visitor (useless) and a per-user bucket (the intended defence).
+    """
     if request.client is None:
         return "unknown"
-    return request.client.host
+    peer = request.client.host
+    if peer in _trusted_proxies(request):
+        for header in ("cf-connecting-ip", "x-real-ip"):
+            v = request.headers.get(header, "").strip()
+            if v:
+                return v
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            # Right-most non-trusted entry. XFF is "client, proxy1, proxy2";
+            # walking from the right skips any chained proxies that are
+            # also in our allowlist.
+            allowed = _trusted_proxies(request)
+            for entry in reversed([e.strip() for e in xff.split(",") if e.strip()]):
+                if entry not in allowed:
+                    return entry
+    return peer
 
 
 def _maybe_sweep(now: float) -> None:

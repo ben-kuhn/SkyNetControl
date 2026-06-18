@@ -1,3 +1,4 @@
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -48,6 +49,19 @@ def decode_access_token(token: str, settings: Settings) -> dict | None:
         return None
 
 
+def _ssrf_guard_check_resolved_ips(host: str, infos: list) -> None:
+    """Inspect the resolved IPs and raise ValueError if any is non-global.
+
+    Split out from _ssrf_guard_discovery_url so the sync wrapper can keep
+    calling getaddrinfo directly (for back-compat with existing callers
+    and tests) while the async path can offload resolution to a thread.
+    """
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ValueError(f"OIDC issuer host {host} resolves to a non-global IP ({ip})")
+
+
 def _ssrf_guard_discovery_url(url: str) -> None:
     """Raise ValueError if `url` is unsafe to fetch from the server side.
 
@@ -62,6 +76,10 @@ def _ssrf_guard_discovery_url(url: str) -> None:
     between this resolve and httpx's own resolve at fetch time; closing
     that fully needs a custom DNS resolver. A pre-fetch check still
     blocks the trivial misconfigurations (http://, localhost, AWS metadata).
+
+    This is the sync entry point. fetch_oidc_discovery offloads the DNS
+    lookup to a thread via `_ssrf_guard_discovery_url_async` so a slow
+    resolver doesn't stall the asyncio event loop.
     """
     parsed = urlparse(url)
     if parsed.scheme != "https":
@@ -73,16 +91,34 @@ def _ssrf_guard_discovery_url(url: str) -> None:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise ValueError(f"OIDC issuer host could not be resolved: {host}") from exc
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if not ip.is_global:
-            raise ValueError(f"OIDC issuer host {host} resolves to a non-global IP ({ip})")
+    _ssrf_guard_check_resolved_ips(host, infos)
+
+
+async def _ssrf_guard_discovery_url_async(url: str) -> None:
+    """Async-safe variant of _ssrf_guard_discovery_url.
+
+    socket.getaddrinfo is blocking. Calling it directly on the asyncio
+    loop lets an attacker submit hostnames whose DNS resolution stalls
+    (slow / non-responsive nameserver) to occupy the single uvicorn
+    worker. Offload to a thread so other requests keep moving.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"OIDC issuer URL must use https:// scheme (got {parsed.scheme or '(none)'})")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("OIDC issuer URL has no hostname")
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"OIDC issuer host could not be resolved: {host}") from exc
+    _ssrf_guard_check_resolved_ips(host, infos)
 
 
 async def fetch_oidc_discovery(discovery_url: str) -> dict | None:
     """Fetch OIDC discovery document and return endpoint URLs, or None on failure."""
     try:
-        _ssrf_guard_discovery_url(discovery_url)
+        await _ssrf_guard_discovery_url_async(discovery_url)
     except ValueError as exc:
         logger.error("Rejecting unsafe OIDC discovery URL %s: %s", discovery_url, exc)
         return None
@@ -112,13 +148,18 @@ async def _get_discovery(discovery_url: str) -> dict | None:
     if cached is not None:
         fetched_at, doc = cached
         if now - fetched_at < _DISCOVERY_CACHE_TTL:
+            # Move to MRU end so cap-eviction targets the least-recently-
+            # used entry, not the oldest-by-insertion. Without this, an
+            # attacker who can force enough discovery fetches to fill the
+            # cap would evict the legit IdP every cycle.
+            del _DISCOVERY_CACHE[discovery_url]
+            _DISCOVERY_CACHE[discovery_url] = (fetched_at, doc)
             return doc
         del _DISCOVERY_CACHE[discovery_url]
     discovery = await fetch_oidc_discovery(discovery_url)
     if discovery is not None:
         if len(_DISCOVERY_CACHE) >= _DISCOVERY_CACHE_MAX:
-            # Evict the oldest entry. Dict iteration order is insertion-order
-            # in CPython 3.7+, so popitem(last=False)-style works via next().
+            # Evict LRU (insertion order = LRU order once we touch on read).
             oldest = next(iter(_DISCOVERY_CACHE))
             del _DISCOVERY_CACHE[oldest]
         _DISCOVERY_CACHE[discovery_url] = (now, discovery)

@@ -81,27 +81,29 @@ def test_each_ciphertext_uses_a_fresh_nonce():
     assert decrypt(a) == decrypt(b) == "same-plaintext"
 
 
-def test_key_change_breaks_decrypt():
-    """If the operator rotates the JWT secret without re-encrypting, the
-    encrypted rows become unrecoverable. Document this with a test so the
-    behaviour is intentional, not surprising. The wizard's preserve-on-
-    empty sentinel is the recovery path: operator just re-enters secrets."""
+def test_key_change_returns_empty_instead_of_crashing():
+    """Key-mismatch handling: decrypt returns "" (not raise) so the
+    surrounding auth/SMTP path degrades to "no credential" instead of
+    500'ing the whole route. Operators recover via the wizard's
+    preserve-on-empty sentinel by re-entering the credential under the
+    current key."""
     install_key_material("key-A")
     ct = encrypt("hello")
-
     install_key_material("key-B")
-    # Different key derived from "key-B" cannot decrypt rows encrypted
-    # under "key-A". The cryptography library raises InvalidTag.
-    from cryptography.exceptions import InvalidTag
-    try:
-        decrypt(ct)
-    except InvalidTag:
-        pass
-    else:
-        raise AssertionError("decrypt should have raised InvalidTag under a different key")
-
+    # The agent's most-feared regression: callers used to see InvalidTag
+    # propagate to FastAPI as a 500. The new behaviour returns empty.
+    assert decrypt(ct) == ""
     # Restore the test key so other tests keep working.
     install_key_material("test-secret")
+
+
+def test_decrypt_malformed_envelope_returns_empty():
+    """Truncated / hand-edited `enc:v1:` payload must not crash the call site."""
+    install_key_material("test-secret")
+    # base64-undecodable suffix
+    assert decrypt("enc:v1:not-valid-base64!!!") == ""
+    # base64 ok but plaintext too short to contain nonce + ciphertext
+    assert decrypt("enc:v1:dGVzdA==") == ""
 
 
 def test_at_rest_storage_is_encrypted(tmp_path):

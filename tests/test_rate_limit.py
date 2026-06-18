@@ -57,6 +57,56 @@ def test_refill_restores_quota():
     assert client.get("/").status_code == 200
 
 
+def test_trusted_proxy_unwraps_cf_connecting_ip():
+    """Behind a trusted proxy, CF-Connecting-IP is the real client.
+
+    Without this, every request collapses to the proxy IP and the rate
+    limiter is effectively a global counter. This test seeds settings.
+    trusted_proxies with 127.0.0.1 (the TestClient's connecting peer),
+    then varies the CF-Connecting-IP header to prove different clients
+    get different buckets even though they all share one peer.
+    """
+    rl.reset_for_tests()
+    from types import SimpleNamespace
+
+    app = FastAPI()
+    # starlette TestClient connects from ("testclient", 50000), so that's
+    # the peer the rate limiter sees — allowlist must include it.
+    app.state.settings = SimpleNamespace(trusted_proxies="testclient")
+
+    @app.get("/", dependencies=[Depends(rl.rate_limit("cf", capacity=1, refill_per_sec=0.01))])
+    def root():
+        return {"ok": True}
+
+    client = TestClient(app)
+    assert client.get("/", headers={"CF-Connecting-IP": "1.1.1.1"}).status_code == 200
+    assert client.get("/", headers={"CF-Connecting-IP": "1.1.1.1"}).status_code == 429
+    # Different real client → its own bucket.
+    assert client.get("/", headers={"CF-Connecting-IP": "2.2.2.2"}).status_code == 200
+
+
+def test_untrusted_peer_ignores_forwarded_headers():
+    """When the connecting peer is NOT in trusted_proxies, spoofed
+    X-Forwarded-For / CF-Connecting-IP must be ignored — otherwise an
+    attacker connecting directly can pretend to be a different client on
+    every request to dodge the rate limit."""
+    rl.reset_for_tests()
+    from types import SimpleNamespace
+
+    app = FastAPI()
+    # 127.0.0.1 is the test peer; allowlist excludes it.
+    app.state.settings = SimpleNamespace(trusted_proxies="10.0.0.1")
+
+    @app.get("/", dependencies=[Depends(rl.rate_limit("spoof", capacity=1, refill_per_sec=0.01))])
+    def root():
+        return {"ok": True}
+
+    client = TestClient(app)
+    # Even with varying spoofed headers, the bucket key stays 127.0.0.1.
+    assert client.get("/", headers={"CF-Connecting-IP": "1.1.1.1"}).status_code == 200
+    assert client.get("/", headers={"CF-Connecting-IP": "2.2.2.2"}).status_code == 429
+
+
 def test_unknown_client_doesnt_crash():
     """request.client can be None in some ASGI scenarios; the limiter
     must not blow up — it just attributes to a synthetic "unknown" IP."""

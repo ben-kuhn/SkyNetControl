@@ -26,11 +26,15 @@ Lifecycle:
 - All other code (oauth.py, smtp.py) just calls encrypt/decrypt.
 """
 import base64
+import logging
 import os
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+logger = logging.getLogger(__name__)
 
 _PREFIX = "enc:v1:"
 _HKDF_SALT = b"skynetcontrol-secretbox-salt-v1"
@@ -78,9 +82,32 @@ def decrypt(stored: str) -> str:
     The passthrough branch supports installs whose existing rows are
     plaintext from before this module landed; those rows re-encrypt on
     the next admin save (oauth/smtp upsert paths always encrypt).
+
+    Key-mismatch handling: AESGCM.decrypt raises InvalidTag when the key
+    derived from the current SKYNET_SECRETS_KEY can't authenticate the
+    ciphertext (rotation without re-encryption, or a corrupt row). The
+    caller cannot meaningfully recover the plaintext from that state, so
+    we return "" — the same sentinel get_oauth_provider / get_smtp_config
+    treat as "no value configured." Auth flows degrade to "provider has
+    no secret" (the wizard's preserve-on-empty re-save fixes it) instead
+    of 500'ing the whole route. The failure is logged at ERROR for ops.
     """
     if not stored or not stored.startswith(_PREFIX):
         return stored
-    blob = base64.urlsafe_b64decode(stored[len(_PREFIX):].encode("ascii"))
-    nonce, ct = blob[:12], blob[12:]
-    return AESGCM(_derive_key()).decrypt(nonce, ct, None).decode("utf-8")
+    try:
+        blob = base64.urlsafe_b64decode(stored[len(_PREFIX):].encode("ascii"))
+        nonce, ct = blob[:12], blob[12:]
+        return AESGCM(_derive_key()).decrypt(nonce, ct, None).decode("utf-8")
+    except InvalidTag:
+        logger.error(
+            "secret_box decrypt: ciphertext does not authenticate under current key. "
+            "If SKYNET_SECRETS_KEY (or, in the fallback path, SKYNET_JWT_SECRET_KEY) "
+            "was just rotated, re-enter the credential via the admin config page or "
+            "the recovery wizard. Returning empty so the route doesn't 500."
+        )
+        return ""
+    except (ValueError, base64.binascii.Error):
+        # Malformed envelope (truncated, hand-edited, etc.). Treat as
+        # missing rather than crashing the request path.
+        logger.error("secret_box decrypt: malformed envelope for stored value")
+        return ""

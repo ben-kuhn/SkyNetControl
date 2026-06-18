@@ -280,9 +280,11 @@ class RegisterRequest(BaseModel):
 
 @auth_router.post("/register")
 async def register(
+    response: Response,
     body: RegisterRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
 ):
     # Gate: only users who haven't claimed a real callsign yet may register.
     # The "PENDING-" prefix is what indicates "no real callsign chosen" — NOT
@@ -309,6 +311,22 @@ async def register(
     db.commit()
 
     user = db.get(User, callsign)
+
+    # Reissue the access_token cookie under the new callsign. Without
+    # this, the JWT's `sub` claim still points at the old PENDING- row
+    # (which no longer exists), so the *very next* request 401s
+    # ("User not found") and the user has to sign in again. Use the
+    # current token_version so the new cookie is immediately valid.
+    new_jwt = create_access_token(user.callsign, user.role.value, app_settings, user.token_version)
+    is_secure = app_settings.app_base_url.startswith("https://")
+    response.set_cookie(
+        key="access_token",
+        value=new_jwt,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        max_age=app_settings.jwt_expire_minutes * 60,
+    )
 
     # Notify admins (fire-and-forget)
     admins = db.query(User).filter(User.role == UserRole.ADMIN).all()

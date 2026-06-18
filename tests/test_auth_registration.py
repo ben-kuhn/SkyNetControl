@@ -166,6 +166,16 @@ async def test_register_admin_with_placeholder_callsign(test_client, test_settin
     assert body["callsign"] == "W0ABC"
     assert body["role"] == "admin"
 
+    # /register must reissue the access_token cookie under the new callsign;
+    # otherwise the next request 401s because the JWT's `sub` still points
+    # at the old PENDING- row that's been renamed away. The new cookie must
+    # let /me succeed immediately under the new callsign.
+    new_token = response.cookies.get("access_token")
+    assert new_token is not None and new_token != token
+    me = await test_client.get("/api/auth/me", cookies={"access_token": new_token})
+    assert me.status_code == 200
+    assert me.json()["callsign"] == "W0ABC"
+
 
 @pytest.mark.asyncio
 async def test_register_unauthenticated(test_client):
