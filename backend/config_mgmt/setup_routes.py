@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_db_session, get_settings
+from backend.auth.rate_limit import rate_limit
 from backend.auth.recovery import decode_recovery_token
 from backend.auth.models import User, UserRole
 from backend.auth.providers import (
@@ -133,7 +134,12 @@ def setup_status(
 # ---------------------------------------------------------------------------
 
 
-@setup_router.post("/claim/start")
+@setup_router.post(
+    "/claim/start",
+    # Pre-auth, pre-setup. _SETUP_SESSIONS_MAX caps memory; this caps
+    # request rate. Together they make the unauth window safe.
+    dependencies=[Depends(rate_limit("setup.claim_start", capacity=5, refill_per_sec=5 / 60))],
+)
 async def setup_claim_start(
     body: SetupClaimStart,
     db: Session = Depends(get_db_session),

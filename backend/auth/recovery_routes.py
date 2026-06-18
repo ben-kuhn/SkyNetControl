@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_db_session, get_settings
+from backend.auth.rate_limit import rate_limit
 from backend.auth.recovery import (
     claim_token,
     cookie_ttl_seconds,
@@ -24,7 +25,12 @@ from backend.config import Settings
 recovery_router = APIRouter(prefix="/recovery", tags=["recovery"])
 
 
-@recovery_router.get("/status")
+@recovery_router.get(
+    "/status",
+    # Public info disclosure (boolean). Keep the rate generous; this is
+    # polled by the recovery UI.
+    dependencies=[Depends(rate_limit("recovery.status", capacity=30, refill_per_sec=30 / 60))],
+)
 def recovery_status(db: Session = Depends(get_db_session)) -> dict:
     """Return {outstanding: bool} — true iff at least one unused, unexpired token exists."""
     return {"outstanding": len(list_outstanding(db)) > 0}
@@ -34,7 +40,13 @@ class RecoveryClaimRequest(BaseModel):
     token: str
 
 
-@recovery_router.post("/claim")
+@recovery_router.post(
+    "/claim",
+    # Tight: this is the brute-force surface. Plaintext recovery tokens
+    # are 256-bit random so guessing is infeasible — but rate limiting
+    # still suppresses any sustained probing.
+    dependencies=[Depends(rate_limit("recovery.claim", capacity=5, refill_per_sec=5 / 60))],
+)
 def recovery_claim(
     body: RecoveryClaimRequest,
     response: Response,

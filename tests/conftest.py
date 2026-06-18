@@ -2,6 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.app import create_app
+from backend.auth.rate_limit import reset_for_tests as _reset_rate_limit
 from backend.auth.secret_box import install_key_material
 from backend.config import Settings
 from backend.db.base import Base
@@ -13,6 +14,17 @@ from backend.db.base import Base
 # single process, so the actual material doesn't matter as long as it's
 # consistent across the whole run.
 install_key_material("test-secret")
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The in-memory per-IP rate limiter is process-global. Without a
+    reset between tests, requests from the synthetic test client at
+    127.0.0.1 share state across the whole suite — and a stress test
+    file can starve every subsequent test of its quota."""
+    _reset_rate_limit()
+    yield
+    _reset_rate_limit()
 
 
 @pytest.fixture

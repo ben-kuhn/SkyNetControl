@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session, get_settings, require_role
+from backend.auth.rate_limit import rate_limit
 from backend.auth.email import (
     notify_admins_new_registration,
     notify_admins_callsign_change,
@@ -38,7 +39,12 @@ async def list_providers(db: Session = Depends(get_db_session)):
     ]
 
 
-@auth_router.get("/login/{provider}")
+@auth_router.get(
+    "/login/{provider}",
+    # 10-request burst then ~10/min steady. Plenty for a human clicking
+    # "Sign in" repeatedly; ceiling for a script.
+    dependencies=[Depends(rate_limit("auth.login", capacity=10, refill_per_sec=10 / 60))],
+)
 async def login(
     provider: str,
     db: Session = Depends(get_db_session),
@@ -71,7 +77,12 @@ async def login(
     return response
 
 
-@auth_router.get("/callback/{provider}")
+@auth_router.get(
+    "/callback/{provider}",
+    # Same as /login. This is the route that creates PENDING users; the
+    # registration_open gate plus this throttle bound DB-row spam.
+    dependencies=[Depends(rate_limit("auth.callback", capacity=10, refill_per_sec=10 / 60))],
+)
 async def callback(
     provider: str,
     code: str = "",
@@ -200,7 +211,11 @@ async def me(user: User = Depends(get_current_user)):
     }
 
 
-@auth_router.post("/logout")
+@auth_router.post(
+    "/logout",
+    # Cheap, but bumps a DB row; throttle.
+    dependencies=[Depends(rate_limit("auth.logout", capacity=30, refill_per_sec=30 / 60))],
+)
 async def logout(
     access_token: str | None = Cookie(default=None),
     db: Session = Depends(get_db_session),
