@@ -1,11 +1,14 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.config import Settings, settings as default_settings
 from backend.db.session import create_engine_from_url, create_session_factory
@@ -92,6 +95,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.settings = settings
+
+    # TrustedHost: reject requests whose Host header doesn't match the
+    # configured app_base_url. Defense in depth against a misconfigured
+    # proxy passing arbitrary Host headers (the OAuth flow already uses
+    # app_settings.app_base_url for redirects, but future code that
+    # consults request.url.hostname benefits). Only enforced when the
+    # operator has configured a non-localhost app_base_url — the default
+    # localhost / dev / test setups send a variety of Host headers
+    # (httpx ASGI client → "test", uvicorn dev → "127.0.0.1", etc.) and
+    # locking those down would just make every test fixture configure it.
+    parsed_base = urlparse(settings.app_base_url)
+    base_host = parsed_base.hostname or ""
+    if base_host and base_host not in ("localhost", "127.0.0.1"):
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=sorted({base_host, "localhost", "127.0.0.1"}),
+        )
+
+    # Security response headers. HSTS only emitted on HTTPS (no point — and
+    # actively harmful — on plain HTTP development setups). CSP is permissive
+    # by default: blocks third-party script/frame embedding without breaking
+    # the SPA bundle that lives same-origin under /assets.
+    is_https = settings.app_base_url.startswith("https://")
+
+    class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            response = await call_next(request)
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "DENY")
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'",
+            )
+            if is_https:
+                response.headers.setdefault(
+                    "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+                )
+            return response
+
+    app.add_middleware(_SecurityHeadersMiddleware)
 
     @app.get("/api/health")
     async def health():

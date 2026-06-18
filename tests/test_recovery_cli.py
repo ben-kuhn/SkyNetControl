@@ -129,6 +129,51 @@ def test_cli_revoke_unknown_prefix_exits_0(tmp_path, capsys, monkeypatch):
     assert "0 token(s)" in out
 
 
+def test_cli_rotate_secrets_re_encrypts_plaintext_rows(tmp_path, monkeypatch, capsys):
+    """rotate-secrets walks AppConfig and re-envelopes any plaintext
+    oauth/smtp credential rows. Idempotent — already-encrypted rows pass
+    through. Non-sensitive rows are left untouched.
+    """
+    url, engine = _make_db(tmp_path)
+    monkeypatch.setenv("SKYNET_DATABASE_URL", url)
+    monkeypatch.setenv("SKYNET_JWT_SECRET_KEY", "test-secret")
+
+    # Hand-seed: one plaintext sensitive row, one already-encrypted
+    # sensitive row, one non-sensitive row.
+    from backend.auth.secret_box import _PREFIX, encrypt, install_key_material
+    from backend.config_mgmt.models import AppConfig
+    install_key_material("test-secret")
+    factory = create_session_factory(engine)
+    with factory() as db:
+        db.add(AppConfig(key="oauth.google.client_secret", value="plain-google-secret"))
+        db.add(AppConfig(key="smtp.password", value=encrypt("already-protected")))
+        db.add(AppConfig(key="net_address", value="w0ne@winlink.org"))
+        db.commit()
+
+    rc = main(["rotate-secrets"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Re-encrypted 1 row(s); 1 were already encrypted." in out
+
+    with factory() as db:
+        google = db.get(AppConfig, "oauth.google.client_secret")
+        smtp = db.get(AppConfig, "smtp.password")
+        net = db.get(AppConfig, "net_address")
+        assert google.value.startswith(_PREFIX)
+        assert "plain-google-secret" not in google.value
+        # Already-encrypted row is unchanged byte-for-byte.
+        from backend.auth.secret_box import decrypt
+        assert decrypt(smtp.value) == "already-protected"
+        # Non-sensitive row is untouched.
+        assert net.value == "w0ne@winlink.org"
+
+    # Second run is idempotent — nothing left to re-encrypt.
+    rc = main(["rotate-secrets"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Re-encrypted 0 row(s); 2 were already encrypted." in out
+
+
 def test_cli_unknown_subcommand_exits_nonzero(monkeypatch, capsys, tmp_path):
     url, _ = _make_db(tmp_path)
     monkeypatch.setenv("SKYNET_DATABASE_URL", url)

@@ -63,6 +63,57 @@ async def test_index_html_is_no_cache_and_assets_are_immutable():
 
 
 @pytest.mark.asyncio
+async def test_security_headers_set_on_responses():
+    """Defense-in-depth headers must be set on every response."""
+    settings = Settings(database_url="sqlite:///", jwt_secret_key="test-secret")
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/health")
+        assert resp.status_code == 200
+        assert resp.headers.get("x-content-type-options") == "nosniff"
+        assert resp.headers.get("x-frame-options") == "DENY"
+        assert resp.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+        assert "default-src 'self'" in resp.headers.get("content-security-policy", "")
+        # HSTS only when https — default app_base_url is http://localhost:8000.
+        assert "strict-transport-security" not in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_hsts_is_set_when_https():
+    settings = Settings(
+        database_url="sqlite:///",
+        jwt_secret_key="test-secret",
+        app_base_url="https://example.com",
+    )
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="https://example.com") as client:
+        resp = await client.get("/api/health")
+        hsts = resp.headers.get("strict-transport-security", "")
+        assert "max-age=" in hsts
+        assert "includeSubDomains" in hsts
+
+
+@pytest.mark.asyncio
+async def test_trusted_host_rejects_mismatched_host():
+    """When app_base_url is non-localhost, requests with a different Host
+    header are refused before reaching any handler. Prevents proxy-Host-
+    confusion attacks against code that consults request.url.hostname."""
+    settings = Settings(
+        database_url="sqlite:///",
+        jwt_secret_key="test-secret",
+        app_base_url="https://skynet.example.com",
+    )
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    # Spoofed Host header — should be rejected by TrustedHostMiddleware.
+    async with AsyncClient(transport=transport, base_url="http://evil.example.com") as client:
+        resp = await client.get("/api/health")
+        assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_url_encoded_path_traversal_is_blocked():
     """Pre-auth file-read guard.
 
