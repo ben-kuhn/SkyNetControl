@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from backend.auth.oidc_slug import RESERVED_SLUGS, validate_slug
+from backend.auth.secret_box import decrypt, encrypt
 from backend.config_mgmt.models import AppConfig
 
 
@@ -49,7 +50,11 @@ def _build(slug: str, rows: dict[str, str]) -> OAuthProviderConfig:
         name=rows.get("name", ""),
         enabled=rows.get("enabled", "false").lower() == "true",
         client_id=rows.get("client_id", ""),
-        client_secret=rows.get("client_secret", ""),
+        # client_secret is the only sensitive field; decrypt on read. Rows
+        # written before secret_box landed are returned by decrypt unchanged
+        # (passthrough on missing `enc:v1:` prefix) and re-encrypted next
+        # time the admin saves.
+        client_secret=decrypt(rows.get("client_secret", "")),
         issuer_url=rows.get("issuer_url", ""),
     )
 
@@ -98,7 +103,9 @@ def upsert_oauth_provider(db: Session, provider: OAuthProviderConfig) -> None:
         "name": provider.name,
         "enabled": "true" if provider.enabled else "false",
         "client_id": provider.client_id,
-        "client_secret": provider.client_secret,
+        # Encrypt at-rest. encrypt("") -> "" so the no-secret case (e.g.
+        # disabled provider with no credentials) round-trips cleanly.
+        "client_secret": encrypt(provider.client_secret),
         "issuer_url": provider.issuer_url,
     }
     for field_name, value in values.items():

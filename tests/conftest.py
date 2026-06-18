@@ -2,8 +2,17 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.app import create_app
+from backend.auth.secret_box import install_key_material
 from backend.config import Settings
 from backend.db.base import Base
+
+
+# Many tests construct routes / call upsert_oauth_provider without going
+# through create_app, so the secret_box key isn't bound. Install a fixed
+# test key once at session start — encrypt/decrypt are symmetric within a
+# single process, so the actual material doesn't matter as long as it's
+# consistent across the whole run.
+install_key_material("test-secret")
 
 
 @pytest.fixture

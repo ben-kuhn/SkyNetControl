@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from backend.auth.secret_box import decrypt, encrypt
 from backend.config_mgmt.models import AppConfig
 
 
@@ -52,7 +53,10 @@ def get_smtp_config(db: Session) -> SmtpConfig | None:
         host=host,
         port=port,
         username=_row(db, "smtp.username") or "",
-        password=_row(db, "smtp.password") or "",
+        # password is the only sensitive field; decrypt on read. Plaintext
+        # rows from before secret_box landed pass through unchanged and
+        # re-encrypt next time the admin saves.
+        password=decrypt(_row(db, "smtp.password") or ""),
         from_address=_row(db, "smtp.from_address") or "",
         use_tls=(_row(db, "smtp.use_tls") or "false").lower() == "true",
     )
@@ -64,7 +68,8 @@ def upsert_smtp_config(db: Session, cfg: SmtpConfig) -> None:
         "smtp.host": cfg.host,
         "smtp.port": str(cfg.port),
         "smtp.username": cfg.username,
-        "smtp.password": cfg.password,
+        # encrypt("") -> "" so the no-auth SMTP case still round-trips.
+        "smtp.password": encrypt(cfg.password),
         "smtp.from_address": cfg.from_address,
         "smtp.use_tls": "true" if cfg.use_tls else "false",
     }

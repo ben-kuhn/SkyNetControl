@@ -42,6 +42,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "SKYNET_JWT_SECRET_KEY env var before starting the server."
         )
 
+    # Bind the AEAD key used by backend.auth.secret_box for at-rest
+    # encryption of OAuth client secrets and SMTP password in app_config.
+    # Derived from the JWT secret via HKDF; rotating the JWT secret invalidates
+    # encrypted rows (operator re-enters via the wizard's preserve sentinel).
+    from backend.auth.secret_box import install_key_material
+
+    install_key_material(settings.jwt_secret_key)
+
     engine = create_engine_from_url(settings.database_url)
     session_factory = create_session_factory(engine)
 
