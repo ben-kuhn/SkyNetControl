@@ -74,9 +74,44 @@ async def test_security_headers_set_on_responses():
         assert resp.headers.get("x-content-type-options") == "nosniff"
         assert resp.headers.get("x-frame-options") == "DENY"
         assert resp.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
-        assert "default-src 'self'" in resp.headers.get("content-security-policy", "")
+        csp = resp.headers.get("content-security-policy", "")
+        assert "default-src 'self'" in csp
+        # script-src must NOT contain 'unsafe-inline' — inline scripts in
+        # the served index.html are now allow-listed by SHA-256 hash.
+        # When the test runs without a static_dir, there's no index.html
+        # and script-src is just 'self' — also no unsafe-inline.
+        assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
         # HSTS only when https — default app_base_url is http://localhost:8000.
         assert "strict-transport-security" not in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_csp_emits_sha256_for_inline_index_scripts(tmp_path):
+    """When index.html contains an inline <script>, its SHA-256 is in CSP."""
+    index = tmp_path / "index.html"
+    # Realistic theme-bootstrap snippet (same shape as frontend/index.html).
+    index.write_text(
+        '<!doctype html><html><head><script>(function(){var t="dark";})();</script>'
+        '</head><body></body></html>'
+    )
+    settings = Settings(
+        database_url="sqlite:///",
+        jwt_secret_key="test-secret",
+        static_dir=str(tmp_path),
+    )
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/health")
+        csp = resp.headers.get("content-security-policy", "")
+        # Compute the expected hash for the inline script body.
+        import base64, hashlib
+        expected = "'sha256-" + base64.b64encode(
+            hashlib.sha256(b'(function(){var t="dark";})();').digest()
+        ).decode("ascii") + "'"
+        assert expected in csp
+        # And the offending 'unsafe-inline' is absent from script-src.
+        assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
 
 
 @pytest.mark.asyncio

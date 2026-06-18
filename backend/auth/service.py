@@ -95,12 +95,23 @@ def _ssrf_guard_discovery_url(url: str) -> None:
 
 
 async def _ssrf_guard_discovery_url_async(url: str) -> None:
-    """Async-safe variant of _ssrf_guard_discovery_url.
+    """Async-safe SSRF guard. Use before EVERY httpx fetch of an
+    attacker-influenceable URL — not just the issuer discovery URL but
+    also the token/userinfo/jwks URLs that come from the discovery doc
+    (a hostile discovery server can otherwise point those at internal
+    addresses and bypass the guard entirely).
 
-    socket.getaddrinfo is blocking. Calling it directly on the asyncio
-    loop lets an attacker submit hostnames whose DNS resolution stalls
-    (slow / non-responsive nameserver) to occupy the single uvicorn
-    worker. Offload to a thread so other requests keep moving.
+    socket.getaddrinfo is blocking, so we offload to a thread; without
+    that, a slow-resolving attacker hostname could stall the single
+    uvicorn worker.
+
+    Residual TOCTOU: between this guard's resolve and httpx's own
+    resolve at fetch time, an attacker controlling DNS could swap the
+    response (DNS rebinding). The window in practice is microseconds —
+    the next-line connection establishes immediately after we return —
+    so practical exploitation needs sub-millisecond DNS response timing.
+    Closing the gap fully requires a custom httpx transport that pins
+    the resolved IP; tracked as future work.
     """
     parsed = urlparse(url)
     if parsed.scheme != "https":

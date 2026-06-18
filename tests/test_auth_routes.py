@@ -188,6 +188,37 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
 
 
 @pytest.mark.asyncio
+async def test_callback_refuses_ssrf_token_url(test_client, test_app, db_setup):
+    """A discovery doc that points token_endpoint at an internal address
+    must not get free SSRF. The SSRF guard runs on token_url and
+    userinfo_url before any httpx fetch."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", role=UserRole.ADMIN))
+        session.commit()
+
+    # Hostile config: token_url points at loopback.
+    hostile = dict(_GOOGLE_CONFIG)
+    hostile["token_url"] = "https://127.0.0.1/internal/token"
+
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock, return_value=hostile):
+        login_resp = await test_client.get("/api/auth/login/google", follow_redirects=False)
+        cookies = login_resp.cookies
+        import urllib.parse
+        parsed = urllib.parse.urlparse(login_resp.headers.get("location", ""))
+        state = urllib.parse.parse_qs(parsed.query).get("state", [""])[0]
+
+        response = await test_client.get(
+            f"/api/auth/callback/google?code=authcode&state={state}",
+            cookies=cookies,
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+    assert "ssrf guard" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_callback_registration_closed_blocks_new_user(test_client, test_app, db_setup):
     """When registration_open=false, OAuth callback for an unknown subject 403s.
 

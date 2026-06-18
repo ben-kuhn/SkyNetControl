@@ -153,7 +153,8 @@ def test_cli_rotate_secrets_re_encrypts_plaintext_rows(tmp_path, monkeypatch, ca
     rc = main(["rotate-secrets"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Re-encrypted 1 row(s); 1 were already encrypted." in out
+    assert "Re-encrypted 1 row(s) from plaintext" in out
+    assert "1 were already encrypted under current key" in out
 
     with factory() as db:
         google = db.get(AppConfig, "oauth.google.client_secret")
@@ -171,7 +172,70 @@ def test_cli_rotate_secrets_re_encrypts_plaintext_rows(tmp_path, monkeypatch, ca
     rc = main(["rotate-secrets"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Re-encrypted 0 row(s); 2 were already encrypted." in out
+    assert "Re-encrypted 0 row(s)" in out
+    assert "2 were already encrypted under current key" in out
+
+
+def test_cli_rotate_secrets_from_key_migrates_old_envelope(tmp_path, monkeypatch, capsys):
+    """--from-key migrates rows encrypted under the previous key.
+
+    Workflow: install old key, encrypt a row, then install new key (sim
+    rotation), run rotate-secrets --from-key OLD. The row should be
+    decrypted under OLD and re-encrypted under the current key, with the
+    plaintext preserved through the round-trip.
+    """
+    url, engine = _make_db(tmp_path)
+    monkeypatch.setenv("SKYNET_DATABASE_URL", url)
+
+    from backend.auth.secret_box import _PREFIX, decrypt, encrypt, install_key_material
+    from backend.config_mgmt.models import AppConfig
+
+    # Encrypt under the OLD key directly into the DB.
+    install_key_material("old-secret-key")
+    factory = create_session_factory(engine)
+    with factory() as db:
+        db.add(AppConfig(key="oauth.google.client_secret", value=encrypt("ORIGINAL-PLAINTEXT")))
+        db.commit()
+
+    # Now rotate: install the NEW key as if the operator changed env.
+    monkeypatch.setenv("SKYNET_JWT_SECRET_KEY", "new-secret-key")
+    # Without --from-key, the row is unrecoverable. With it, it migrates.
+    rc = main(["rotate-secrets", "--from-key", "old-secret-key"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "migrated 1" in out
+
+    # Re-bind the current key in this test process (the CLI bound it
+    # via its own install_key_material call) and verify the row now
+    # decrypts under the new key.
+    install_key_material("new-secret-key")
+    with factory() as db:
+        row = db.get(AppConfig, "oauth.google.client_secret")
+        assert row.value.startswith(_PREFIX)
+        assert decrypt(row.value) == "ORIGINAL-PLAINTEXT"
+
+
+def test_cli_rotate_secrets_without_from_key_warns_on_unrecoverable(tmp_path, monkeypatch, capsys):
+    """Without --from-key, an old-key envelope is flagged as unrecoverable
+    rather than silently re-encrypting garbage."""
+    url, engine = _make_db(tmp_path)
+    monkeypatch.setenv("SKYNET_DATABASE_URL", url)
+
+    from backend.auth.secret_box import encrypt, install_key_material
+    from backend.config_mgmt.models import AppConfig
+
+    install_key_material("old-secret-key")
+    factory = create_session_factory(engine)
+    with factory() as db:
+        db.add(AppConfig(key="oauth.google.client_secret", value=encrypt("PLAINTEXT")))
+        db.commit()
+
+    monkeypatch.setenv("SKYNET_JWT_SECRET_KEY", "new-secret-key")
+    rc = main(["rotate-secrets"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    # Stderr carries the warning so log scrapers see it; stdout has summary.
+    assert "could not be decrypted" in captured.err
 
 
 def test_cli_unknown_subcommand_exits_nonzero(monkeypatch, capsys, tmp_path):

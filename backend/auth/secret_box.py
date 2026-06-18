@@ -54,13 +54,39 @@ def install_key_material(material: str) -> None:
     _key_material = material
 
 
+def _derive_key_from(material: str) -> bytes:
+    kdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=_HKDF_SALT, info=_HKDF_INFO)
+    return kdf.derive(material.encode("utf-8"))
+
+
 def _derive_key() -> bytes:
     if _key_material is None:
         raise RuntimeError(
             "secret_box not initialized — call install_key_material() from create_app() or conftest"
         )
-    kdf = HKDF(algorithm=hashes.SHA256(), length=32, salt=_HKDF_SALT, info=_HKDF_INFO)
-    return kdf.derive(_key_material.encode("utf-8"))
+    return _derive_key_from(_key_material)
+
+
+def decrypt_with_key(stored: str, key_material: str) -> str | None:
+    """Decrypt an `enc:v1:` envelope under an explicit key.
+
+    Returns plaintext on success, None if the envelope can't be decrypted
+    under `key_material`. Used by `skynetcontrol-recovery rotate-secrets
+    --from-key` to migrate rows that were encrypted under the previous
+    SKYNET_SECRETS_KEY before the operator rotates.
+
+    Unlike `decrypt()`, this raises nothing — the rotate path expects to
+    sometimes hit rows already encrypted under the *current* key, and
+    needs to tell that apart from a true failure.
+    """
+    if not stored.startswith(_PREFIX):
+        return None
+    try:
+        blob = base64.urlsafe_b64decode(stored[len(_PREFIX):].encode("ascii"))
+        nonce, ct = blob[:12], blob[12:]
+        return AESGCM(_derive_key_from(key_material)).decrypt(nonce, ct, None).decode("utf-8")
+    except (InvalidTag, ValueError, base64.binascii.Error):
+        return None
 
 
 def encrypt(plaintext: str) -> str:

@@ -131,6 +131,21 @@ async def callback(
         raise HTTPException(status_code=404, detail=f"Unknown auth provider: {provider}")
     redirect_uri = f"{app_settings.app_base_url}/api/auth/callback/{provider}"
 
+    # SSRF-guard the discovery-derived URLs. Without this, a hostile
+    # discovery doc that points token_endpoint / userinfo_endpoint at
+    # internal addresses would give an attacker free SSRF — the
+    # original guard only covered the issuer URL itself.
+    from backend.auth.service import _ssrf_guard_discovery_url_async
+
+    for url in (config["token_url"], config["userinfo_url"]):
+        try:
+            await _ssrf_guard_discovery_url_async(url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider URL refused by SSRF guard: {exc}",
+            ) from exc
+
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
             config["token_url"],

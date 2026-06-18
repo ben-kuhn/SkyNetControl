@@ -242,6 +242,19 @@ async def oauth_test_callback(
 
     redirect_uri = f"{app_settings.app_base_url}/api/admin/test/oauth/callback"
 
+    # SSRF-guard the discovery-derived URLs (token/userinfo). Admin-gated,
+    # but defense-in-depth — an admin tricked into testing a hostile
+    # OIDC provider shouldn't grant that provider SSRF.
+    from backend.auth.service import _ssrf_guard_discovery_url_async
+
+    for url in (token_url, userinfo_url):
+        try:
+            await _ssrf_guard_discovery_url_async(url)
+        except ValueError as exc:
+            session.status = "failed"
+            session.error = f"Provider URL refused by SSRF guard: {exc}"
+            return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
+
     try:
         async with httpx.AsyncClient() as client:
             token_response = await client.post(

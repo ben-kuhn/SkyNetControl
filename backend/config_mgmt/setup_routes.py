@@ -335,6 +335,21 @@ async def try_complete_setup(
 
     redirect_uri = f"{session.app_base_url}/api/auth/callback/{slug}"
 
+    # SSRF-guard the discovery-derived URLs. Pre-setup this handler is
+    # reachable unauthenticated, so a hostile issuer who controlled DNS
+    # could otherwise point token/userinfo at internal addresses.
+    from backend.auth.service import _ssrf_guard_discovery_url_async
+
+    for url in (token_url, userinfo_url):
+        try:
+            await _ssrf_guard_discovery_url_async(url)
+        except ValueError as exc:
+            del _SETUP_SESSIONS[state]
+            return _error_html(
+                "Unsafe Provider URL",
+                f"Provider endpoint refused by SSRF guard: {exc}",
+            )
+
     try:
         async with httpx.AsyncClient() as client:
             token_response = await client.post(

@@ -1,5 +1,8 @@
 import asyncio
+import base64
+import hashlib
 import os
+import re
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -33,6 +36,38 @@ from backend.auth.recovery_routes import recovery_router
 
 
 _DEFAULT_JWT_SECRET = "change-me-in-production"
+
+
+# Inline <script>...</script> blocks (no src=) in served HTML. Vite emits
+# index.html with a tiny theme-bootstrap snippet that reads localStorage
+# and sets data-theme before React mounts. CSP would block it without an
+# 'unsafe-inline' allowance (which defeats most of the point) — so we
+# hash each inline block at startup and emit script-src 'sha256-...'
+# instead. Matches what browsers expect per W3C CSP §6.6.4.
+_INLINE_SCRIPT_RE = re.compile(
+    r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _csp_script_hashes(static_dir: str) -> list[str]:
+    """Return CSP `'sha256-…'` literals for every inline script in index.html.
+
+    Empty list when no index.html is served — keeps script-src 'self'
+    permissive enough for the API-only deployments (tests) where the
+    SPA isn't bundled.
+    """
+    index_path = os.path.join(static_dir, "index.html")
+    if not os.path.isfile(index_path):
+        return []
+    with open(index_path, "rb") as f:
+        html = f.read().decode("utf-8", errors="replace")
+    hashes = []
+    for match in _INLINE_SCRIPT_RE.finditer(html):
+        body = match.group(1).encode("utf-8")
+        digest = hashlib.sha256(body).digest()
+        hashes.append(f"'sha256-{base64.b64encode(digest).decode('ascii')}'")
+    return hashes
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -119,23 +154,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # the SPA bundle that lives same-origin under /assets.
     is_https = settings.app_base_url.startswith("https://")
 
+    # script-src: hash the inline scripts in served index.html so we can
+    # drop 'unsafe-inline' (which would otherwise neuter CSP's headline
+    # value against XSS sinks). style-src keeps 'unsafe-inline' because
+    # React's `style={{...}}` produces inline style attributes on every
+    # render and hashing every possible style isn't practical.
+    inline_script_hashes = _csp_script_hashes(settings.static_dir)
+    script_src = "'self' " + " ".join(inline_script_hashes) if inline_script_hashes else "'self'"
+    csp = (
+        "default-src 'self'; "
+        f"script-src {script_src}; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+
     class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
             response = await call_next(request)
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")
             response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-            response.headers.setdefault(
-                "Content-Security-Policy",
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data:; "
-                "connect-src 'self'; "
-                "frame-ancestors 'none'; "
-                "base-uri 'self'; "
-                "form-action 'self'",
-            )
+            response.headers.setdefault("Content-Security-Policy", csp)
             if is_https:
                 response.headers.setdefault(
                     "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
