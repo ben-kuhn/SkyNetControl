@@ -159,6 +159,8 @@ async def resolve_provider(db, slug: str) -> dict | None:
             extract_email=_oidc_extract_email,
         )
 
+    issuer = ""
+    jwks_uri = ""
     if config.protocol == "oidc":
         discovery = await _get_discovery(config.discovery_url) if config.discovery_url else None
         if discovery is None:
@@ -167,6 +169,10 @@ async def resolve_provider(db, slug: str) -> dict | None:
         authorize_url = discovery.get("authorization_endpoint", "")
         token_url = discovery.get("token_endpoint", "")
         userinfo_url = discovery.get("userinfo_endpoint", "")
+        # Captured here so the callback can verify id_token against the
+        # IdP's published JWKS without re-fetching discovery.
+        issuer = discovery.get("issuer", "")
+        jwks_uri = discovery.get("jwks_uri", "")
     else:
         authorize_url = config.authorize_url
         token_url = config.token_url
@@ -176,6 +182,8 @@ async def resolve_provider(db, slug: str) -> dict | None:
         "authorize_url": authorize_url,
         "token_url": token_url,
         "userinfo_url": userinfo_url,
+        "issuer": issuer,
+        "jwks_uri": jwks_uri,
         "client_id": provider_settings.client_id,
         "client_secret": provider_settings.client_secret,
         "scopes": config.scopes,

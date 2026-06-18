@@ -53,6 +53,10 @@ class _SetupSession:
     smtp: SmtpConfig | None
     # Bookkeeping
     expires_at: datetime
+    # OIDC nonce, generated at /claim/start and carried into try_complete_setup
+    # so we can verify the id_token. Empty for OAuth2 providers that don't
+    # issue id_tokens.
+    nonce: str = ""
 
 
 _SETUP_SESSIONS: dict[str, _SetupSession] = {}  # keyed by `state`
@@ -203,6 +207,11 @@ async def setup_claim_start(
         scopes = "openid email profile"
 
     state = secrets.token_urlsafe(32)
+    # nonce binds the id_token to this specific wizard run. Only meaningful
+    # for OIDC providers (fixed: google/microsoft, plus custom_oidc); OAuth2
+    # providers don't issue id_tokens.
+    is_oidc = (provider_config is not None and provider_config.protocol == "oidc") or provider_config is None
+    nonce = secrets.token_urlsafe(32) if is_oidc else ""
     # Same callback URI as everyday sign-in (`/api/auth/callback/{slug}`).
     # The state lookup in _SETUP_SESSIONS is what tells that handler this
     # is a setup-completion flow vs. a normal sign-in. Reusing the URI means
@@ -215,6 +224,8 @@ async def setup_claim_start(
         "scope": scopes,
         "state": state,
     }
+    if nonce:
+        params["nonce"] = nonce
     full_authorize_url = f"{authorize_url}?{urllib.parse.urlencode(params)}"
 
     # Convert smtp body to SmtpConfig if present
@@ -241,6 +252,7 @@ async def setup_claim_start(
         oauth_issuer_url=body.oauth_issuer_url,
         smtp=smtp_cfg,
         expires_at=datetime.now(timezone.utc) + _SESSION_TTL,
+        nonce=nonce,
     )
     _SETUP_SESSIONS[state] = session
 
@@ -283,9 +295,12 @@ async def try_complete_setup(
         del _SETUP_SESSIONS[state]
         return _error_html("OAuth Error", f"The OAuth provider returned an error: {error}")
 
-    # Determine token/userinfo URLs
+    # Determine token/userinfo URLs and OIDC issuer/jwks for id_token verify.
     slug = session.oauth_slug
     provider_config = FIXED_PROVIDERS.get(slug)
+    oidc_issuer = ""
+    oidc_jwks_uri = ""
+    is_oidc = False
     if provider_config is not None:
         if provider_config.protocol == "oidc":
             discovery = await _get_discovery(provider_config.discovery_url)
@@ -294,6 +309,9 @@ async def try_complete_setup(
                 return _error_html("OIDC Discovery Failed", "Could not fetch OIDC discovery document.")
             token_url = discovery.get("token_endpoint", "")
             userinfo_url = discovery.get("userinfo_endpoint", "")
+            oidc_issuer = discovery.get("issuer", "")
+            oidc_jwks_uri = discovery.get("jwks_uri", "")
+            is_oidc = True
         else:
             token_url = provider_config.token_url
             userinfo_url = provider_config.userinfo_url
@@ -308,6 +326,9 @@ async def try_complete_setup(
             return _error_html("OIDC Discovery Failed", "Could not fetch OIDC discovery document.")
         token_url = discovery.get("token_endpoint", "")
         userinfo_url = discovery.get("userinfo_endpoint", "")
+        oidc_issuer = discovery.get("issuer", "")
+        oidc_jwks_uri = discovery.get("jwks_uri", "")
+        is_oidc = True
         extract_subject = _oidc_extract_subject
         extract_name = _oidc_extract_name
         extract_email = _oidc_extract_email
@@ -336,6 +357,34 @@ async def try_complete_setup(
                 )
                 del _SETUP_SESSIONS[state]
                 return _error_html("Token Exchange Failed", f"Could not obtain access token: {err_desc}")
+
+            # Verify id_token for OIDC providers (everything except GitHub
+            # / Discord / Facebook). Anchors the IdP to its JWKS key and
+            # binds the exchange to this wizard run via nonce — without
+            # this, userinfo was our only authentication signal.
+            if is_oidc:
+                id_token_value = token_data.get("id_token", "")
+                if not id_token_value or not oidc_jwks_uri:
+                    del _SETUP_SESSIONS[state]
+                    return _error_html(
+                        "OIDC Verification Failed",
+                        "Provider did not return an id_token; cannot complete setup.",
+                    )
+                from backend.auth.oidc_verify import verify_id_token
+
+                claims = await verify_id_token(
+                    id_token_value,
+                    expected_issuer=oidc_issuer,
+                    expected_audience=session.oauth_client_id,
+                    expected_nonce=session.nonce,
+                    jwks_uri=oidc_jwks_uri,
+                )
+                if claims is None:
+                    del _SETUP_SESSIONS[state]
+                    return _error_html(
+                        "OIDC Verification Failed",
+                        "Could not verify id_token signature or claims. Check server logs.",
+                    )
 
             userinfo_response = await client.get(
                 userinfo_url,

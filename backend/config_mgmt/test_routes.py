@@ -35,6 +35,11 @@ class _TestSession:
     status: str = "pending"  # "pending" | "success" | "failed"
     error: str | None = None
     identity: dict | None = None
+    # nonce + discovery-derived issuer/jwks for id_token verification on
+    # the OIDC callback (empty strings for OAuth2-only providers).
+    nonce: str = ""
+    oidc_issuer: str = ""
+    oidc_jwks_uri: str = ""
 
 
 # Keyed by `state` — the unguessable OAuth state parameter used as the lookup key.
@@ -113,12 +118,18 @@ async def start_oauth_test(
     _sweep_expired()
     # Determine authorize URL via the same logic as resolve_provider
     provider_config = FIXED_PROVIDERS.get(slug)
+    oidc_issuer = ""
+    oidc_jwks_uri = ""
+    is_oidc = False
     if provider_config is not None:
         if provider_config.protocol == "oidc":
             discovery = await _get_discovery(provider_config.discovery_url)
             if discovery is None:
                 raise HTTPException(status_code=400, detail="oidc discovery failed")
             authorize_url = discovery.get("authorization_endpoint", "")
+            oidc_issuer = discovery.get("issuer", "")
+            oidc_jwks_uri = discovery.get("jwks_uri", "")
+            is_oidc = True
         else:
             authorize_url = provider_config.authorize_url
         scopes = provider_config.scopes
@@ -131,6 +142,9 @@ async def start_oauth_test(
         if discovery is None:
             raise HTTPException(status_code=400, detail="oidc discovery failed")
         authorize_url = discovery.get("authorization_endpoint", "")
+        oidc_issuer = discovery.get("issuer", "")
+        oidc_jwks_uri = discovery.get("jwks_uri", "")
+        is_oidc = True
         scopes = "openid email profile"
 
     # Stored-secret fallback (mirrors SMTP test): empty client_secret means
@@ -148,6 +162,7 @@ async def start_oauth_test(
 
     state = secrets.token_urlsafe(32)
     test_session_id = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32) if is_oidc else ""
 
     redirect_uri = f"{app_settings.app_base_url}/api/admin/test/oauth/callback"
     params = {
@@ -157,6 +172,8 @@ async def start_oauth_test(
         "scope": scopes,
         "state": state,
     }
+    if nonce:
+        params["nonce"] = nonce
     full_authorize_url = f"{authorize_url}?{urllib.parse.urlencode(params)}"
 
     session = _TestSession(
@@ -167,6 +184,9 @@ async def start_oauth_test(
         client_secret=client_secret,
         issuer_url=body.issuer_url,
         expires_at=datetime.now(timezone.utc) + _SESSION_TTL,
+        nonce=nonce,
+        oidc_issuer=oidc_issuer,
+        oidc_jwks_uri=oidc_jwks_uri,
     )
     _TEST_SESSIONS[state] = session
 
@@ -245,6 +265,28 @@ async def oauth_test_callback(
                 session.status = "failed"
                 session.error = err_desc
                 return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
+
+            # Verify id_token for OIDC providers — same protection as the
+            # everyday sign-in path. Skipped for OAuth2-only providers.
+            if session.oidc_jwks_uri:
+                id_token_value = token_data.get("id_token", "")
+                if not id_token_value:
+                    session.status = "failed"
+                    session.error = "provider did not return id_token"
+                    return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
+                from backend.auth.oidc_verify import verify_id_token
+
+                claims = await verify_id_token(
+                    id_token_value,
+                    expected_issuer=session.oidc_issuer,
+                    expected_audience=session.client_id,
+                    expected_nonce=session.nonce,
+                    jwks_uri=session.oidc_jwks_uri,
+                )
+                if claims is None:
+                    session.status = "failed"
+                    session.error = "id_token verification failed"
+                    return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
 
             userinfo_response = await client.get(
                 userinfo_url,

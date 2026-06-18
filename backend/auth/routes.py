@@ -55,6 +55,11 @@ async def login(
         raise HTTPException(status_code=404, detail=f"Unknown auth provider: {provider}")
 
     state = secrets.token_urlsafe(32)
+    # nonce binds the id_token to this specific sign-in attempt. Per OIDC
+    # core, the IdP must echo it in the id_token; we verify on callback.
+    # OAuth2-only providers don't issue id_tokens, so the nonce is unused
+    # there — kept in the cookie for parsing uniformity (always 3 fields).
+    nonce = secrets.token_urlsafe(32) if config["protocol"] == "oidc" else ""
     params = {
         "client_id": config["client_id"],
         "redirect_uri": f"{app_settings.app_base_url}/api/auth/callback/{provider}",
@@ -62,13 +67,15 @@ async def login(
         "scope": config["scopes"],
         "state": state,
     }
+    if nonce:
+        params["nonce"] = nonce
     authorization_url = f"{config['authorize_url']}?{urllib.parse.urlencode(params)}"
 
     response = RedirectResponse(url=authorization_url)
     is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
         key="oauth_state",
-        value=f"{provider}:{state}",
+        value=f"{provider}:{state}:{nonce}",
         httponly=True,
         secure=is_secure,
         samesite="lax",
@@ -106,8 +113,17 @@ async def callback(
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    expected_state = f"{provider}:{state}"
-    if not oauth_state or not secrets.compare_digest(oauth_state, expected_state):
+    # Cookie shape: "provider:state:nonce" (nonce empty for non-OIDC).
+    # Reject anything else to avoid mis-parsing legacy/in-flight cookies.
+    if not oauth_state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state cookie")
+    cookie_parts = oauth_state.split(":", 2)
+    if len(cookie_parts) != 3:
+        raise HTTPException(status_code=400, detail="Malformed OAuth state cookie")
+    cookie_provider, cookie_state, cookie_nonce = cookie_parts
+    if cookie_provider != provider:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    if not secrets.compare_digest(cookie_state, state):
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     config = await resolve_provider(db, provider)
@@ -132,6 +148,25 @@ async def callback(
 
         if not access_token:
             raise HTTPException(status_code=400, detail="Failed to obtain access token from provider")
+
+        # Verify id_token for OIDC providers. Pins the IdP's identity to
+        # its published JWKS key and pins this exchange to the originating
+        # sign-in via nonce — without this, userinfo was our only signal.
+        if config["protocol"] == "oidc":
+            id_token_value = token_data.get("id_token", "")
+            if not id_token_value or not config["jwks_uri"]:
+                raise HTTPException(status_code=400, detail="OIDC provider did not return an id_token")
+            from backend.auth.oidc_verify import verify_id_token
+
+            claims = await verify_id_token(
+                id_token_value,
+                expected_issuer=config["issuer"],
+                expected_audience=config["client_id"],
+                expected_nonce=cookie_nonce,
+                jwks_uri=config["jwks_uri"],
+            )
+            if claims is None:
+                raise HTTPException(status_code=401, detail="id_token verification failed")
 
         userinfo_response = await client.get(
             config["userinfo_url"],

@@ -68,6 +68,8 @@ _GOOGLE_CONFIG = {
     "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
     "token_url": "https://oauth2.googleapis.com/token",
     "userinfo_url": "https://openidconnect.googleapis.com/v1/userinfo",
+    "issuer": "https://accounts.google.com",
+    "jwks_uri": "https://www.googleapis.com/oauth2/v3/certs",
     "client_id": "test-gid",
     "client_secret": "test-gsec",
     "scopes": "openid email profile",
@@ -77,6 +79,18 @@ _GOOGLE_CONFIG = {
     "extract_name": lambda d: d.get("name", "Unknown"),
     "extract_email": lambda d: d.get("email", ""),
 }
+
+
+def _mock_oidc_verifier(claims_to_return: dict | None):
+    """Helper: return an AsyncMock for backend.auth.oidc_verify.verify_id_token.
+
+    OIDC callback now requires id_token verification; mock it to skip the
+    JWKS fetch + signature check in unit tests."""
+    return patch(
+        "backend.auth.oidc_verify.verify_id_token",
+        new_callable=AsyncMock,
+        return_value=claims_to_return,
+    )
 
 
 @pytest.mark.asyncio
@@ -120,7 +134,12 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
 
     mock_token_response = MagicMock()
     mock_token_response.status_code = 200
-    mock_token_response.json.return_value = {"access_token": "fake-token", "token_type": "Bearer"}
+    # OIDC callback now requires an id_token; the verifier is mocked below.
+    mock_token_response.json.return_value = {
+        "access_token": "fake-token",
+        "id_token": "fake-id-token",
+        "token_type": "Bearer",
+    }
 
     mock_userinfo_response = MagicMock()
     mock_userinfo_response.status_code = 200
@@ -128,10 +147,11 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
         "sub": "google-123",
         "name": "Test User",
         "email": "test@example.com",
+        "email_verified": True,
     }
 
     with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
-               return_value=_GOOGLE_CONFIG):
+               return_value=_GOOGLE_CONFIG), _mock_oidc_verifier({"sub": "google-123"}):
         with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_token_response
@@ -185,11 +205,16 @@ async def test_callback_registration_closed_blocks_new_user(test_client, test_ap
         session.commit()
 
     mock_token_response = MagicMock()
-    mock_token_response.json.return_value = {"access_token": "fake-token", "token_type": "Bearer"}
+    mock_token_response.json.return_value = {
+        "access_token": "fake-token",
+        "id_token": "fake-id-token",
+        "token_type": "Bearer",
+    }
     mock_userinfo_response = MagicMock()
     mock_userinfo_response.json.return_value = {"sub": "stranger", "name": "Drive-By", "email": "x@y.z"}
 
-    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock, return_value=_GOOGLE_CONFIG):
+    with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock, return_value=_GOOGLE_CONFIG), \
+            _mock_oidc_verifier({"sub": "stranger"}):
         with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_token_response
@@ -226,14 +251,18 @@ async def test_callback_existing_user_not_changed(test_client, test_app, db_setu
 
     mock_token_response = MagicMock()
     mock_token_response.status_code = 200
-    mock_token_response.json.return_value = {"access_token": "fake-token", "token_type": "Bearer"}
+    mock_token_response.json.return_value = {
+        "access_token": "fake-token",
+        "id_token": "fake-id-token",
+        "token_type": "Bearer",
+    }
 
     mock_userinfo_response = MagicMock()
     mock_userinfo_response.status_code = 200
     mock_userinfo_response.json.return_value = {"sub": "existing-123", "name": "Existing", "email": "e@e.com"}
 
     with patch("backend.auth.routes.resolve_provider", new_callable=AsyncMock,
-               return_value=_GOOGLE_CONFIG):
+               return_value=_GOOGLE_CONFIG), _mock_oidc_verifier({"sub": "existing-123"}):
         with patch("backend.auth.routes.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_token_response
