@@ -201,11 +201,13 @@ async def register(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
-    # Two gates here: the callsign-prefix check + the role check. The role
-    # check is the load-bearing one ("only PENDING accounts may claim a
-    # callsign"); the prefix check defends against a future code path that
-    # somehow leaves a PENDING-named row in a non-PENDING role.
-    if user.role != UserRole.PENDING or not user.callsign.startswith("PENDING-"):
+    # Gate: only users who haven't claimed a real callsign yet may register.
+    # The "PENDING-" prefix is what indicates "no real callsign chosen" — NOT
+    # role==PENDING. The first-signup admin is created with role=ADMIN but a
+    # PENDING- callsign (routes.py:141-143) and still needs this endpoint to
+    # claim their real callsign without a self-approval round-trip. Don't be
+    # tempted to also require role==PENDING; that breaks first-admin signup.
+    if not user.callsign.startswith("PENDING-"):
         raise HTTPException(status_code=409, detail="User already registered")
 
     callsign = body.callsign.upper()
