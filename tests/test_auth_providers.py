@@ -149,3 +149,22 @@ def test_disabled_provider_omitted_from_enabled(db):
 def test_provider_with_empty_client_id_is_treated_as_disabled(db):
     _seed(db, "google", enabled=True, client_id="", client_secret="")
     assert "google" not in get_enabled_providers(db)
+
+
+def test_oidc_extract_email_returns_empty_when_unverified():
+    """OIDC: only trust email when email_verified=true.
+
+    An OIDC IdP that lets users self-register with arbitrary email (and
+    never verifies) could let an attacker claim a victim's email on our
+    User row. We key sign-in on `oidc_subject` so the unverified email
+    can't be used to impersonate, but trusting it for admin contact
+    features (notifications) is still wrong. Per OIDC core spec the
+    `email_verified` claim is the gate.
+    """
+    from backend.auth.providers import _oidc_extract_email
+
+    assert _oidc_extract_email({"email": "a@b.c"}) == ""
+    assert _oidc_extract_email({"email": "a@b.c", "email_verified": False}) == ""
+    assert _oidc_extract_email({"email": "a@b.c", "email_verified": True}) == "a@b.c"
+    # Missing email key always returns empty regardless of verified flag.
+    assert _oidc_extract_email({"email_verified": True}) == ""

@@ -29,6 +29,15 @@ def _oidc_extract_name(data: dict) -> str:
 
 
 def _oidc_extract_email(data: dict) -> str:
+    # Trust the IdP-provided email only when it is marked verified. An OIDC
+    # provider that lets users self-serve account creation with arbitrary
+    # email (and never verifies) could let an attacker claim a victim's
+    # email — innocuous for sign-in (we key on `oidc_subject`, not email)
+    # but the unverified email would still be stored on the User row and
+    # used by admin contact features. Per the spec, `email_verified` is a
+    # boolean; if absent or false, treat the email as unknown.
+    if not data.get("email_verified"):
+        return ""
     return data.get("email", "")
 
 
