@@ -25,12 +25,17 @@ def create_access_token(
     callsign: str,
     role: str,
     settings: Settings,
+    token_version: int = 0,
 ) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     payload = {
         "sub": callsign,
         "role": role,
         "exp": expire,
+        # `tv` lets logout/role-change/delete invalidate every outstanding
+        # token for this user by bumping users.token_version. See the
+        # comparison in get_current_user.
+        "tv": token_version,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 

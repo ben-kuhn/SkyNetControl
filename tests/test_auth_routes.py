@@ -258,6 +258,65 @@ async def test_logout_clears_cookie(test_client, test_settings):
 
 
 @pytest.mark.asyncio
+async def test_logout_invalidates_outstanding_jwt(test_client, test_settings, db_setup):
+    """Stolen-cookie defense: after logout, the same JWT must stop working.
+
+    delete_cookie clears the browser's copy, but a cookie captured via
+    XSS/log leak/shared device is unaffected. Bumping users.token_version
+    and checking it in get_current_user makes outstanding tokens 401 on
+    the next request, eliminating the window between logout and exp.
+    """
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
+        session.commit()
+
+    # Issue a JWT with token_version=0 (the default).
+    token = create_access_token("W0NE", "admin", test_settings, token_version=0)
+
+    # /me works before logout.
+    me = await test_client.get("/api/auth/me", cookies={"access_token": token})
+    assert me.status_code == 200
+
+    # Logout bumps token_version on the row.
+    await test_client.post("/api/auth/logout", cookies={"access_token": token})
+
+    # Same JWT now 401s — its tv=0 no longer matches users.token_version=1.
+    after = await test_client.get("/api/auth/me", cookies={"access_token": token})
+    assert after.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_role_change_invalidates_outstanding_jwt(test_client, test_settings, db_setup):
+    """Demote an admin: their existing JWT (which encoded role=admin) must
+    not survive the demotion. token_version bump on PATCH /users handles this."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|target", name="Target", role=UserRole.ADMIN))
+        session.commit()
+
+    admin_token = create_access_token("W0NE", "admin", test_settings, token_version=0)
+    target_token = create_access_token("KD0TST", "admin", test_settings, token_version=0)
+
+    # Target's JWT works initially.
+    pre = await test_client.get("/api/auth/me", cookies={"access_token": target_token})
+    assert pre.status_code == 200
+
+    # Admin demotes target to viewer.
+    demote = await test_client.patch(
+        "/api/auth/users/KD0TST",
+        json={"role": "viewer"},
+        cookies={"access_token": admin_token},
+    )
+    assert demote.status_code == 200
+
+    # Target's old JWT (which claimed admin role + tv=0) is now invalid.
+    post = await test_client.get("/api/auth/me", cookies={"access_token": target_token})
+    assert post.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_admin_can_list_users(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:

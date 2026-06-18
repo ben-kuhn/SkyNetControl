@@ -17,7 +17,7 @@ from backend.auth.email import (
     notify_user_callsign_approved,
 )
 from backend.auth.models import User, UserRole
-from backend.auth.service import create_access_token, resolve_provider
+from backend.auth.service import create_access_token, decode_access_token, resolve_provider
 from backend.audit.service import log_action
 from backend.config import Settings
 
@@ -159,7 +159,7 @@ async def callback(
         db.commit()
         db.refresh(user)
 
-    jwt_token = create_access_token(user.callsign, user.role.value, app_settings)
+    jwt_token = create_access_token(user.callsign, user.role.value, app_settings, user.token_version)
     response = RedirectResponse(url=app_settings.app_base_url)
     is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
@@ -185,7 +185,24 @@ async def me(user: User = Depends(get_current_user)):
 
 
 @auth_router.post("/logout")
-async def logout():
+async def logout(
+    access_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db_session),
+    app_settings: Settings = Depends(get_settings),
+):
+    # Best-effort token_version bump so a stolen cookie can't outlive
+    # logout. Decoded without invoking get_current_user (which would 401
+    # an already-expired/invalidated token before we got here — making
+    # repeat-logout a footgun); we just want the `sub` if it's there.
+    if access_token:
+        payload = decode_access_token(access_token, settings=app_settings)
+        if payload is not None:
+            callsign = payload.get("sub")
+            if callsign:
+                user = db.get(User, callsign)
+                if user is not None:
+                    user.token_version += 1
+                    db.commit()
     response = Response(content='{"message": "logged out"}', media_type="application/json")
     response.delete_cookie(key="access_token", httponly=True, samesite="lax")
     return response
@@ -310,6 +327,11 @@ async def update_user_role(
     old_role = target_user.role.value
     was_pending = target_user.role == UserRole.PENDING
     target_user.role = body.role
+    # Bump token_version so any outstanding JWT for this user — which
+    # encoded the old role — is rejected on next request. Without this,
+    # a demoted admin keeps admin privileges until their JWT expires
+    # (jwt_expire_minutes, default 1440 / 24 h).
+    target_user.token_version += 1
     db.commit()
     db.refresh(target_user)
     log_action(

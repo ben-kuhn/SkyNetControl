@@ -389,8 +389,10 @@ async def try_complete_setup(
     db.commit()
     mark_setup_completed(db)
 
-    # Issue JWT cookie and redirect
-    jwt_token = create_access_token(session.default_net_control, "admin", app_settings)
+    # Issue JWT cookie and redirect. token_version=0 because the row was
+    # freshly merged just above with the default; everything works as long
+    # as the JWT's tv matches users.token_version, which is 0 on insert.
+    jwt_token = create_access_token(session.default_net_control, "admin", app_settings, 0)
     is_secure = session.app_base_url.startswith("https://")
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(

@@ -61,6 +61,15 @@ def get_current_user(
     if user.role == UserRole.DELETED:
         raise HTTPException(status_code=401, detail="Account has been deleted")
 
+    # Invalidate tokens issued before logout / role-change / delete bumped
+    # users.token_version. Tokens without a `tv` claim (legacy from before
+    # this rolled out) compare as 0, which only matches users still at the
+    # default token_version=0 — i.e. those who have never logged out, never
+    # had a role change, never had a forced invalidation. Once their tv
+    # bumps past 0, legacy tokens stop working.
+    if payload.get("tv", 0) != user.token_version:
+        raise HTTPException(status_code=401, detail="Token has been invalidated")
+
     return user
 
 

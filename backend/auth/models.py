@@ -24,6 +24,14 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pending_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # JWT invalidation: incremented on logout, role change, and account
+    # delete; the JWT carries the value at issue time and auth dependencies
+    # reject any token whose `tv` claim doesn't match the current row.
+    # `server_default="0"` matches the alembic migration so existing rows
+    # populate cleanly on upgrade.
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
