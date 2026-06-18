@@ -63,6 +63,41 @@ async def test_index_html_is_no_cache_and_assets_are_immutable():
 
 
 @pytest.mark.asyncio
+async def test_url_encoded_path_traversal_is_blocked():
+    """Pre-auth file-read guard.
+
+    Starlette collapses literal "../" but not URL-encoded "%2e%2e".
+    Without the realpath/commonpath guard in serve_frontend, GET
+    /%2e%2e/<file> resolves outside static_dir and `FileResponse` would
+    serve arbitrary files readable by the server process.
+    """
+    with tempfile.TemporaryDirectory() as static_dir:
+        with open(os.path.join(static_dir, "index.html"), "w") as f:
+            f.write("<html><body>SkyNetControl</body></html>")
+
+        # Place a "secret" file OUTSIDE the static dir but still in the
+        # parent's reach via a relative traversal.
+        secret_dir = os.path.dirname(static_dir)
+        secret_path = os.path.join(secret_dir, "outside_secret.txt")
+        with open(secret_path, "w") as f:
+            f.write("SECRET-DO-NOT-SERVE")
+
+        try:
+            settings = Settings(database_url="sqlite:///", static_dir=static_dir, jwt_secret_key="test-secret")
+            app = create_app(settings=settings)
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                # URL-encoded `../` survives Starlette's collapse.
+                resp = await client.get("/%2e%2e/outside_secret.txt")
+                # Must NOT serve the secret. The guard falls back to index.html.
+                assert resp.status_code == 200
+                assert "SECRET-DO-NOT-SERVE" not in resp.text
+                assert "SkyNetControl" in resp.text
+        finally:
+            os.unlink(secret_path)
+
+
+@pytest.mark.asyncio
 async def test_api_routes_take_priority_over_static():
     with tempfile.TemporaryDirectory() as static_dir:
         index_path = os.path.join(static_dir, "index.html")

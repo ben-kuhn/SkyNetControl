@@ -137,6 +137,46 @@ async def test_sensitive_config_value_redacted_in_audit_log(test_client, test_se
 
 
 @pytest.mark.asyncio
+async def test_get_config_masks_secret_values(test_client, test_settings):
+    """GET /api/config/ must not return raw OAuth client_secret / SMTP password.
+
+    Previous bug: the bulk endpoint returned every AppConfig row verbatim,
+    so admin browsers received plaintext IdP and SMTP credentials in JSON.
+    The typed routes (oauth_routes, smtp_routes) masked these as "***";
+    bulk now matches.
+    """
+    token = create_access_token("W0NE", "admin", test_settings)
+
+    # Seed a sensitive and a non-sensitive value via the PUT endpoint.
+    await test_client.put(
+        "/api/config/oauth.google.client_secret",
+        json={"value": "real-google-secret"},
+        cookies={"access_token": token},
+    )
+    await test_client.put(
+        "/api/config/smtp.password",
+        json={"value": "real-smtp-password"},
+        cookies={"access_token": token},
+    )
+    await test_client.put(
+        "/api/config/net_address",
+        json={"value": "w0ne@winlink.org"},
+        cookies={"access_token": token},
+    )
+
+    response = await test_client.get("/api/config/", cookies={"access_token": token})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["oauth.google.client_secret"] == "***"
+    assert body["smtp.password"] == "***"
+    # Non-sensitive keys are still readable verbatim.
+    assert body["net_address"] == "w0ne@winlink.org"
+    # And the raw secret never appears anywhere in the payload.
+    assert "real-google-secret" not in response.text
+    assert "real-smtp-password" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_non_sensitive_config_value_logged_verbatim(test_client, test_settings, db_setup):
     """Non-secret keys still log the actual value for traceability."""
     import json

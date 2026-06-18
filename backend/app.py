@@ -134,12 +134,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.mount("/assets", _ImmutableAssets(directory=assets_dir), name="assets")
 
         _NO_CACHE = {"Cache-Control": "no-cache"}
+        _STATIC_ROOT = os.path.realpath(settings.static_dir)
+        _INDEX_HTML = os.path.join(_STATIC_ROOT, "index.html")
 
         @app.get("/{path:path}")
         async def serve_frontend(path: str):
-            file_path = os.path.join(settings.static_dir, path)
-            if path and os.path.isfile(file_path):
-                return FileResponse(file_path, headers=_NO_CACHE)
-            return FileResponse(os.path.join(settings.static_dir, "index.html"), headers=_NO_CACHE)
+            # Path traversal guard. Starlette collapses literal "../" segments
+            # before routing, but URL-encoded "%2e%2e" reaches here as raw
+            # "../" inside `path` — without this check, GET /%2e%2e/etc/passwd
+            # would resolve outside _STATIC_ROOT and serve arbitrary files
+            # readable by the uvicorn user.
+            resolved = os.path.realpath(os.path.join(_STATIC_ROOT, path))
+            inside = resolved == _STATIC_ROOT or resolved.startswith(_STATIC_ROOT + os.sep)
+            if path and inside and os.path.isfile(resolved):
+                return FileResponse(resolved, headers=_NO_CACHE)
+            return FileResponse(_INDEX_HTML, headers=_NO_CACHE)
 
     return app

@@ -28,7 +28,13 @@ async def list_config(
     principal: Principal = Depends(require_admin_or_recovery),
     db: Session = Depends(get_db_session),
 ):
-    return get_all_config(db)
+    # Mirror the per-domain GET handlers (oauth_routes, smtp_routes) which
+    # mask secret values as "***". The bulk endpoint previously returned
+    # OAuth client_secret and SMTP password verbatim — defeating the masking
+    # discipline that the typed routes follow. Frontend never needs the
+    # actual secret; "***" is enough to indicate "set, but not shown."
+    raw = get_all_config(db)
+    return {k: ("***" if _is_sensitive_key(k) and v else v) for k, v in raw.items()}
 
 
 @config_router.put("/{key}")
