@@ -19,6 +19,15 @@ cat > skynetcontrol.env <<EOF
 SKYNET_DATABASE_URL=sqlite:////data/skynetcontrol.db
 SKYNET_JWT_SECRET_KEY=$(openssl rand -hex 32)
 SKYNET_APP_BASE_URL=https://net.example.org
+
+# Optional but recommended behind a reverse proxy (Cloudflare, nginx, etc.):
+# without this, the per-IP rate limiter buckets every visitor under the
+# proxy's IP. See docs/deployment/operations.md for details.
+# SKYNET_TRUSTED_PROXIES=127.0.0.1
+
+# Optional: separate AES key for at-rest credential encryption. Skip to
+# reuse the JWT secret. Set this to rotate the two independently.
+# SKYNET_SECRETS_KEY=$(openssl rand -hex 32)
 EOF
 ```
 
@@ -52,7 +61,7 @@ with a plain `docker compose up -d`. If you ever need to run alembic
 manually (e.g. to inspect history or downgrade), the wrapper is on PATH:
 `docker compose run --rm --entrypoint skynetcontrol-alembic skynetcontrol history`.
 
-Front it with nginx / Caddy / Traefik for TLS. Visit your `APP_BASE_URL` — the first-boot wizard at `/setup` walks you through net basics, one OAuth provider (with a Test sign-in), optional SMTP, and then a sign-in that creates the first admin user with the callsign you entered. After setup completes, the wizard route 410's and the app is fully usable.
+Front it with nginx / Caddy / Traefik for TLS. Visit your `APP_BASE_URL` — the first-boot wizard at `/setup` walks you through net basics, one OAuth provider (Step 2 shows the redirect URI to register), optional SMTP, and then a sign-in that creates the first admin user with the callsign you entered. After setup completes, the wizard route 410's and the app is fully usable.
 
 For ongoing configuration (OAuth providers, SMTP, PAT mailbox, scanner, delivery backends, Claude API key…), use the `/config` page once you're signed in as admin. See **[docs/deployment/app-config-keys.md](docs/deployment/app-config-keys.md)** for the full list of AppConfig keys.
 
@@ -64,12 +73,15 @@ For NixOS hosts, use the `services.skynetcontrol` module from `module.nix`. It h
 
 ```nix
 services.skynetcontrol = {
-  enable        = true;
-  host          = "127.0.0.1";
-  port          = 8040;
-  stateDir      = "/storage/skynetcontrol";
-  appBaseUrl    = "https://net.example.org";
-  jwtSecretFile = config.age.secrets.skynetcontrol-jwt.path;  # via agenix or sops-nix
+  enable         = true;
+  host           = "127.0.0.1";
+  port           = 8040;
+  stateDir       = "/storage/skynetcontrol";
+  appBaseUrl     = "https://net.example.org";
+  # One agenix / sops secret containing SKYNET_JWT_SECRET_KEY and
+  # (optionally) SKYNET_SECRETS_KEY as an env-file. See secrets.md.
+  secretsFile    = config.age.secrets.skynetcontrol.path;
+  trustedProxies = "127.0.0.1";   # required behind a proxy
 };
 users.users.skynetcontrol.extraGroups = [ "pat" ];
 ```

@@ -41,12 +41,17 @@ In your NixOS flake or configuration, import `module.nix`:
   ];
 
   services.skynetcontrol = {
-    enable        = true;
-    host          = "127.0.0.1";   # bind localhost; front with nginx for TLS
-    port          = 8040;
-    stateDir      = "/storage/skynetcontrol";
-    appBaseUrl    = "https://skynetcontrol.example.org";
-    jwtSecretFile = config.age.secrets.skynetcontrol-jwt.path;
+    enable      = true;
+    host        = "127.0.0.1";   # bind localhost; front with nginx for TLS
+    port        = 8040;
+    stateDir    = "/storage/skynetcontrol";
+    appBaseUrl  = "https://skynetcontrol.example.org";
+
+    # One agenix secret with both bootstrap keys (see Secrets section).
+    secretsFile = config.age.secrets.skynetcontrol.path;
+
+    # Required behind a reverse proxy.
+    trustedProxies = "127.0.0.1,::1";
   };
   users.users.skynetcontrol.extraGroups = [ "pat" ];
 }
@@ -54,14 +59,7 @@ In your NixOS flake or configuration, import `module.nix`:
 
 (Without flakes: clone the repo to `/etc/nixos/skynetcontrol`, then `imports = [ /etc/nixos/skynetcontrol/module.nix ];`.)
 
-`jwtSecretFile` must point to a file containing the raw JWT signing secret (no trailing newline needed). Generate it once:
-
-```bash
-openssl rand -hex 32 | sudo tee /etc/skynetcontrol-jwt > /dev/null
-sudo chmod 400 /etc/skynetcontrol-jwt
-```
-
-The unit reads it via systemd `LoadCredential`, so it is never visible in the Nix store or in `systemctl show`.
+`secretsFile` is an env-file-shaped secret containing both bootstrap secrets (see the [Secrets](#secrets) section for the file format and the agenix / sops-nix patterns). If you'd rather manage each secret as its own file, the older `jwtSecretFile` + `secretsKeyFile` shape is still supported.
 
 ### What the module does
 
@@ -82,7 +80,10 @@ The unit reads it via systemd `LoadCredential`, so it is never visible in the Ni
 | `stateDir` | `/var/lib/skynetcontrol` | Service state. The default database URL points inside here. |
 | `databaseUrl` | `sqlite:///${stateDir}/skynetcontrol.db` | Defaults inside `stateDir`. Override to point at PostgreSQL. |
 | `appBaseUrl` | *(required)* | Externally-visible URL the user's browser hits (including scheme and any non-default port). Used for OAuth redirect URIs and email links. |
-| `jwtSecretFile` | *(required)* | Path to a file containing the JWT signing secret. Read via systemd `LoadCredential` — never lands in the Nix store. |
+| `secretsFile` | `null` | **Recommended.** Path to a single env-file containing both `SKYNET_JWT_SECRET_KEY` and (optionally) `SKYNET_SECRETS_KEY`. Loaded via systemd `EnvironmentFile`. Mutually exclusive with `jwtSecretFile`/`secretsKeyFile` — one shape or the other. See [Secrets](#secrets) below. |
+| `jwtSecretFile` | `null` | Legacy. Path to a file containing only the JWT signing secret. Used together with optional `secretsKeyFile`; the unit reads each via systemd `LoadCredential`. Set this OR `secretsFile`, not both. |
+| `secretsKeyFile` | `null` | Legacy companion to `jwtSecretFile`. Path to a file containing only the AES key for at-rest credential encryption. Cannot be combined with `secretsFile`. |
+| `trustedProxies` | `""` | Comma-separated peer-IP allowlist for the per-IP rate limiter. **Required behind any reverse proxy** — without it every visitor shares one bucket. Typical same-host value: `"127.0.0.1,::1"`. See [operations.md → Behind a reverse proxy](operations.md#behind-a-reverse-proxy-cloudflare-nginx-caddy-etc). |
 
 ### After upgrading from a pre-Phase-5 release
 
@@ -98,41 +99,59 @@ before the next `nixos-rebuild switch`.
 
 ### Secrets
 
-The only secret that belongs in `module.nix` is `jwtSecretFile`. Point it at a file managed by your secret store of choice:
+The module offers two shapes for the bootstrap secrets. Pick one — the assertion in `module.nix` enforces that they're mutually exclusive.
+
+#### Recommended: one combined env-file
+
+`secretsFile` is a single agenix / sops secret containing both `SKYNET_JWT_SECRET_KEY` and (optionally) `SKYNET_SECRETS_KEY`. systemd loads it natively via `EnvironmentFile` — no shell-wrapper around `cat`, no second decryption rule to maintain in your secret store. One secret per service is also how most agenix / sops-nix setups already work.
+
+The file is a plain key-value env-file:
+
+```ini
+SKYNET_JWT_SECRET_KEY=<openssl rand -hex 32>
+SKYNET_SECRETS_KEY=<openssl rand -hex 32>    # optional
+```
+
+Wire it up:
 
 ```nix
-# Using agenix
-age.secrets.skynetcontrol-jwt = {
-  file = ../secrets/skynetcontrol-jwt.age;
-};
-services.skynetcontrol.jwtSecretFile = config.age.secrets.skynetcontrol-jwt.path;
+# agenix
+age.secrets.skynetcontrol.file = ../secrets/skynetcontrol.age;
+
+services.skynetcontrol.secretsFile = config.age.secrets.skynetcontrol.path;
 ```
 
 ```nix
-# Using sops-nix
-sops.secrets."skynetcontrol-jwt" = {
+# sops-nix
+sops.secrets.skynetcontrol = {
+  format = "binary";          # the secret is a raw env-file, not yaml
   owner = "root";
   mode = "0400";
 };
-services.skynetcontrol.jwtSecretFile = config.sops.secrets."skynetcontrol-jwt".path;
+
+services.skynetcontrol.secretsFile = config.sops.secrets.skynetcontrol.path;
 ```
 
-Or, for a simple self-managed installation, generate a file outside the Nix store and make it root-readable:
+Skip `SKYNET_SECRETS_KEY` if you don't care about rotating the at-rest encryption key independently of JWT signing. Adding it later just means appending a line to the secret and `rotate-secrets --from-key` to migrate (see [operations.md → Key rotation](operations.md#key-rotation)).
 
-```bash
-openssl rand -hex 32 | sudo tee /etc/skynetcontrol-jwt > /dev/null
-sudo chmod 400 /etc/skynetcontrol-jwt
-```
+#### Legacy: separate files per secret
+
+Pre-existing installs use `jwtSecretFile` + optional `secretsKeyFile`, each a path to a file containing the raw secret value (no `KEY=` prefix). The unit reads them via systemd `LoadCredential` and exports each to the process environment.
 
 ```nix
-services.skynetcontrol.jwtSecretFile = "/etc/skynetcontrol-jwt";
+services.skynetcontrol = {
+  jwtSecretFile  = "/etc/skynetcontrol-jwt";
+  secretsKeyFile = "/etc/skynetcontrol-secrets";   # optional
+};
 ```
 
-All other previously-secret values (OAuth client secrets, SMTP passwords, etc.) are stored in the AppConfig table and managed via the `/config` admin page — no env vars needed.
+This shape is supported indefinitely — but new deployments should prefer `secretsFile`. Mixing `secretsFile` with `jwtSecretFile` / `secretsKeyFile` raises an assertion at `nixos-rebuild switch` time.
+
+All other previously-secret values (OAuth client secrets, SMTP passwords, Claude API key, etc.) are stored encrypted in the AppConfig table and managed via the `/config` admin page — no env vars needed.
 
 ### Reverse proxy with TLS
 
-The module binds localhost by default. Front it with nginx (or Caddy, Traefik) for TLS:
+The module binds localhost by default. Front it with nginx (or Caddy, Traefik, cloudflared) for TLS:
 
 ```nix
 services.nginx = {
@@ -152,6 +171,21 @@ security.acme.defaults.email = "you@example.org";
 ```
 
 Remember to set `appBaseUrl = "https://net.example.org"` in `services.skynetcontrol` so OAuth callbacks use the public URL.
+
+#### Trusted proxies (required behind any proxy)
+
+When the connecting peer uvicorn sees is a proxy rather than the real client, the per-IP rate limiter (login, callback, recovery, setup endpoints) buckets every visitor under the proxy's IP — useless. Tell the limiter which proxies to trust so it consults the forwarded-IP headers (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`) instead:
+
+```nix
+services.skynetcontrol = {
+  # ... other options ...
+  # Comma-separated list. Local nginx → 127.0.0.1. Cloudflare tunnel on
+  # the same host → also 127.0.0.1. Add ::1 if uvicorn also accepts v6.
+  trustedProxies = "127.0.0.1,::1";
+};
+```
+
+See [operations.md → Behind a reverse proxy](operations.md#behind-a-reverse-proxy-cloudflare-nginx-caddy-etc) for the Cloudflare-specific notes (CF tunnel co-located with uvicorn, HSTS/CSP round-trip considerations, cache headers).
 
 ### PostgreSQL
 
@@ -480,6 +514,23 @@ The image:
 - Does NOT auto-run migrations. Run `skynetcontrol-alembic upgrade head` before each upgrade. (The NixOS module handles this automatically.)
 
 The bundled `skynetcontrol-alembic` entry point is wrapped to know where the migrations and `alembic.ini` are inside the Nix store — you don't need to pass `-c`.
+
+A minimal env file:
+
+```ini
+SKYNET_JWT_SECRET_KEY=<openssl rand -hex 32>
+SKYNET_APP_BASE_URL=https://net.example.org
+
+# Optional but recommended behind a reverse proxy (Cloudflare, nginx,
+# Caddy, etc.) — without this every visitor shares one rate-limit bucket.
+SKYNET_TRUSTED_PROXIES=127.0.0.1
+
+# Optional — separate AES key for at-rest credential encryption.
+# Skip to reuse the JWT secret. See operations.md → Key rotation.
+# SKYNET_SECRETS_KEY=<openssl rand -hex 32>
+```
+
+`/api/csp-report` collects browser-side CSP violation reports as WARNINGs on the `backend.csp` logger; `grep csp.violation` in your container logs to catch a broken inline script after an upgrade. See [operations.md](operations.md) for the full ops runbook (recovery tokens, key rotation, registration toggle, audit log queries).
 
 ### PAT integration (hourly Winlink fetch)
 

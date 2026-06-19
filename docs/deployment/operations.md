@@ -79,8 +79,13 @@ OLD_KEY=$SKYNET_SECRETS_KEY  # or `cat /path/to/key-file`, etc.
 # 2. Mint a new key.
 NEW_KEY=$(openssl rand -hex 32)
 
-# 3. Update SKYNET_SECRETS_KEY in your env-var source (systemd LoadCredential
-#    file, sops secret, EnvironmentFile, etc.) to $NEW_KEY.
+# 3. Update SKYNET_SECRETS_KEY in your env-var source:
+#    - Combined-secret deployments (services.skynetcontrol.secretsFile):
+#      edit the SKYNET_SECRETS_KEY=... line in the agenix/sops-managed
+#      env-file and re-deploy / re-decrypt.
+#    - Legacy-shape deployments (services.skynetcontrol.secretsKeyFile):
+#      replace the contents of the secretsKeyFile path with $NEW_KEY.
+#    - Plain Docker / env_file: rewrite the env file.
 
 # 4. Restart the service so the new key is loaded.
 

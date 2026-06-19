@@ -41,46 +41,67 @@ The typed routes mask secret values as `"***"` on GET. The bulk `GET /api/config
 
 The patterns below all expose the three bootstrap env vars to the process. None of them touch provider or SMTP credentials — those go through the wizard.
 
-### NixOS module
+### NixOS module — recommended (one combined secret)
 
 ```nix
 services.skynetcontrol = {
-  enable = true;
-  appBaseUrl = "https://net.example.org";
-  jwtSecretFile = "/etc/skynetcontrol-jwt";     # 0600, root-owned
-  secretsKeyFile = "/etc/skynetcontrol-secrets"; # optional, same shape
+  enable      = true;
+  appBaseUrl  = "https://net.example.org";
+  secretsFile = "/run/agenix/skynetcontrol";   # or any root-only env-file path
 };
 ```
 
-Both files are loaded via systemd `LoadCredential`, so they never appear in the Nix store.
+The file is loaded via systemd `EnvironmentFile`. Format:
 
-### NixOS with sops-nix
-
-```nix
-sops.secrets."skynetcontrol/jwt" = {};
-sops.secrets."skynetcontrol/secrets" = {};
-
-services.skynetcontrol = {
-  enable = true;
-  appBaseUrl = "https://net.example.org";
-  jwtSecretFile = config.sops.secrets."skynetcontrol/jwt".path;
-  secretsKeyFile = config.sops.secrets."skynetcontrol/secrets".path;
-};
+```ini
+SKYNET_JWT_SECRET_KEY=<hex>
+SKYNET_SECRETS_KEY=<hex>     # optional
 ```
 
 ### NixOS with agenix
 
 ```nix
-age.secrets.skynet-jwt.file = ../secrets/skynet-jwt.age;
-age.secrets.skynet-secrets.file = ../secrets/skynet-secrets.age;
+age.secrets.skynetcontrol.file = ../secrets/skynetcontrol.age;
 
 services.skynetcontrol = {
-  enable = true;
-  appBaseUrl = "https://net.example.org";
-  jwtSecretFile = config.age.secrets.skynet-jwt.path;
-  secretsKeyFile = config.age.secrets.skynet-secrets.path;
+  enable      = true;
+  appBaseUrl  = "https://net.example.org";
+  secretsFile = config.age.secrets.skynetcontrol.path;
 };
 ```
+
+The contents of `secrets/skynetcontrol.age` is the env-file above. One agenix rule, one secret.
+
+### NixOS with sops-nix
+
+```nix
+sops.secrets.skynetcontrol = {
+  format = "binary";       # raw env-file, not yaml
+  owner  = "root";
+  mode   = "0400";
+};
+
+services.skynetcontrol = {
+  enable      = true;
+  appBaseUrl  = "https://net.example.org";
+  secretsFile = config.sops.secrets.skynetcontrol.path;
+};
+```
+
+### NixOS legacy (separate files)
+
+Earlier deployments used a path-per-secret shape; supported indefinitely but new installs should use `secretsFile`.
+
+```nix
+services.skynetcontrol = {
+  enable         = true;
+  appBaseUrl     = "https://net.example.org";
+  jwtSecretFile  = "/etc/skynetcontrol-jwt";        # 0400, root-owned
+  secretsKeyFile = "/etc/skynetcontrol-secrets";    # optional
+};
+```
+
+`jwtSecretFile` and `secretsKeyFile` cannot be combined with `secretsFile` — the module asserts at evaluation time.
 
 ### systemd EnvironmentFile
 

@@ -2,8 +2,8 @@
 
 SkyNetControl has two layers of configuration:
 
-1. **Environment variables** (`SKYNET_*`) — startup configuration. JWT secret, auth providers, database URL, SMTP. Documented in [secrets.md](secrets.md).
-2. **App configuration** (DB-stored key/value) — runtime/operational configuration. Edited through the in-app `/config` page (admin only) or via `PUT /api/config/{key}`.
+1. **Environment variables** (`SKYNET_*`) — bootstrap-only: database URL, JWT secret, app base URL, optional secrets key, trusted proxies. Documented in [secrets.md](secrets.md) and [operations.md](operations.md).
+2. **App configuration** (DB-stored key/value) — everything else. OAuth providers, SMTP, net basics, scanner, delivery routing, integration API keys. Edited through the in-app `/config` page (admin only), the first-boot wizard at `/setup`, or via `PUT /api/config/{key}`. Sensitive values (anything matching `api_key`/`password`/`secret`/`token`) are encrypted at rest under `SKYNET_SECRETS_KEY` (or the JWT secret fallback) and masked as `"***"` on GET.
 
 This doc lists every key the codebase reads from layer 2, where it's used, and what value format the code expects.
 
@@ -14,7 +14,8 @@ This doc lists every key the codebase reads from layer 2, where it's used, and w
 | `default_net_control` | Schedule | callsign string | Default NCS assigned to new sessions when not set per-session. |
 | `pat_mailbox_path` | Check-ins, Winlink delivery, Scanner | filesystem path | Directory where PAT stores Winlink messages. |
 | `net_address` | Check-ins, Winlink delivery, Scanner | email string | Winlink address for the net (e.g., `w0ne@winlink.org`). |
-| `claude_api_key` | Activities (chat) | API key string | Anthropic API key for the activity-brainstorm chat. If unset, the chat returns 503 and the UI shows a banner. |
+| `claude_api_key` | Activities (chat) | API key string (encrypted) | Anthropic API key for the activity-brainstorm chat. If unset, the chat returns 503 and the UI shows a banner. |
+| `registration_open` | OAuth callback | `"true"` / `"false"` | Default `"true"`. When `"false"`, the callback refuses new OAuth subjects (existing users keep signing in). Toggle from the **Net Operations** group on `/config`. |
 
 ## Check-in modes
 
@@ -36,7 +37,7 @@ Supported backend names: `"email"`, `"groupsio"`, `"winlink"`.
 
 ### Email backend
 
-Uses the SMTP env vars (`SKYNET_SMTP_*`) for connection; this key sets the recipient.
+Connection details live in `app_config` under the `smtp.*` keys (host / port / username / password / from_address / use_tls), configured via the SMTP form on `/config`. `smtp.password` is encrypted at rest. This `delivery.email.to_address` key sets the recipient.
 
 | Key | Type | Description |
 |-----|------|-------------|
