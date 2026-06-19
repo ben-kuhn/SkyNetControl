@@ -174,6 +174,72 @@ async def test_verify_rejects_wrong_audience():
     assert claims is None
 
 
+def _compute_at_hash(access_token: str) -> str:
+    """Compute the RS256 at_hash per OpenID Connect Core 3.1.3.6:
+    base64url-no-padding of the left half of SHA-256(access_token).
+    """
+    import hashlib
+
+    digest = hashlib.sha256(access_token.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest[: len(digest) // 2]).decode("ascii").rstrip("=")
+
+
+@pytest.mark.asyncio
+async def test_verify_at_hash_requires_access_token():
+    """An id_token carrying at_hash (Google does) needs the access_token
+    threaded through, or jose refuses it. Regression for the prod log
+    "No access_token provided to compare against at_hash claim."
+    """
+    private_pem, jwk = _make_rsa_jwk()
+    access_token = "the-real-access-token"
+    token = _sign_id_token(
+        private_pem,
+        {
+            "iss": "https://idp.example.com",
+            "aud": "test-client",
+            "sub": "u",
+            "exp": 9999999999,
+            "at_hash": _compute_at_hash(access_token),
+        },
+    )
+
+    # Without access_token → jose raises, verifier returns None.
+    with patch.object(oidc_verify, "_fetch_jwks", new=AsyncMock(return_value=[jwk])):
+        claims = await oidc_verify.verify_id_token(
+            token,
+            expected_issuer="https://idp.example.com",
+            expected_audience="test-client",
+            expected_nonce="",
+            jwks_uri="https://idp.example.com/jwks",
+        )
+    assert claims is None
+
+    # With matching access_token → passes.
+    with patch.object(oidc_verify, "_fetch_jwks", new=AsyncMock(return_value=[jwk])):
+        claims = await oidc_verify.verify_id_token(
+            token,
+            expected_issuer="https://idp.example.com",
+            expected_audience="test-client",
+            expected_nonce="",
+            jwks_uri="https://idp.example.com/jwks",
+            access_token=access_token,
+        )
+    assert claims is not None
+    assert claims["sub"] == "u"
+
+    # Wrong access_token → at_hash mismatch, verifier returns None.
+    with patch.object(oidc_verify, "_fetch_jwks", new=AsyncMock(return_value=[jwk])):
+        claims = await oidc_verify.verify_id_token(
+            token,
+            expected_issuer="https://idp.example.com",
+            expected_audience="test-client",
+            expected_nonce="",
+            jwks_uri="https://idp.example.com/jwks",
+            access_token="some-other-token",
+        )
+    assert claims is None
+
+
 @pytest.mark.asyncio
 async def test_verify_jwks_unreachable_returns_none():
     """If the JWKS endpoint can't be reached, the verifier refuses the

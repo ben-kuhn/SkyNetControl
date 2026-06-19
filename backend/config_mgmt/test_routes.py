@@ -322,6 +322,7 @@ async def try_complete_oauth_test(
                         expected_audience=session.client_id,
                         expected_nonce=session.nonce,
                         jwks_uri=session.oidc_jwks_uri,
+                        access_token=access_token,
                     )
                     if claims is None:
                         session.status = "failed"

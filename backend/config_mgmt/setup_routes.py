@@ -407,6 +407,7 @@ async def try_complete_setup(
                         expected_audience=session.oauth_client_id,
                         expected_nonce=session.nonce,
                         jwks_uri=oidc_jwks_uri,
+                        access_token=access_token,
                     )
                     if claims is None:
                         del _SETUP_SESSIONS[state]

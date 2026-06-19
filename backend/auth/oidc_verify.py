@@ -104,6 +104,7 @@ async def verify_id_token(
     expected_audience: str,
     expected_nonce: str,
     jwks_uri: str,
+    access_token: str | None = None,
 ) -> dict | None:
     """Return verified claims, or None if verification fails.
 
@@ -112,6 +113,13 @@ async def verify_id_token(
     `nonce` == expected_nonce. Algorithm restricted to the asymmetric
     set in _ALLOWED_ALGS — "none" and HMAC are rejected outright to
     prevent algorithm-confusion / signature-stripping attacks.
+
+    `access_token` is forwarded to jose so it can validate the optional
+    `at_hash` claim when the IdP includes one (Google does). Without it,
+    a token that carries at_hash is rejected with "No access_token
+    provided to compare against at_hash claim." Callers always have the
+    access_token in hand from the token exchange they just completed,
+    so passing it through is free.
 
     Returning None (not raising) lets callers decide whether to fall
     back, log, or reject; the function logs the specific failure mode
@@ -157,8 +165,11 @@ async def verify_id_token(
                 algorithms=[alg],
                 audience=expected_audience,
                 issuer=expected_issuer,
+                access_token=access_token,
                 # python-jose validates exp/nbf/iat by default; aud/iss
-                # are validated when the arguments are passed.
+                # are validated when the arguments are passed; at_hash
+                # is validated when access_token is given AND the token
+                # carries the claim.
             )
         except JWTError as exc:
             last_exc = exc

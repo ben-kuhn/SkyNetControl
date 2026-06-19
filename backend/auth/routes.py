@@ -199,6 +199,7 @@ async def callback(
                     expected_audience=config["client_id"],
                     expected_nonce=cookie_nonce,
                     jwks_uri=config["jwks_uri"],
+                    access_token=access_token,
                 )
                 if claims is None:
                     raise HTTPException(status_code=401, detail="id_token verification failed")
