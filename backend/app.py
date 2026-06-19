@@ -160,6 +160,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # React's `style={{...}}` produces inline style attributes on every
     # render and hashing every possible style isn't practical.
     inline_script_hashes = _csp_script_hashes(settings.static_dir)
+    # Log the result at startup so operators can spot a regression — if
+    # Vite ever reformats the theme-bootstrap snippet, this count drops
+    # to zero, CSP blocks the inline script, and the deployment ships
+    # a broken SPA. Catching it in the journal is faster than the
+    # browser-side "first paint flashes default theme" symptom.
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        "CSP script-src: %d inline-script hash(es) loaded from %s",
+        len(inline_script_hashes),
+        os.path.join(settings.static_dir, "index.html"),
+    )
     script_src = "'self' " + " ".join(inline_script_hashes) if inline_script_hashes else "'self'"
     csp = (
         "default-src 'self'; "

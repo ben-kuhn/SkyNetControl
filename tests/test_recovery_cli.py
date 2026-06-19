@@ -232,7 +232,10 @@ def test_cli_rotate_secrets_without_from_key_warns_on_unrecoverable(tmp_path, mo
 
     monkeypatch.setenv("SKYNET_JWT_SECRET_KEY", "new-secret-key")
     rc = main(["rotate-secrets"])
-    assert rc == 0
+    # Non-zero exit so scripted callers (cron jobs, CI rotation pipelines)
+    # don't silently miss the unrecoverable rows — the stderr WARNING
+    # spells out the recovery path.
+    assert rc != 0
     captured = capsys.readouterr()
     # Stderr carries the warning so log scrapers see it; stdout has summary.
     assert "could not be decrypted" in captured.err

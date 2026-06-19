@@ -40,24 +40,21 @@ def _is_sensitive_key(key: str) -> bool:
     return any(fragment in lk for fragment in ("api_key", "password", "secret", "token"))
 
 
-def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int]:
+def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int, int]:
     """Walk app_config, re-encrypt any sensitive key under the current key.
 
-    Returns (re_encrypted, already_encrypted, migrated_from_old). Behaviour:
-    - Plaintext sensitive row → encrypted under the current key. Counts
-      toward re_encrypted.
-    - Envelope-encrypted row decryptable under current key → left untouched.
-      Counts toward already.
-    - Envelope-encrypted row NOT decryptable under current key, and
-      from_key supplied → decrypted under from_key, re-encrypted under
-      current. Counts toward migrated_from_old.
-    - Envelope-encrypted row NOT decryptable under either → counted as
-      "already" but logged as an unrecoverable row so the operator sees it.
+    Returns (re_encrypted, already_encrypted, migrated_from_old, unrecoverable):
+    - Plaintext sensitive row → encrypted under current key. → re_encrypted.
+    - Envelope-encrypted row decryptable under current key → untouched. → already.
+    - Envelope NOT decryptable under current key, from_key supplied,
+      decryptable under from_key → re-encrypted under current. → migrated.
+    - Envelope decryptable under neither key (or no from_key supplied) →
+      left untouched. → unrecoverable.
 
-    Idempotent without from_key: a second run does nothing.
+    Idempotent without from_key: a second run does nothing destructive.
+    The CLI surfaces a non-zero exit code when `unrecoverable` is non-zero
+    so scripted callers don't silently miss the failure.
     """
-    from backend.auth.secret_box import decrypt as decrypt_current
-
     rows = (
         db.query(AppConfig)
         .filter(AppConfig.value.isnot(None))
@@ -67,6 +64,11 @@ def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int]:
     already = 0
     migrated = 0
     unrecoverable = 0
+    # The current installed key — read once. install_key_material was
+    # called in main() before we ever reach here, so this is never None
+    # in production, but defensive against test paths that don't init.
+    from backend.auth.secret_box import _key_material as _current_material
+
     for row in rows:
         if not _is_sensitive_key(row.key) or not row.value:
             continue
@@ -75,33 +77,26 @@ def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int]:
             row.value = encrypt(row.value)
             re_encrypted += 1
             continue
-        # Envelope present. Try the current key first.
-        plain_current = decrypt_current(row.value)
-        # decrypt_current returns "" on InvalidTag (the graceful-degrade
-        # contract). Distinguish "decryptable under current key (already
-        # good)" from "fails under current key" by trying the current key
-        # explicitly here.
-        from backend.auth.secret_box import _key_material as _current_material
-
+        # Envelope present. Try the current key. decrypt_with_key returns
+        # None on InvalidTag, so a None result definitively means "this
+        # row is not under our current key" — without conflating it with
+        # legitimately-empty plaintext (which would never be enveloped).
         decrypted_current = (
             decrypt_with_key(row.value, _current_material) if _current_material else None
         )
         if decrypted_current is not None:
             already += 1
             continue
-        # Not decryptable under current key. Try from_key if provided.
+        # Not under current key. Try from_key if provided.
         if from_key is not None:
             decrypted_old = decrypt_with_key(row.value, from_key)
             if decrypted_old is not None:
                 row.value = encrypt(decrypted_old)
                 migrated += 1
                 continue
-        # Row is encrypted under neither current nor from_key (or no
-        # from_key supplied). Leave it; warn the caller.
+        # Encrypted under neither current nor from_key (or no from_key).
+        # Leave the row alone; the CLI exit code + stderr warn the caller.
         unrecoverable += 1
-        # Defensive: avoid attribute-not-loaded suppression confusing
-        # plain_current usage below.
-        _ = plain_current
     if re_encrypted or migrated:
         db.commit()
     if unrecoverable:
@@ -111,7 +106,7 @@ def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int]:
             "Re-enter affected credentials via the admin config page.",
             file=sys.stderr,
         )
-    return re_encrypted, already, migrated
+    return re_encrypted, already, migrated, unrecoverable
 
 
 def _parse_ttl(spec: str) -> timedelta:
@@ -202,15 +197,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.cmd == "rotate-secrets":
-            re_encrypted, already, migrated = _rotate_secrets(db, from_key=args.from_key)
+            re_encrypted, already, migrated, unrecoverable = _rotate_secrets(
+                db, from_key=args.from_key
+            )
             parts = [f"Re-encrypted {re_encrypted} row(s) from plaintext"]
             if args.from_key is not None:
                 parts.append(f"migrated {migrated} row(s) from --from-key")
             parts.append(f"{already} were already encrypted under current key")
             print("; ".join(parts) + ".")
-            if re_encrypted == 0 and already == 0 and migrated == 0:
+            if re_encrypted == 0 and already == 0 and migrated == 0 and unrecoverable == 0:
                 print("No sensitive AppConfig rows found.")
-            return 0
+            # Non-zero exit when any row could not be migrated, so scripted
+            # callers don't silently miss the failure. The stderr WARNING
+            # already explains the recovery path.
+            return 3 if unrecoverable else 0
 
     # Argparse with required=True already exits non-zero for unknown subcommands;
     # this is a defensive fallthrough.

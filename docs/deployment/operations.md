@@ -71,21 +71,28 @@ To avoid the coupling, set `SKYNET_SECRETS_KEY` to a separate value and rotate t
 ### Rotating `SKYNET_SECRETS_KEY`
 
 ```bash
-# 1. Mint a new key.
+# 1. Capture the CURRENT key before you change anything. If you skip this
+#    step and then update the env var you have no way to recover already-
+#    encrypted credentials.
+OLD_KEY=$SKYNET_SECRETS_KEY  # or `cat /path/to/key-file`, etc.
+
+# 2. Mint a new key.
 NEW_KEY=$(openssl rand -hex 32)
 
-# 2. Update SKYNET_SECRETS_KEY in your env-var source (systemd LoadCredential
-#    file, sops secret, EnvironmentFile, etc.) to the new value.
+# 3. Update SKYNET_SECRETS_KEY in your env-var source (systemd LoadCredential
+#    file, sops secret, EnvironmentFile, etc.) to $NEW_KEY.
 
-# 3. Restart the service so the new key is loaded.
+# 4. Restart the service so the new key is loaded.
 
-# 4. Migrate existing rows. Run the CLI with the OLD key value:
+# 5. Migrate existing rows. Run the CLI with the OLD key value:
 skynetcontrol-recovery rotate-secrets --from-key "$OLD_KEY"
+# Exits non-zero if any row could not be decrypted under either key.
+# Check stderr for the recovery instructions in that case.
 ```
 
-The CLI walks every sensitive `app_config` row (anything matching `api_key`/`password`/`secret`/`token`), tries to decrypt under the current key, and on failure tries the supplied `--from-key`. Rows that decrypt under either are re-encrypted under the current key. Anything that decrypts under neither is flagged to stderr; the operator has to re-enter that credential through the admin config page.
+The CLI walks every sensitive `app_config` row (anything matching `api_key`/`password`/`secret`/`token`), tries to decrypt under the current key, and on failure tries the supplied `--from-key`. Rows that decrypt under either are re-encrypted under the current key. Anything that decrypts under neither is flagged to stderr **and the CLI exits non-zero** — scripted callers must check the exit code, not just stdout.
 
-If you forget `--from-key` after a rotation, `rotate-secrets` prints a warning for every unrecoverable row but doesn't corrupt them. Re-run with the right `--from-key` to recover.
+If you forget `--from-key` after a rotation, `rotate-secrets` prints a warning for every unrecoverable row but doesn't corrupt them. Re-run with the right `--from-key` to recover, or re-enter the affected credentials through the admin config page.
 
 ## Behind a reverse proxy (Cloudflare, nginx, Caddy, etc.)
 
