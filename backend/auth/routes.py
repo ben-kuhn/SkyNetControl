@@ -1,3 +1,4 @@
+import contextlib
 import re
 import secrets
 import urllib.parse
@@ -134,60 +135,70 @@ async def callback(
     # SSRF-guard the discovery-derived URLs. Without this, a hostile
     # discovery doc that points token_endpoint / userinfo_endpoint at
     # internal addresses would give an attacker free SSRF — the
-    # original guard only covered the issuer URL itself.
+    # original guard only covered the issuer URL itself. Also captures
+    # the resolved IPs so dns_pin can lock the connection to those
+    # exact IPs (closes the DNS-rebinding TOCTOU).
+    from backend.auth.dns_pin import pin_dns
     from backend.auth.service import _ssrf_guard_discovery_url_async
 
+    pins = {}
     for url in (config["token_url"], config["userinfo_url"]):
         try:
-            await _ssrf_guard_discovery_url_async(url)
+            host, ip = await _ssrf_guard_discovery_url_async(url)
+            pins[host] = ip
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
                 detail=f"Provider URL refused by SSRF guard: {exc}",
             ) from exc
 
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(
-            config["token_url"],
-            data={
-                "client_id": config["client_id"],
-                "client_secret": config["client_secret"],
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-            },
-            headers={"Accept": "application/json"},
-        )
-        token_data = token_response.json()
-        access_token = token_data.get("access_token", "")
-
-        if not access_token:
-            raise HTTPException(status_code=400, detail="Failed to obtain access token from provider")
-
-        # Verify id_token for OIDC providers. Pins the IdP's identity to
-        # its published JWKS key and pins this exchange to the originating
-        # sign-in via nonce — without this, userinfo was our only signal.
-        if config["protocol"] == "oidc":
-            id_token_value = token_data.get("id_token", "")
-            if not id_token_value or not config["jwks_uri"]:
-                raise HTTPException(status_code=400, detail="OIDC provider did not return an id_token")
-            from backend.auth.oidc_verify import verify_id_token
-
-            claims = await verify_id_token(
-                id_token_value,
-                expected_issuer=config["issuer"],
-                expected_audience=config["client_id"],
-                expected_nonce=cookie_nonce,
-                jwks_uri=config["jwks_uri"],
+    # Pin each verified host inside a single nested-context so all the
+    # IPs are active for the duration of the fetch chain.
+    with contextlib.ExitStack() as stack:
+        for host, ip in pins.items():
+            stack.enter_context(pin_dns(host, ip))
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                config["token_url"],
+                data={
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": redirect_uri,
+                },
+                headers={"Accept": "application/json"},
             )
-            if claims is None:
-                raise HTTPException(status_code=401, detail="id_token verification failed")
+            token_data = token_response.json()
+            access_token = token_data.get("access_token", "")
 
-        userinfo_response = await client.get(
-            config["userinfo_url"],
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        userinfo = userinfo_response.json()
+            if not access_token:
+                raise HTTPException(status_code=400, detail="Failed to obtain access token from provider")
+
+            # Verify id_token for OIDC providers. Pins the IdP's identity to
+            # its published JWKS key and pins this exchange to the originating
+            # sign-in via nonce — without this, userinfo was our only signal.
+            if config["protocol"] == "oidc":
+                id_token_value = token_data.get("id_token", "")
+                if not id_token_value or not config["jwks_uri"]:
+                    raise HTTPException(status_code=400, detail="OIDC provider did not return an id_token")
+                from backend.auth.oidc_verify import verify_id_token
+
+                claims = await verify_id_token(
+                    id_token_value,
+                    expected_issuer=config["issuer"],
+                    expected_audience=config["client_id"],
+                    expected_nonce=cookie_nonce,
+                    jwks_uri=config["jwks_uri"],
+                )
+                if claims is None:
+                    raise HTTPException(status_code=401, detail="id_token verification failed")
+
+            userinfo_response = await client.get(
+                config["userinfo_url"],
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            userinfo = userinfo_response.json()
 
     raw_subject = config["extract_subject"](userinfo)
     if not raw_subject:

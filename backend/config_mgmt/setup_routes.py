@@ -337,12 +337,19 @@ async def try_complete_setup(
 
     # SSRF-guard the discovery-derived URLs. Pre-setup this handler is
     # reachable unauthenticated, so a hostile issuer who controlled DNS
-    # could otherwise point token/userinfo at internal addresses.
+    # could otherwise point token/userinfo at internal addresses. Also
+    # captures the resolved IPs so dns_pin locks each connection to the
+    # exact IP the guard verified — closes the DNS-rebinding TOCTOU.
+    import contextlib as _ctx
+
+    from backend.auth.dns_pin import pin_dns
     from backend.auth.service import _ssrf_guard_discovery_url_async
 
+    _pins: dict[str, str] = {}
     for url in (token_url, userinfo_url):
         try:
-            await _ssrf_guard_discovery_url_async(url)
+            _host, _ip = await _ssrf_guard_discovery_url_async(url)
+            _pins[_host] = _ip
         except ValueError as exc:
             del _SETUP_SESSIONS[state]
             return _error_html(
@@ -351,61 +358,68 @@ async def try_complete_setup(
             )
 
     try:
-        async with httpx.AsyncClient() as client:
-            token_response = await client.post(
-                token_url,
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "client_id": session.oauth_client_id,
-                    "client_secret": session.oauth_client_secret,
-                    "redirect_uri": redirect_uri,
-                },
-                headers={"Accept": "application/json"},
-            )
-            token_data = token_response.json()
-            access_token = token_data.get("access_token", "")
-
-            if not access_token:
-                err_desc = (
-                    token_data.get("error_description") or token_data.get("error") or "no access_token in response"
+        with _ctx.ExitStack() as _stack:
+            for _host, _ip in _pins.items():
+                _stack.enter_context(pin_dns(_host, _ip))
+            async with httpx.AsyncClient() as client:
+                token_response = await client.post(
+                    token_url,
+                    data={
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "client_id": session.oauth_client_id,
+                        "client_secret": session.oauth_client_secret,
+                        "redirect_uri": redirect_uri,
+                    },
+                    headers={"Accept": "application/json"},
                 )
-                del _SETUP_SESSIONS[state]
-                return _error_html("Token Exchange Failed", f"Could not obtain access token: {err_desc}")
+                token_data = token_response.json()
+                access_token = token_data.get("access_token", "")
 
-            # Verify id_token for OIDC providers (everything except GitHub
-            # / Discord / Facebook). Anchors the IdP to its JWKS key and
-            # binds the exchange to this wizard run via nonce — without
-            # this, userinfo was our only authentication signal.
-            if is_oidc:
-                id_token_value = token_data.get("id_token", "")
-                if not id_token_value or not oidc_jwks_uri:
+                if not access_token:
+                    err_desc = (
+                        token_data.get("error_description")
+                        or token_data.get("error")
+                        or "no access_token in response"
+                    )
                     del _SETUP_SESSIONS[state]
                     return _error_html(
-                        "OIDC Verification Failed",
-                        "Provider did not return an id_token; cannot complete setup.",
+                        "Token Exchange Failed", f"Could not obtain access token: {err_desc}"
                     )
-                from backend.auth.oidc_verify import verify_id_token
 
-                claims = await verify_id_token(
-                    id_token_value,
-                    expected_issuer=oidc_issuer,
-                    expected_audience=session.oauth_client_id,
-                    expected_nonce=session.nonce,
-                    jwks_uri=oidc_jwks_uri,
+                # Verify id_token for OIDC providers (everything except GitHub
+                # / Discord / Facebook). Anchors the IdP to its JWKS key and
+                # binds the exchange to this wizard run via nonce — without
+                # this, userinfo was our only authentication signal.
+                if is_oidc:
+                    id_token_value = token_data.get("id_token", "")
+                    if not id_token_value or not oidc_jwks_uri:
+                        del _SETUP_SESSIONS[state]
+                        return _error_html(
+                            "OIDC Verification Failed",
+                            "Provider did not return an id_token; cannot complete setup.",
+                        )
+                    from backend.auth.oidc_verify import verify_id_token
+
+                    claims = await verify_id_token(
+                        id_token_value,
+                        expected_issuer=oidc_issuer,
+                        expected_audience=session.oauth_client_id,
+                        expected_nonce=session.nonce,
+                        jwks_uri=oidc_jwks_uri,
+                    )
+                    if claims is None:
+                        del _SETUP_SESSIONS[state]
+                        return _error_html(
+                            "OIDC Verification Failed",
+                            "Could not verify id_token signature or claims. Check server logs.",
+                        )
+
+                userinfo_response = await client.get(
+                    userinfo_url,
+                    headers={"Authorization": f"Bearer {access_token}"},
                 )
-                if claims is None:
-                    del _SETUP_SESSIONS[state]
-                    return _error_html(
-                        "OIDC Verification Failed",
-                        "Could not verify id_token signature or claims. Check server logs.",
-                    )
-
-            userinfo_response = await client.get(
-                userinfo_url,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            userinfo = userinfo_response.json()
+                userinfo = userinfo_response.json()
     except Exception as exc:
         # Log the full exception server-side; show a generic message to the
         # caller. Pre-setup this page is reachable unauthenticated, and

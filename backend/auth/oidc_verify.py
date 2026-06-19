@@ -53,19 +53,24 @@ async def _fetch_jwks(jwks_uri: str) -> list[dict] | None:
     discovery cache could otherwise point us at an internal URL.
     """
     try:
-        await _ssrf_guard_discovery_url_async(jwks_uri)
+        host, ip = await _ssrf_guard_discovery_url_async(jwks_uri)
     except ValueError as exc:
         logger.error("Rejecting unsafe JWKS URI %s: %s", jwks_uri, exc)
         return None
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(jwks_uri, timeout=10)
-            response.raise_for_status()
-            doc = response.json()
-            keys = doc.get("keys")
-            if not isinstance(keys, list):
-                return None
-            return keys
+        # Lock the connect to the exact IP the guard verified, so DNS
+        # rebinding can't swap in a private address between check and fetch.
+        from backend.auth.dns_pin import pin_dns
+
+        with pin_dns(host, ip):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(jwks_uri, timeout=10)
+                response.raise_for_status()
+                doc = response.json()
+                keys = doc.get("keys")
+                if not isinstance(keys, list):
+                    return None
+                return keys
     except Exception:
         logger.error("Failed to fetch JWKS from %s", jwks_uri)
         return None

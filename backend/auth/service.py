@@ -49,33 +49,40 @@ def decode_access_token(token: str, settings: Settings) -> dict | None:
         return None
 
 
-def _ssrf_guard_check_resolved_ips(host: str, infos: list) -> None:
+def _ssrf_guard_check_resolved_ips(host: str, infos: list) -> str:
     """Inspect the resolved IPs and raise ValueError if any is non-global.
+
+    Returns the first resolved IP on success — callers pass this to
+    backend.auth.dns_pin.pin_dns so the subsequent httpx fetch is
+    locked to that exact IP (closes the DNS-rebinding TOCTOU between
+    this check and the connect that follows).
 
     Split out from _ssrf_guard_discovery_url so the sync wrapper can keep
     calling getaddrinfo directly (for back-compat with existing callers
     and tests) while the async path can offload resolution to a thread.
     """
+    if not infos:
+        raise ValueError(f"OIDC issuer host {host} returned no addresses")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
             raise ValueError(f"OIDC issuer host {host} resolves to a non-global IP ({ip})")
+    return infos[0][4][0]
 
 
-def _ssrf_guard_discovery_url(url: str) -> None:
+def _ssrf_guard_discovery_url(url: str) -> tuple[str, str]:
     """Raise ValueError if `url` is unsafe to fetch from the server side.
+
+    Returns (hostname, resolved_ip). Callers pass these to
+    `backend.auth.dns_pin.pin_dns` around the subsequent httpx fetch so
+    DNS rebinding can't swap in a private IP between the check and the
+    connect.
 
     `issuer_url` reaches this function from admin-supplied form input (and,
     pre-setup, from any unauthenticated POST to /api/setup/claim/start).
     Without a guard, an attacker can point us at http://169.254.169.254/
     (cloud metadata), http://127.0.0.1:<internal-port>, or any internal
     HTTP service and read the response body via _error_html on failure.
-
-    The check resolves the hostname once and rejects non-https schemes
-    plus any address that isn't globally routable. There's a TOCTOU gap
-    between this resolve and httpx's own resolve at fetch time; closing
-    that fully needs a custom DNS resolver. A pre-fetch check still
-    blocks the trivial misconfigurations (http://, localhost, AWS metadata).
 
     This is the sync entry point. fetch_oidc_discovery offloads the DNS
     lookup to a thread via `_ssrf_guard_discovery_url_async` so a slow
@@ -91,27 +98,25 @@ def _ssrf_guard_discovery_url(url: str) -> None:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise ValueError(f"OIDC issuer host could not be resolved: {host}") from exc
-    _ssrf_guard_check_resolved_ips(host, infos)
+    ip = _ssrf_guard_check_resolved_ips(host, infos)
+    return host, ip
 
 
-async def _ssrf_guard_discovery_url_async(url: str) -> None:
-    """Async-safe SSRF guard. Use before EVERY httpx fetch of an
-    attacker-influenceable URL — not just the issuer discovery URL but
-    also the token/userinfo/jwks URLs that come from the discovery doc
-    (a hostile discovery server can otherwise point those at internal
-    addresses and bypass the guard entirely).
+async def _ssrf_guard_discovery_url_async(url: str) -> tuple[str, str]:
+    """Async-safe SSRF guard. Returns (hostname, resolved_ip).
+
+    Use before EVERY httpx fetch of an attacker-influenceable URL — not
+    just the issuer discovery URL but also the token/userinfo/jwks URLs
+    that come from the discovery doc (a hostile discovery server can
+    otherwise point those at internal addresses and bypass the guard
+    entirely). Pass the returned (host, ip) into
+    `backend.auth.dns_pin.pin_dns` so the subsequent httpx fetch is
+    locked to the exact IP this guard verified — closing the DNS-
+    rebinding TOCTOU.
 
     socket.getaddrinfo is blocking, so we offload to a thread; without
     that, a slow-resolving attacker hostname could stall the single
     uvicorn worker.
-
-    Residual TOCTOU: between this guard's resolve and httpx's own
-    resolve at fetch time, an attacker controlling DNS could swap the
-    response (DNS rebinding). The window in practice is microseconds —
-    the next-line connection establishes immediately after we return —
-    so practical exploitation needs sub-millisecond DNS response timing.
-    Closing the gap fully requires a custom httpx transport that pins
-    the resolved IP; tracked as future work.
     """
     parsed = urlparse(url)
     if parsed.scheme != "https":
@@ -123,21 +128,28 @@ async def _ssrf_guard_discovery_url_async(url: str) -> None:
         infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
     except socket.gaierror as exc:
         raise ValueError(f"OIDC issuer host could not be resolved: {host}") from exc
-    _ssrf_guard_check_resolved_ips(host, infos)
+    ip = _ssrf_guard_check_resolved_ips(host, infos)
+    return host, ip
 
 
 async def fetch_oidc_discovery(discovery_url: str) -> dict | None:
     """Fetch OIDC discovery document and return endpoint URLs, or None on failure."""
     try:
-        await _ssrf_guard_discovery_url_async(discovery_url)
+        host, ip = await _ssrf_guard_discovery_url_async(discovery_url)
     except ValueError as exc:
         logger.error("Rejecting unsafe OIDC discovery URL %s: %s", discovery_url, exc)
         return None
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(discovery_url, timeout=10)
-            response.raise_for_status()
-            return response.json()
+        # Pin the hostname to the exact IP the guard just verified, so the
+        # TCP connect can't be redirected via DNS rebinding to an internal
+        # address between the check and the fetch.
+        from backend.auth.dns_pin import pin_dns
+
+        with pin_dns(host, ip):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(discovery_url, timeout=10)
+                response.raise_for_status()
+                return response.json()
     except Exception:
         logger.error("Failed to fetch OIDC discovery from %s", discovery_url)
         return None

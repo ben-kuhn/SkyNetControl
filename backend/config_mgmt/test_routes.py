@@ -244,68 +244,85 @@ async def oauth_test_callback(
 
     # SSRF-guard the discovery-derived URLs (token/userinfo). Admin-gated,
     # but defense-in-depth — an admin tricked into testing a hostile
-    # OIDC provider shouldn't grant that provider SSRF.
+    # OIDC provider shouldn't grant that provider SSRF. Also pin DNS so
+    # the connect can't be redirected via rebinding between check and fetch.
+    import contextlib as _ctx
+
+    from backend.auth.dns_pin import pin_dns
     from backend.auth.service import _ssrf_guard_discovery_url_async
 
+    _pins: dict[str, str] = {}
     for url in (token_url, userinfo_url):
         try:
-            await _ssrf_guard_discovery_url_async(url)
+            _host, _ip = await _ssrf_guard_discovery_url_async(url)
+            _pins[_host] = _ip
         except ValueError as exc:
             session.status = "failed"
             session.error = f"Provider URL refused by SSRF guard: {exc}"
             return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
 
     try:
-        async with httpx.AsyncClient() as client:
-            token_response = await client.post(
-                token_url,
-                data={
-                    "client_id": session.client_id,
-                    "client_secret": session.client_secret,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": redirect_uri,
-                },
-                headers={"Accept": "application/json"},
-            )
-            token_data = token_response.json()
-            access_token = token_data.get("access_token", "")
-
-            if not access_token:
-                err_desc = (
-                    token_data.get("error_description") or token_data.get("error") or "no access_token in response"
+        with _ctx.ExitStack() as _stack:
+            for _host, _ip in _pins.items():
+                _stack.enter_context(pin_dns(_host, _ip))
+            async with httpx.AsyncClient() as client:
+                token_response = await client.post(
+                    token_url,
+                    data={
+                        "client_id": session.client_id,
+                        "client_secret": session.client_secret,
+                        "code": code,
+                        "grant_type": "authorization_code",
+                        "redirect_uri": redirect_uri,
+                    },
+                    headers={"Accept": "application/json"},
                 )
-                session.status = "failed"
-                session.error = err_desc
-                return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
+                token_data = token_response.json()
+                access_token = token_data.get("access_token", "")
 
-            # Verify id_token for OIDC providers — same protection as the
-            # everyday sign-in path. Skipped for OAuth2-only providers.
-            if session.oidc_jwks_uri:
-                id_token_value = token_data.get("id_token", "")
-                if not id_token_value:
+                if not access_token:
+                    err_desc = (
+                        token_data.get("error_description")
+                        or token_data.get("error")
+                        or "no access_token in response"
+                    )
                     session.status = "failed"
-                    session.error = "provider did not return id_token"
-                    return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
-                from backend.auth.oidc_verify import verify_id_token
+                    session.error = err_desc
+                    return _autoclose_html(
+                        session.test_session_id, "failed", app_settings.app_base_url
+                    )
 
-                claims = await verify_id_token(
-                    id_token_value,
-                    expected_issuer=session.oidc_issuer,
-                    expected_audience=session.client_id,
-                    expected_nonce=session.nonce,
-                    jwks_uri=session.oidc_jwks_uri,
+                # Verify id_token for OIDC providers — same protection as the
+                # everyday sign-in path. Skipped for OAuth2-only providers.
+                if session.oidc_jwks_uri:
+                    id_token_value = token_data.get("id_token", "")
+                    if not id_token_value:
+                        session.status = "failed"
+                        session.error = "provider did not return id_token"
+                        return _autoclose_html(
+                            session.test_session_id, "failed", app_settings.app_base_url
+                        )
+                    from backend.auth.oidc_verify import verify_id_token
+
+                    claims = await verify_id_token(
+                        id_token_value,
+                        expected_issuer=session.oidc_issuer,
+                        expected_audience=session.client_id,
+                        expected_nonce=session.nonce,
+                        jwks_uri=session.oidc_jwks_uri,
+                    )
+                    if claims is None:
+                        session.status = "failed"
+                        session.error = "id_token verification failed"
+                        return _autoclose_html(
+                            session.test_session_id, "failed", app_settings.app_base_url
+                        )
+
+                userinfo_response = await client.get(
+                    userinfo_url,
+                    headers={"Authorization": f"Bearer {access_token}"},
                 )
-                if claims is None:
-                    session.status = "failed"
-                    session.error = "id_token verification failed"
-                    return _autoclose_html(session.test_session_id, "failed", app_settings.app_base_url)
-
-            userinfo_response = await client.get(
-                userinfo_url,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            userinfo = userinfo_response.json()
+                userinfo = userinfo_response.json()
     except Exception as exc:
         session.status = "failed"
         session.error = str(exc)
