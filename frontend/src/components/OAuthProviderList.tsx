@@ -155,6 +155,22 @@ function ProviderFormModal({ mode, typeChoice, existing, onSave, onClose }: Prov
   const [slugError, setSlugError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copy = async (uri: string) => {
+    try {
+      await navigator.clipboard.writeText(uri);
+      setCopied(uri);
+      window.setTimeout(() => setCopied((c) => (c === uri ? null : c)), 1500);
+    } catch {
+      /* clipboard blocked — user can select and copy manually */
+    }
+  };
+
+  const baseUrl =
+    typeof window !== "undefined" ? window.location.origin.replace(/\/+$/, "") : "";
+  const slug = form.slug.trim();
+  const signInUri = baseUrl && slug ? `${baseUrl}/api/auth/callback/${slug}` : "";
 
   // Debounced slug derivation (Custom OIDC add only)
   const deriveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -276,6 +292,29 @@ function ProviderFormModal({ mode, typeChoice, existing, onSave, onClose }: Prov
             placeholder="https://your-oidc-provider.example.com"
           />
         )}
+
+        {/* Redirect URI to register at the IdP. The Test sign-in button
+            uses this same URI (dispatched server-side from state). */}
+        {signInUri ? (
+          <div className="rounded-lg border border-border bg-bg-elevated p-3 flex flex-col gap-2 text-sm">
+            <div className="text-xs font-medium text-text-muted uppercase tracking-wider">
+              Redirect URI to register at your provider
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 break-all font-mono text-xs text-text-primary">
+                {signInUri}
+              </code>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => copy(signInUri)}
+              >
+                {copied === signInUri ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {submitError && !slugError && (
           <p className="text-sm text-danger">{submitError}</p>

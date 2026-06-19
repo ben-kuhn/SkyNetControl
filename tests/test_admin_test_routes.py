@@ -147,15 +147,17 @@ async def test_start_empty_secret_without_stored_returns_400(admin_client):
 
 
 @pytest.mark.asyncio
-async def test_callback_with_unknown_state_returns_404(test_app):
-    """GET callback with a bogus state should 404."""
+async def test_callback_with_unknown_state_falls_through(test_app):
+    """Unified callback: unknown state means no live test session, so the test
+    dispatcher returns None and the request falls through to normal sign-in,
+    which 400s on the missing OAuth state cookie."""
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
-            "/api/admin/test/oauth/callback",
+            "/api/auth/callback/github",
             params={"state": "nonexistent-state", "code": "someCode"},
         )
-    assert resp.status_code == 404
+    assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +199,7 @@ async def test_callback_success_marks_session(admin_client, test_app):
     async with AsyncClient(transport=transport, base_url="http://test") as raw_client:
         with patch("backend.config_mgmt.test_routes.httpx.AsyncClient", return_value=mock_http_client):
             cb_resp = await raw_client.get(
-                "/api/admin/test/oauth/callback",
+                "/api/auth/callback/github",
                 params={"state": state, "code": "auth-code-xyz"},
             )
     assert cb_resp.status_code == 200
@@ -245,7 +247,7 @@ async def test_callback_failure_marks_session(admin_client, test_app):
     async with AsyncClient(transport=transport, base_url="http://test") as raw_client:
         with patch("backend.config_mgmt.test_routes.httpx.AsyncClient", return_value=mock_http_client):
             cb_resp = await raw_client.get(
-                "/api/admin/test/oauth/callback",
+                "/api/auth/callback/github",
                 params={"state": state, "code": "bad-code"},
             )
     assert cb_resp.status_code == 200
@@ -295,17 +297,19 @@ async def test_callback_is_single_use(admin_client, test_app):
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as raw_client:
         first = await raw_client.get(
-            "/api/admin/test/oauth/callback",
+            "/api/auth/callback/github",
             params={"state": state, "error": "access_denied"},
         )
         assert first.status_code == 200  # auto-close page rendered
 
-        # Second hit with same state must 404 — session is no longer "live".
+        # Second hit with same state: session is no longer "live" so the
+        # test dispatcher returns None and the unified callback falls
+        # through to normal sign-in, which 400s on the missing cookie.
         second = await raw_client.get(
-            "/api/admin/test/oauth/callback",
+            "/api/auth/callback/github",
             params={"state": state, "code": "should-not-be-exchanged"},
         )
-        assert second.status_code == 404
+        assert second.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -326,10 +330,12 @@ async def test_session_expires_after_ttl(admin_client, test_app):
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as raw_client:
         cb_resp = await raw_client.get(
-            "/api/admin/test/oauth/callback",
+            "/api/auth/callback/github",
             params={"state": state, "code": "code"},
         )
-    assert cb_resp.status_code == 404
+    # Expired session: dispatcher returns None, falls through to normal
+    # sign-in which 400s on the missing cookie.
+    assert cb_resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------

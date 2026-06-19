@@ -111,6 +111,15 @@ async def callback(
     if setup_response is not None:
         return setup_response
 
+    # Admin OAuth-provider "Test sign-in" lands here too. Same one-callback
+    # rationale as setup: dispatch in-memory by state, fall through if not
+    # a live test session.
+    from backend.config_mgmt.test_routes import try_complete_oauth_test
+
+    test_response = await try_complete_oauth_test(state, code, error, app_settings)
+    if test_response is not None:
+        return test_response
+
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 

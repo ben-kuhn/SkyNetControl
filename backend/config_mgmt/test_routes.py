@@ -164,7 +164,12 @@ async def start_oauth_test(
     test_session_id = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32) if is_oidc else ""
 
-    redirect_uri = f"{app_settings.app_base_url}/api/admin/test/oauth/callback"
+    # Test callbacks land on the same URI as everyday sign-in
+    # (/api/auth/callback/{slug}) — admins only need to register one
+    # redirect URI at the IdP. Dispatch in the unified callback uses the
+    # in-memory _TEST_SESSIONS lookup to tell test traffic from real
+    # sign-in. See try_complete_oauth_test().
+    redirect_uri = f"{app_settings.app_base_url}/api/auth/callback/{slug}"
     params = {
         "client_id": body.client_id,
         "redirect_uri": redirect_uri,
@@ -194,21 +199,27 @@ async def start_oauth_test(
 
 
 # ---------------------------------------------------------------------------
-# OAuth test: callback (no auth — security via unguessable state)
+# OAuth test: callback dispatch invoked from /api/auth/callback/{slug}
 # ---------------------------------------------------------------------------
 
 
-@test_router.get("/oauth/callback")
-async def oauth_test_callback(
-    state: str = "",
-    code: str = "",
-    error: str = "",
-    app_settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    """Handle the OAuth provider redirect. No auth — secured by the unguessable state token."""
+async def try_complete_oauth_test(
+    state: str,
+    code: str,
+    error: str,
+    app_settings: Settings,
+) -> HTMLResponse | None:
+    """If `state` matches a live test session, finish the test and return the autoclose page.
+
+    Returns None when no test session is in flight for this state — the caller
+    should fall through to the normal sign-in path. Like try_complete_setup,
+    the in-memory _TEST_SESSIONS lookup IS the authentication here; state is
+    32 bytes of secrets.token_urlsafe so a collision with a real sign-in is
+    negligible.
+    """
     session = _get_live_session(state)
     if session is None:
-        raise HTTPException(status_code=404, detail="Test session not found or expired")
+        return None
 
     if error:
         session.status = "failed"
@@ -240,7 +251,8 @@ async def oauth_test_callback(
         token_url = discovery.get("token_endpoint", "")
         userinfo_url = discovery.get("userinfo_endpoint", "")
 
-    redirect_uri = f"{app_settings.app_base_url}/api/admin/test/oauth/callback"
+    # Must match the redirect_uri sent in /start — see start_oauth_test().
+    redirect_uri = f"{app_settings.app_base_url}/api/auth/callback/{session.slug}"
 
     # SSRF-guard the discovery-derived URLs (token/userinfo). Admin-gated,
     # but defense-in-depth — an admin tricked into testing a hostile
