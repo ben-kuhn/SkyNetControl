@@ -241,6 +241,64 @@ async def test_verify_at_hash_requires_access_token():
 
 
 @pytest.mark.asyncio
+async def test_verify_microsoft_templated_issuer():
+    """Microsoft's common-tenant discovery doc returns a templated issuer
+    `https://login.microsoftonline.com/{tenantid}/v2.0`; the actual id_token
+    has the real tenant UUID substituted. The verifier must substitute the
+    token's `tid` claim into the template before comparing.
+    """
+    private_pem, jwk = _make_rsa_jwk()
+    tid = "11111111-2222-3333-4444-555555555555"
+    token = _sign_id_token(
+        private_pem,
+        {
+            "iss": f"https://login.microsoftonline.com/{tid}/v2.0",
+            "tid": tid,
+            "aud": "test-client",
+            "sub": "u",
+            "exp": 9999999999,
+        },
+    )
+
+    with patch.object(oidc_verify, "_fetch_jwks", new=AsyncMock(return_value=[jwk])):
+        claims = await oidc_verify.verify_id_token(
+            token,
+            expected_issuer="https://login.microsoftonline.com/{tenantid}/v2.0",
+            expected_audience="test-client",
+            expected_nonce="",
+            jwks_uri="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        )
+    assert claims is not None
+    assert claims["tid"] == tid
+
+
+@pytest.mark.asyncio
+async def test_verify_templated_issuer_rejects_missing_tid():
+    """If the discovery issuer is templated but the id_token has no tid
+    claim, verification must fail rather than silently dropping the check."""
+    private_pem, jwk = _make_rsa_jwk()
+    token = _sign_id_token(
+        private_pem,
+        {
+            "iss": "https://login.microsoftonline.com/some-tenant/v2.0",
+            "aud": "test-client",
+            "sub": "u",
+            "exp": 9999999999,
+        },
+    )
+
+    with patch.object(oidc_verify, "_fetch_jwks", new=AsyncMock(return_value=[jwk])):
+        claims = await oidc_verify.verify_id_token(
+            token,
+            expected_issuer="https://login.microsoftonline.com/{tenantid}/v2.0",
+            expected_audience="test-client",
+            expected_nonce="",
+            jwks_uri="https://login.microsoftonline.com/common/discovery/v2.0/keys",
+        )
+    assert claims is None
+
+
+@pytest.mark.asyncio
 async def test_verify_jwks_unreachable_returns_none():
     """If the JWKS endpoint can't be reached, the verifier refuses the
     token rather than admitting an unverified one."""

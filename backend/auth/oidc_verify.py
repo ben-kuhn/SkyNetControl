@@ -156,6 +156,29 @@ async def verify_id_token(
         logger.warning("verify_id_token: no JWKS key matches kid=%r", kid)
         return None
 
+    # Microsoft's common-tenant discovery returns a templated issuer
+    # ("https://login.microsoftonline.com/{tenantid}/v2.0"); the actual
+    # id_token has the real tenant UUID substituted. Substitute the
+    # unverified `tid` claim before passing to jose. Reading unverified
+    # claims is safe here: jose still validates the signature against
+    # the IdP's JWKS, and the substituted issuer must equal the actual
+    # `iss` after that — an attacker cannot mint a token signed by
+    # Microsoft for a tenant they don't control. Operators wanting
+    # single-tenant pinning should configure a tenant-specific issuer
+    # URL instead of `common`.
+    resolved_issuer = expected_issuer
+    if "{tenantid}" in expected_issuer or "{tenant_id}" in expected_issuer:
+        try:
+            unverified = jwt.get_unverified_claims(id_token)
+            tid = unverified.get("tid", "")
+        except JWTError as exc:
+            logger.warning("verify_id_token: malformed claims: %s", exc)
+            return None
+        if not tid:
+            logger.warning("verify_id_token: templated issuer but token has no tid claim")
+            return None
+        resolved_issuer = expected_issuer.replace("{tenantid}", tid).replace("{tenant_id}", tid)
+
     last_exc: Exception | None = None
     for key in matching:
         try:
@@ -164,7 +187,7 @@ async def verify_id_token(
                 key,
                 algorithms=[alg],
                 audience=expected_audience,
-                issuer=expected_issuer,
+                issuer=resolved_issuer,
                 access_token=access_token,
                 # python-jose validates exp/nbf/iat by default; aud/iss
                 # are validated when the arguments are passed; at_hash
