@@ -21,7 +21,7 @@ def db():
 def test_create_roster_template(db):
     template = RosterTemplate(
         name="Default Roster",
-        subject_template="W0NE Roster — {{ date }}",
+        subject_template="{{ net_callsign }} Roster — {{ date }}",
         header_template="Session on {{ date }}.",
         welcome_template="{% for m in new_members %}Welcome {{ m.name }}!{% endfor %}",
         comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}{% endif %}{% endfor %}",  # noqa: E501

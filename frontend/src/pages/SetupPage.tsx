@@ -159,7 +159,7 @@ function Step1({ form, setForm, onNext, recoveryMode }: Step1Props) {
         label="Net control callsign"
         value={form.default_net_control}
         onChange={(e) => setForm((f) => ({ ...f, default_net_control: e.target.value.toUpperCase() }))}
-        placeholder="W0NE"
+        placeholder="WA0XYZ"
         mono
         required
         autoFocus
@@ -168,7 +168,7 @@ function Step1({ form, setForm, onNext, recoveryMode }: Step1Props) {
         label="Net address (Winlink)"
         value={form.net_address}
         onChange={(e) => setForm((f) => ({ ...f, net_address: e.target.value }))}
-        placeholder="w0ne@winlink.org"
+        placeholder="wa0xyz@winlink.org"
         mono
         required
       />

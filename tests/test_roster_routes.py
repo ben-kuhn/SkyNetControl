@@ -73,7 +73,7 @@ def db_setup():
             header_template="NCS: {{ net_control }}, Count: {{ total_count }}",
             welcome_template="{% for m in new_members %}Welcome {{ m.name }}!\n{% endfor %}",
             comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",  # noqa: E501
-            footer_template="73 de W0NE",
+            footer_template="73 de {{ net_callsign }}",
             lead_time_days=1,
             is_default=True,
         )

@@ -326,7 +326,7 @@ def default_template(db):
         header_template="Session: {{ date }}, NCS: {{ net_control }}, Count: {{ total_count }}",
         welcome_template="{% for m in new_members %}Welcome {{ m.name }} ({{ m.callsign }})!\n{% endfor %}",
         comments_template="{% for c in checkins %}{% if c.comments %}{{ c.callsign }}: {{ c.comments }}\n{% endif %}{% endfor %}",  # noqa: E501
-        footer_template="{% if next_week_preview %}Next: {{ next_week_preview }}{% endif %}\n{% if session_url %}Check-in details: {{ session_url }}{% endif %}\n73 de W0NE",  # noqa: E501
+        footer_template="{% if next_week_preview %}Next: {{ next_week_preview }}{% endif %}\n{% if session_url %}Check-in details: {{ session_url }}{% endif %}\n73 de {{ net_callsign }}",  # noqa: E501
         lead_time_days=1,
         is_default=True,
     )
@@ -341,6 +341,7 @@ def test_render_roster(db, default_template):
         "time": "6:00 PM",
         "day_of_week": "Thursday",
         "net_control": "W0NE",
+        "net_callsign": "W0NE",
         "activity_title": "",
         "activity_instructions": "",
         "next_week_preview": "Standard Winlink Check-in",
