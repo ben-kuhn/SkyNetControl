@@ -50,6 +50,35 @@ def test_pin_clears_on_context_exit():
     assert _PINS.get() == {}
 
 
+def test_pin_returns_ipv6_family_for_ipv6_pin():
+    """A v6 pinned IP must come back with AF_INET6 + 4-tuple sockaddr.
+
+    Without this, httpx would receive an AF_INET-tagged v6 string and
+    `socket.connect` would refuse it; v6-only OIDC providers would be
+    unreachable under the pin.
+    """
+    with pin_dns("v6.example", "2001:db8::1"):
+        result = socket.getaddrinfo("v6.example", 443)
+    family, _socktype, _proto, _canon, sockaddr = result[0]
+    assert family == socket.AF_INET6
+    # IPv6 sockaddr is (addr, port, flowinfo, scopeid).
+    assert sockaddr[0] == "2001:db8::1"
+    assert len(sockaddr) == 4
+
+
+def test_pin_idna_round_trip():
+    """An IDN hostname goes in as Unicode but httpx will look it up in
+    its ace form. The pin must match either spelling."""
+    # bücher.example → xn--bcher-kva.example
+    unicode_host = "bücher.example"
+    ace_host = unicode_host.encode("idna").decode("ascii").lower()
+
+    with pin_dns(unicode_host, "203.0.113.99"):
+        # httpx-style lookup: ace form.
+        ace_result = socket.getaddrinfo(ace_host, 443)
+    assert any(addr[4][0] == "203.0.113.99" for addr in ace_result)
+
+
 def test_pin_nested_contexts_combine():
     """Nested pin_dns contexts both apply; exit restores the prior frame."""
     with pin_dns("host-a.example", "203.0.113.1"):

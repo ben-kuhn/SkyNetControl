@@ -86,6 +86,36 @@ async def test_security_headers_set_on_responses():
 
 
 @pytest.mark.asyncio
+async def test_csp_report_endpoint_accepts_violation_report():
+    """The CSP header points at /api/csp-report; the endpoint must accept
+    the standard `application/csp-report` envelope and respond 204 so the
+    browser doesn't retry. Without an endpoint, CSP violations are silent."""
+    settings = Settings(database_url="sqlite:///", jwt_secret_key="test-secret")
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Headers point at the endpoint.
+        resp = await client.get("/api/health")
+        assert "/api/csp-report" in resp.headers.get("content-security-policy", "")
+        assert "csp-endpoint" in resp.headers.get("reporting-endpoints", "")
+
+        # Browser-shaped violation report → 204.
+        report = {
+            "csp-report": {
+                "document-uri": "https://example.com/",
+                "violated-directive": "script-src 'self'",
+                "blocked-uri": "inline",
+            }
+        }
+        violation = await client.post(
+            "/api/csp-report",
+            json=report,
+            headers={"Content-Type": "application/csp-report"},
+        )
+        assert violation.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_csp_emits_sha256_for_inline_index_scripts(tmp_path):
     """When index.html contains an inline <script>, its SHA-256 is in CSP."""
     index = tmp_path / "index.html"

@@ -1,12 +1,12 @@
 import asyncio
 import base64
 import hashlib
+import html.parser
 import os
-import re
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -38,16 +38,42 @@ from backend.auth.recovery_routes import recovery_router
 _DEFAULT_JWT_SECRET = "change-me-in-production"
 
 
-# Inline <script>...</script> blocks (no src=) in served HTML. Vite emits
-# index.html with a tiny theme-bootstrap snippet that reads localStorage
-# and sets data-theme before React mounts. CSP would block it without an
-# 'unsafe-inline' allowance (which defeats most of the point) — so we
-# hash each inline block at startup and emit script-src 'sha256-...'
-# instead. Matches what browsers expect per W3C CSP §6.6.4.
-_INLINE_SCRIPT_RE = re.compile(
-    r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>",
-    re.DOTALL | re.IGNORECASE,
-)
+class _InlineScriptCollector(html.parser.HTMLParser):
+    """Extract the body of every inline <script>...</script> (no src= attr).
+
+    Used at startup to hash the inline scripts in served index.html so
+    we can emit script-src 'sha256-…' in CSP instead of 'unsafe-inline'.
+    Using the stdlib HTML parser rather than a regex is robust to
+    attribute values containing `>`, multi-line tags, comments in the
+    body, and the various quoting styles Vite plugins might emit.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.scripts: list[str] = []
+        self._capturing = False
+        self._buffer: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "script":
+            return
+        # Inline = no src attribute. (Same definition CSP uses.)
+        attr_names = {name.lower() for name, _ in attrs}
+        if "src" in attr_names:
+            return
+        self._capturing = True
+        self._buffer = []
+
+    def handle_data(self, data):
+        if self._capturing:
+            self._buffer.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() != "script" or not self._capturing:
+            return
+        self.scripts.append("".join(self._buffer))
+        self._capturing = False
+        self._buffer = []
 
 
 def _csp_script_hashes(static_dir: str) -> list[str]:
@@ -61,11 +87,12 @@ def _csp_script_hashes(static_dir: str) -> list[str]:
     if not os.path.isfile(index_path):
         return []
     with open(index_path, "rb") as f:
-        html = f.read().decode("utf-8", errors="replace")
+        html_text = f.read().decode("utf-8", errors="replace")
+    collector = _InlineScriptCollector()
+    collector.feed(html_text)
     hashes = []
-    for match in _INLINE_SCRIPT_RE.finditer(html):
-        body = match.group(1).encode("utf-8")
-        digest = hashlib.sha256(body).digest()
+    for body in collector.scripts:
+        digest = hashlib.sha256(body.encode("utf-8")).digest()
         hashes.append(f"'sha256-{base64.b64encode(digest).decode('ascii')}'")
     return hashes
 
@@ -172,6 +199,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         os.path.join(settings.static_dir, "index.html"),
     )
     script_src = "'self' " + " ".join(inline_script_hashes) if inline_script_hashes else "'self'"
+    # report-uri is deprecated in favour of report-to + Reporting-Endpoints,
+    # but every current browser still honours it as a fallback; emit both
+    # so a future browser that drops report-uri still calls our endpoint.
     csp = (
         "default-src 'self'; "
         f"script-src {script_src}; "
@@ -180,8 +210,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "connect-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
-        "form-action 'self'"
+        "form-action 'self'; "
+        "report-uri /api/csp-report; "
+        "report-to csp-endpoint"
     )
+    reporting_endpoints = '"csp-endpoint": "/api/csp-report"'
 
     class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
@@ -190,6 +223,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers.setdefault("X-Frame-Options", "DENY")
             response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
             response.headers.setdefault("Content-Security-Policy", csp)
+            response.headers.setdefault("Reporting-Endpoints", reporting_endpoints)
             if is_https:
                 response.headers.setdefault(
                     "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
@@ -197,6 +231,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return response
 
     app.add_middleware(_SecurityHeadersMiddleware)
+
+    @app.post("/api/csp-report")
+    async def csp_report(request: Request):
+        """Sink for browser-side CSP violation reports.
+
+        CSP without a report endpoint is silent — a future Vite reformat
+        of the theme bootstrap, or a fresh XSS sink the policy catches,
+        would only surface in the operator's devtools. With report-uri
+        pointing here, every block lands in the journal where it can be
+        seen and acted on. Body is the standard `application/csp-report`
+        envelope; we log the inner "csp-report" dict at WARNING so a
+        grep for "csp.violation" finds them.
+        """
+        import logging as _logging
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        violation = (body or {}).get("csp-report", body)
+        _logging.getLogger("backend.csp").warning("csp.violation: %s", violation)
+        return Response(status_code=204)
 
     @app.get("/api/health")
     async def health():

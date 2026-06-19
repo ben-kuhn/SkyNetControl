@@ -23,13 +23,32 @@ exactly once at import time.
 """
 import contextlib
 import contextvars
+import ipaddress
 import socket
 from typing import Iterator
 
 
-# {original_hostname: pinned_ip}. Empty / unset means no pinning active
-# for this task — fall through to the system resolver.
+# {ace_hostname: pinned_ip}. Empty / unset means no pinning active
+# for this task — fall through to the system resolver. Keys are stored
+# in IDNA-encoded ("ace") form so the pin survives Unicode-vs-punycode
+# round-trips between urlparse() (which returns Unicode for IDNs) and
+# httpx/anyio (which call getaddrinfo with the ace form).
 _PINS: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar("_PINS", default={})
+
+
+def _to_ace(hostname: str) -> str:
+    """Return the lower-cased ASCII-Compatible-Encoding form of `hostname`.
+
+    For ASCII hosts this is just `.lower()`. For IDN hosts (anything
+    containing non-ASCII), encode via IDNA — which is exactly what
+    httpx will do internally before calling getaddrinfo. On encode
+    failure, fall back to lowercase so the lookup can still match in
+    the common ASCII path.
+    """
+    try:
+        return hostname.encode("idna").decode("ascii").lower()
+    except (UnicodeError, ValueError):
+        return hostname.lower()
 
 
 def _normalise_host(host) -> str:
@@ -46,14 +65,42 @@ _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 def _patched_getaddrinfo(host, port, *args, **kwargs):
     pins = _PINS.get()
     if pins:
-        key = _normalise_host(host)
+        # Normalise the caller's hostname into the same shape the pin
+        # uses for the dict key — lowercased ace form. httpx passes the
+        # already-encoded ace form, so this mostly just lowercases.
+        key = _to_ace(_normalise_host(host))
         ip = pins.get(key)
         if ip is not None:
-            # Returns the same shape as getaddrinfo: (family, type, proto, canonname, sockaddr).
-            # Force IPv4 — we only resolve to a single global IPv4 in the guard
-            # today; extend to IPv6 here if/when the guard does.
-            family = socket.AF_INET
-            return [(family, socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+            # Reflect the address family the pinned IP actually belongs to.
+            # IPv4 returns the 2-tuple sockaddr; IPv6 needs the 4-tuple
+            # (addr, port, flowinfo, scopeid). Without this an IPv6-only
+            # OIDC endpoint would silently fail to connect.
+            try:
+                addr_obj = ipaddress.ip_address(ip)
+            except ValueError:
+                # Shouldn't happen — the SSRF guard validates this — but
+                # if it does, fall through to the real resolver so the
+                # request is observable rather than silently broken.
+                return _ORIGINAL_GETADDRINFO(host, port, *args, **kwargs)
+            if isinstance(addr_obj, ipaddress.IPv6Address):
+                return [
+                    (
+                        socket.AF_INET6,
+                        socket.SOCK_STREAM,
+                        socket.IPPROTO_TCP,
+                        "",
+                        (ip, port or 0, 0, 0),
+                    )
+                ]
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    (ip, port or 0),
+                )
+            ]
     return _ORIGINAL_GETADDRINFO(host, port, *args, **kwargs)
 
 
@@ -78,10 +125,13 @@ def pin_dns(hostname: str, ip: str) -> Iterator[None]:
     Use after the SSRF guard has verified `ip` is global. Wrap the httpx
     fetch inside the `with` block — the override applies to the calling
     task and to any thread it dispatches via asyncio.to_thread.
+
+    Hostname is stored in IDNA ace form so the pin matches the
+    httpx-supplied lookup key regardless of which side did the encoding.
     """
     install_resolver_patch()
     current = _PINS.get()
-    new = {**current, hostname: ip}
+    new = {**current, _to_ace(hostname): ip}
     token = _PINS.set(new)
     try:
         yield
