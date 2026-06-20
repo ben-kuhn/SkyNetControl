@@ -72,3 +72,15 @@ export async function updateReminderTemplate(
 export async function deleteReminderTemplate(id: number): Promise<void> {
   await apiFetch<void>(`/reminders/templates/${id}`, { method: "DELETE" });
 }
+
+export interface ReminderTemplateDefault {
+  name: string;
+  template_type: ReminderTemplateType;
+  subject_template: string;
+  body_template: string;
+  lead_time_days: number;
+}
+
+export async function fetchReminderTemplateDefaults(): Promise<ReminderTemplateDefault[]> {
+  return apiFetch<ReminderTemplateDefault[]>("/reminders/template-defaults");
+}

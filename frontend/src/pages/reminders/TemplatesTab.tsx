@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import {
   createReminderTemplate,
   deleteReminderTemplate,
+  fetchReminderTemplateDefaults,
   fetchReminderTemplates,
   updateReminderTemplate,
+  type ReminderTemplateDefault,
   type TemplateInput,
 } from "../../api/reminders";
 import type { ReminderTemplate, ReminderTemplateType } from "../../types";
@@ -14,12 +16,21 @@ const TYPE_LABEL: Record<ReminderTemplateType, string> = {
   activity: "Activity",
 };
 
+// Modal modes:
+// - edit: existing row, PATCH on save
+// - create-blank: shipped-defaults fetch failed; user starts empty (still hits POST)
+// - create-from-default: pre-filled from the shipped seed for the chosen type
+// - create-from-clone: pre-filled from an existing row (the row's name is suffixed " (copy)")
+type ModalState =
+  | { kind: "closed" }
+  | { kind: "edit"; template: ReminderTemplate }
+  | { kind: "create"; seedByType: Record<ReminderTemplateType, ReminderTemplateDefault | null>; clonedFrom: ReminderTemplate | null };
+
 export function TemplatesTab() {
   const [templates, setTemplates] = useState<ReminderTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<ReminderTemplate | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [modal, setModal] = useState<ModalState>({ kind: "closed" });
 
   const { addToast } = useToast();
 
@@ -52,11 +63,38 @@ export function TemplatesTab() {
     }
   };
 
+  const openCreate = async () => {
+    // Fetch shipped defaults so the modal can pre-fill from the matching
+    // type. Falls back to blank if the fetch fails (defaults are a nicety,
+    // not a hard requirement).
+    let seedByType: Record<ReminderTemplateType, ReminderTemplateDefault | null> = {
+      regular_checkin: null,
+      activity: null,
+    };
+    try {
+      const defaults = await fetchReminderTemplateDefaults();
+      for (const d of defaults) {
+        seedByType[d.template_type] = d;
+      }
+    } catch {
+      // ignore — user gets a blank form
+    }
+    setModal({ kind: "create", seedByType, clonedFrom: null });
+  };
+
+  const openClone = (t: ReminderTemplate) => {
+    setModal({
+      kind: "create",
+      seedByType: { regular_checkin: null, activity: null },
+      clonedFrom: t,
+    });
+  };
+
   return (
     <div>
       <div className="flex justify-end mb-3">
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={openCreate}
           className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90"
         >
           + New template
@@ -75,7 +113,7 @@ export function TemplatesTab() {
                 <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Type</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Lead time</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Default</th>
-                <th className="border-b border-border w-32"></th>
+                <th className="border-b border-border w-40"></th>
               </tr>
             </thead>
             <tbody>
@@ -93,10 +131,16 @@ export function TemplatesTab() {
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <button
-                      onClick={() => setEditing(t)}
+                      onClick={() => setModal({ kind: "edit", template: t })}
                       className="text-text-muted hover:text-accent text-xs mr-2"
                     >
                       Edit
+                    </button>
+                    <button
+                      onClick={() => openClone(t)}
+                      className="text-text-muted hover:text-accent text-xs mr-2"
+                    >
+                      Clone
                     </button>
                     <button
                       onClick={() => handleDelete(t)}
@@ -121,16 +165,12 @@ export function TemplatesTab() {
         </div>
       )}
 
-      {(showCreate || editing) && (
+      {modal.kind !== "closed" && (
         <TemplateModal
-          initial={editing}
-          onClose={() => {
-            setShowCreate(false);
-            setEditing(null);
-          }}
+          modal={modal}
+          onClose={() => setModal({ kind: "closed" })}
           onSaved={() => {
-            setShowCreate(false);
-            setEditing(null);
+            setModal({ kind: "closed" });
             load();
           }}
           onError={(msg) => addToast(msg, "error")}
@@ -141,26 +181,83 @@ export function TemplatesTab() {
   );
 }
 
+function initialFormFromModal(modal: Exclude<ModalState, { kind: "closed" }>) {
+  if (modal.kind === "edit") {
+    const t = modal.template;
+    return {
+      name: t.name,
+      type: t.template_type,
+      subject: t.subject_template,
+      body: t.body_template,
+      leadTime: t.lead_time_days,
+      isDefault: t.is_default,
+    };
+  }
+  // create
+  if (modal.clonedFrom) {
+    const t = modal.clonedFrom;
+    return {
+      name: `${t.name} (copy)`,
+      type: t.template_type,
+      subject: t.subject_template,
+      body: t.body_template,
+      leadTime: t.lead_time_days,
+      isDefault: false, // a clone never inherits default flag — would collide
+    };
+  }
+  const seed = modal.seedByType.regular_checkin;
+  return {
+    name: "",
+    type: "regular_checkin" as ReminderTemplateType,
+    subject: seed?.subject_template ?? "",
+    body: seed?.body_template ?? "",
+    leadTime: seed?.lead_time_days ?? 3,
+    isDefault: false,
+  };
+}
+
 function TemplateModal({
-  initial,
+  modal,
   onClose,
   onSaved,
   onError,
   onInfo,
 }: {
-  initial: ReminderTemplate | null;
+  modal: Exclude<ModalState, { kind: "closed" }>;
   onClose: () => void;
   onSaved: () => void;
   onError: (msg: string) => void;
   onInfo: (msg: string) => void;
 }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState<ReminderTemplateType>(initial?.template_type ?? "regular_checkin");
-  const [subject, setSubject] = useState(initial?.subject_template ?? "");
-  const [body, setBody] = useState(initial?.body_template ?? "");
-  const [leadTime, setLeadTime] = useState(initial?.lead_time_days ?? 3);
-  const [isDefault, setIsDefault] = useState(initial?.is_default ?? false);
+  const initial = initialFormFromModal(modal);
+  const [name, setName] = useState(initial.name);
+  const [type, setType] = useState<ReminderTemplateType>(initial.type);
+  const [subject, setSubject] = useState(initial.subject);
+  const [body, setBody] = useState(initial.body);
+  const [leadTime, setLeadTime] = useState(initial.leadTime);
+  const [isDefault, setIsDefault] = useState(initial.isDefault);
   const [submitting, setSubmitting] = useState(false);
+
+  // Track whether the body/subject still match the seed for the currently
+  // selected type. If they do, swapping type swaps in the new seed too;
+  // if the user has edited away from the seed, we preserve their edits.
+  const isCreateFromDefault =
+    modal.kind === "create" && modal.clonedFrom === null;
+
+  const handleTypeChange = (newType: ReminderTemplateType) => {
+    if (isCreateFromDefault) {
+      const oldSeed = modal.seedByType[type];
+      const userEditedSubject = oldSeed ? subject !== oldSeed.subject_template : subject !== "";
+      const userEditedBody = oldSeed ? body !== oldSeed.body_template : body !== "";
+      const newSeed = modal.seedByType[newType];
+      if (!userEditedSubject) setSubject(newSeed?.subject_template ?? "");
+      if (!userEditedBody) setBody(newSeed?.body_template ?? "");
+      if (!userEditedSubject && !userEditedBody && newSeed) {
+        setLeadTime(newSeed.lead_time_days);
+      }
+    }
+    setType(newType);
+  };
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -173,8 +270,8 @@ function TemplateModal({
       is_default: isDefault,
     };
     try {
-      if (initial) {
-        await updateReminderTemplate(initial.id, input);
+      if (modal.kind === "edit") {
+        await updateReminderTemplate(modal.template.id, input);
         onInfo("Template updated.");
       } else {
         await createReminderTemplate(input);
@@ -188,15 +285,20 @@ function TemplateModal({
     }
   };
 
+  const title =
+    modal.kind === "edit"
+      ? "Edit template"
+      : modal.clonedFrom
+        ? `Clone of ${modal.clonedFrom.name}`
+        : "New template";
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
         className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-2xl max-h-[90vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold text-text-primary mb-3">
-          {initial ? "Edit template" : "New template"}
-        </h3>
+        <h3 className="text-lg font-semibold text-text-primary mb-3">{title}</h3>
 
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
@@ -212,7 +314,7 @@ function TemplateModal({
             <label className="block text-xs uppercase tracking-wider text-text-muted font-semibold mb-1">Type</label>
             <select
               value={type}
-              onChange={(e) => setType(e.target.value as ReminderTemplateType)}
+              onChange={(e) => handleTypeChange(e.target.value as ReminderTemplateType)}
               className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-bg-elevated text-text-primary"
             >
               <option value="regular_checkin">Regular check-in</option>
@@ -240,7 +342,7 @@ function TemplateModal({
             className="w-full px-3 py-2 text-[0.8125rem] border border-border rounded-lg bg-bg-elevated text-text-primary font-mono"
           />
           <p className="text-xs text-text-muted mt-1">
-            Placeholders: <code>{"{{ date }}"}</code>, <code>{"{{ time }}"}</code>, <code>{"{{ day_of_week }}"}</code>, <code>{"{{ activity_title }}"}</code>, <code>{"{{ activity_instructions }}"}</code>, <code>{"{{ net_control }}"}</code>, <code>{"{{ next_week_preview }}"}</code>
+            Placeholders: <code>{"{{ date }}"}</code>, <code>{"{{ time }}"}</code>, <code>{"{{ day_of_week }}"}</code>, <code>{"{{ activity_title }}"}</code>, <code>{"{{ activity_instructions }}"}</code>, <code>{"{{ net_control }}"}</code>, <code>{"{{ next_week_preview }}"}</code>, <code>{"{{ net_callsign }}"}</code>, <code>{"{{ net_address }}"}</code>
           </p>
         </div>
 

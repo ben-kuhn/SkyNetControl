@@ -2,22 +2,33 @@ import { useEffect, useState } from "react";
 import {
   createRosterTemplate,
   deleteRosterTemplate,
+  fetchRosterTemplateDefaults,
   fetchRosterTemplates,
   updateRosterTemplate,
+  type RosterTemplateDefault,
   type RosterTemplateInput,
 } from "../../api/roster";
 import type { RosterTemplate } from "../../types";
 import { useToast } from "../../context/ToastContext";
 
 const PLACEHOLDER_HINT =
-  "Placeholders: {{ date }}, {{ time }}, {{ day_of_week }}, {{ net_control }}, {{ activity_title }}, {{ activity_instructions }}, {{ next_week_preview }}, {{ session_url }}, {{ total_count }}, {{ checkins }} (use {% for c in checkins %}…{% endfor %}), {{ new_members }}";
+  "Placeholders: {{ date }}, {{ time }}, {{ day_of_week }}, {{ net_control }}, {{ net_callsign }}, {{ net_address }}, {{ activity_title }}, {{ activity_instructions }}, {{ next_week_preview }}, {{ session_url }}, {{ total_count }}, {{ checkins }} (use {% for c in checkins %}…{% endfor %}), {{ new_members }}";
+
+// Modal modes:
+// - edit: existing row, PATCH on save
+// - create with seed=null: blank form (default fetch failed)
+// - create with seed=<default>: pre-filled from shipped default
+// - create with seed=<clone>: pre-filled from an existing row, name suffixed " (copy)"
+type ModalState =
+  | { kind: "closed" }
+  | { kind: "edit"; template: RosterTemplate }
+  | { kind: "create"; seed: RosterTemplateDefault | null; clonedFrom: RosterTemplate | null };
 
 export function TemplatesTab() {
   const [templates, setTemplates] = useState<RosterTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<RosterTemplate | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [modal, setModal] = useState<ModalState>({ kind: "closed" });
 
   const { addToast } = useToast();
 
@@ -50,11 +61,28 @@ export function TemplatesTab() {
     }
   };
 
+  const openCreate = async () => {
+    // Fetch shipped defaults so the modal can pre-fill. Falls back to
+    // blank if the fetch fails (defaults are a nicety, not required).
+    let seed: RosterTemplateDefault | null = null;
+    try {
+      const defaults = await fetchRosterTemplateDefaults();
+      seed = defaults[0] ?? null;
+    } catch {
+      // ignore — user gets a blank form
+    }
+    setModal({ kind: "create", seed, clonedFrom: null });
+  };
+
+  const openClone = (t: RosterTemplate) => {
+    setModal({ kind: "create", seed: null, clonedFrom: t });
+  };
+
   return (
     <div>
       <div className="flex justify-end mb-3">
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={openCreate}
           className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90"
         >
           + New template
@@ -72,7 +100,7 @@ export function TemplatesTab() {
                 <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Name</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Lead time</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Default</th>
-                <th className="border-b border-border w-32"></th>
+                <th className="border-b border-border w-40"></th>
               </tr>
             </thead>
             <tbody>
@@ -89,10 +117,16 @@ export function TemplatesTab() {
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <button
-                      onClick={() => setEditing(t)}
+                      onClick={() => setModal({ kind: "edit", template: t })}
                       className="text-text-muted hover:text-accent text-xs mr-2"
                     >
                       Edit
+                    </button>
+                    <button
+                      onClick={() => openClone(t)}
+                      className="text-text-muted hover:text-accent text-xs mr-2"
+                    >
+                      Clone
                     </button>
                     <button
                       onClick={() => handleDelete(t)}
@@ -117,16 +151,12 @@ export function TemplatesTab() {
         </div>
       )}
 
-      {(showCreate || editing) && (
+      {modal.kind !== "closed" && (
         <TemplateModal
-          initial={editing}
-          onClose={() => {
-            setShowCreate(false);
-            setEditing(null);
-          }}
+          modal={modal}
+          onClose={() => setModal({ kind: "closed" })}
           onSaved={() => {
-            setShowCreate(false);
-            setEditing(null);
+            setModal({ kind: "closed" });
             load();
           }}
           onError={(msg) => addToast(msg, "error")}
@@ -137,27 +167,69 @@ export function TemplatesTab() {
   );
 }
 
+function initialFormFromModal(modal: Exclude<ModalState, { kind: "closed" }>) {
+  if (modal.kind === "edit") {
+    const t = modal.template;
+    return {
+      name: t.name,
+      subject: t.subject_template,
+      header: t.header_template,
+      welcome: t.welcome_template,
+      comments: t.comments_template,
+      footer: t.footer_template,
+      leadTime: t.lead_time_days,
+      isDefault: t.is_default,
+    };
+  }
+  // create
+  if (modal.clonedFrom) {
+    const t = modal.clonedFrom;
+    return {
+      name: `${t.name} (copy)`,
+      subject: t.subject_template,
+      header: t.header_template,
+      welcome: t.welcome_template,
+      comments: t.comments_template,
+      footer: t.footer_template,
+      leadTime: t.lead_time_days,
+      isDefault: false, // clones never inherit default — would collide
+    };
+  }
+  const seed = modal.seed;
+  return {
+    name: "",
+    subject: seed?.subject_template ?? "",
+    header: seed?.header_template ?? "",
+    welcome: seed?.welcome_template ?? "",
+    comments: seed?.comments_template ?? "",
+    footer: seed?.footer_template ?? "",
+    leadTime: seed?.lead_time_days ?? 1,
+    isDefault: false,
+  };
+}
+
 function TemplateModal({
-  initial,
+  modal,
   onClose,
   onSaved,
   onError,
   onInfo,
 }: {
-  initial: RosterTemplate | null;
+  modal: Exclude<ModalState, { kind: "closed" }>;
   onClose: () => void;
   onSaved: () => void;
   onError: (msg: string) => void;
   onInfo: (msg: string) => void;
 }) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [subject, setSubject] = useState(initial?.subject_template ?? "");
-  const [header, setHeader] = useState(initial?.header_template ?? "");
-  const [welcome, setWelcome] = useState(initial?.welcome_template ?? "");
-  const [comments, setComments] = useState(initial?.comments_template ?? "");
-  const [footer, setFooter] = useState(initial?.footer_template ?? "");
-  const [leadTime, setLeadTime] = useState(initial?.lead_time_days ?? 1);
-  const [isDefault, setIsDefault] = useState(initial?.is_default ?? false);
+  const initial = initialFormFromModal(modal);
+  const [name, setName] = useState(initial.name);
+  const [subject, setSubject] = useState(initial.subject);
+  const [header, setHeader] = useState(initial.header);
+  const [welcome, setWelcome] = useState(initial.welcome);
+  const [comments, setComments] = useState(initial.comments);
+  const [footer, setFooter] = useState(initial.footer);
+  const [leadTime, setLeadTime] = useState(initial.leadTime);
+  const [isDefault, setIsDefault] = useState(initial.isDefault);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
@@ -173,8 +245,8 @@ function TemplateModal({
       is_default: isDefault,
     };
     try {
-      if (initial) {
-        await updateRosterTemplate(initial.id, input);
+      if (modal.kind === "edit") {
+        await updateRosterTemplate(modal.template.id, input);
         onInfo("Template updated.");
       } else {
         await createRosterTemplate(input);
@@ -188,15 +260,20 @@ function TemplateModal({
     }
   };
 
+  const title =
+    modal.kind === "edit"
+      ? "Edit template"
+      : modal.clonedFrom
+        ? `Clone of ${modal.clonedFrom.name}`
+        : "New template";
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
         className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-3xl max-h-[90vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-lg font-semibold text-text-primary mb-3">
-          {initial ? "Edit template" : "New template"}
-        </h3>
+        <h3 className="text-lg font-semibold text-text-primary mb-3">{title}</h3>
 
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>

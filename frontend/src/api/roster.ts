@@ -81,3 +81,17 @@ export async function updateRosterTemplate(
 export async function deleteRosterTemplate(id: number): Promise<void> {
   await apiFetch<void>(`/roster/templates/${id}`, { method: "DELETE" });
 }
+
+export interface RosterTemplateDefault {
+  name: string;
+  subject_template: string;
+  header_template: string;
+  welcome_template: string;
+  comments_template: string;
+  footer_template: string;
+  lead_time_days: number;
+}
+
+export async function fetchRosterTemplateDefaults(): Promise<RosterTemplateDefault[]> {
+  return apiFetch<RosterTemplateDefault[]>("/roster/template-defaults");
+}

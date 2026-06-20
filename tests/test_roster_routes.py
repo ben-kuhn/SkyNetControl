@@ -199,6 +199,28 @@ async def test_viewer_cannot_create_template(viewer_client):
     assert resp.status_code == 403
 
 
+@pytest.mark.anyio
+async def test_template_defaults_returns_seed(admin_client):
+    """Endpoint returns the shipped roster seed in genericized form."""
+    resp = await admin_client.get("/api/roster/template-defaults")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    seed = data[0]
+    assert seed["name"] == "Default Net Roster"
+    assert "W0NE" not in seed["subject_template"]
+    assert "W0NE" not in seed["header_template"]
+    assert "W0NE" not in seed["footer_template"]
+    assert "{{ net_callsign }}" in seed["footer_template"]
+
+
+@pytest.mark.anyio
+async def test_template_defaults_requires_role(viewer_client):
+    """Viewer cannot see the defaults endpoint (matches create's role gate)."""
+    resp = await viewer_client.get("/api/roster/template-defaults")
+    assert resp.status_code == 403
+
+
 # --- Generation routes ---
 
 

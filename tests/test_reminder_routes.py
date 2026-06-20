@@ -579,3 +579,37 @@ async def test_regenerate_reminder_route_requires_role(test_client, test_setting
         cookies={"access_token": viewer_token},
     )
     assert resp.status_code == 403
+
+
+# --- /template-defaults ---
+
+
+@pytest.mark.asyncio
+async def test_template_defaults_returns_seed_list(test_client, test_settings):
+    """The endpoint returns both shipped seeds, in their genericized form."""
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.get(
+        "/api/reminders/template-defaults",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    types = {d["template_type"] for d in data}
+    assert types == {"regular_checkin", "activity"}
+    for d in data:
+        # Genericized — no W0NE branding anywhere in the shipped seeds.
+        assert "W0NE" not in d["subject_template"]
+        assert "W0NE" not in d["body_template"]
+        assert "{{ net_callsign }}" in d["subject_template"]
+
+
+@pytest.mark.asyncio
+async def test_template_defaults_requires_role(test_client, test_settings):
+    """Viewer cannot see the defaults endpoint (matches create's role gate)."""
+    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    resp = await test_client.get(
+        "/api/reminders/template-defaults",
+        cookies={"access_token": viewer_token},
+    )
+    assert resp.status_code == 403

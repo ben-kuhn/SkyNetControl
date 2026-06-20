@@ -125,6 +125,18 @@ async def list_templates_route(
     return [_template_to_response(t) for t in templates]
 
 
+@roster_router.get("/template-defaults")
+async def template_defaults_route(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+):
+    """Return the shipped seed templates so the "+ New template" UI can
+    pre-fill from pristine originals, even after operators have edited
+    their installed defaults."""
+    from backend.modules.roster.seeds import SEED_ROSTER_TEMPLATES
+
+    return SEED_ROSTER_TEMPLATES
+
+
 @roster_router.patch("/templates/{template_id}")
 async def update_template_route(
     template_id: int,
