@@ -50,6 +50,17 @@ class CheckinUpdate(BaseModel):
 
 
 def _checkin_to_response(checkin: CheckIn) -> dict:
+    raw = checkin.raw_message
+    raw_payload: dict | None
+    if raw is None:
+        raw_payload = None
+    else:
+        raw_payload = {
+            "subject": raw.subject,
+            "from_address": raw.from_address,
+            "received_at": raw.received_at.isoformat(),
+            "body": raw.body,
+        }
     return {
         "id": checkin.id,
         "session_id": checkin.session_id,
@@ -66,6 +77,7 @@ def _checkin_to_response(checkin: CheckIn) -> dict:
         "parse_status": checkin.parse_status.value,
         "timing_status": checkin.timing_status.value,
         "is_new_member": checkin.is_new_member,
+        "raw_message": raw_payload,
     }
 
 

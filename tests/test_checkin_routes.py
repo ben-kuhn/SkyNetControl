@@ -426,3 +426,72 @@ async def test_get_session_checkins_pending_user_sees_only_completed(test_client
         cookies={"access_token": token},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_checkins_includes_raw_message(test_client, test_settings, db_setup):
+    """The list response exposes the joined raw_message body for parser-derived rows."""
+    from backend.modules.checkins.models import RawMessage, MessageType
+
+    with db_setup() as session:
+        raw = RawMessage(
+            message_id="<raw-1@x>",
+            from_address="w0abc@winlink.org",
+            received_at=datetime.now(tz=timezone.utc),
+            subject="//WL2K Check-in",
+            body="John, W0ABC, Denver, CO, Voice",
+            message_type=MessageType.PLAIN_TEXT,
+            parsed=True,
+            source_path="/tmp/x.b2f",
+        )
+        session.add(raw)
+        session.flush()
+        session.add(CheckIn(
+            session_id=1,
+            raw_message_id=raw.id,
+            callsign="W0ABC",
+            name="John",
+            mode="Voice",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        ))
+        session.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    response = await test_client.get(
+        "/api/checkins/session/1",
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    rows = response.json()
+    parser_row = next(r for r in rows if r["callsign"] == "W0ABC")
+    assert parser_row["raw_message"] is not None
+    assert parser_row["raw_message"]["body"] == "John, W0ABC, Denver, CO, Voice"
+    assert parser_row["raw_message"]["subject"] == "//WL2K Check-in"
+    assert parser_row["raw_message"]["from_address"] == "w0abc@winlink.org"
+    assert "received_at" in parser_row["raw_message"]
+
+
+@pytest.mark.asyncio
+async def test_list_checkins_raw_message_null_for_manual(test_client, test_settings, db_setup):
+    """Manual check-ins serialize raw_message as null."""
+    with db_setup() as session:
+        session.add(CheckIn(
+            session_id=1,
+            raw_message_id=None,
+            callsign="W0XYZ",
+            name="Hand-entered",
+            mode="Voice",
+            parse_status=ParseStatus.MANUALLY_ENTERED,
+            timing_status=TimingStatus.ON_TIME,
+        ))
+        session.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    response = await test_client.get(
+        "/api/checkins/session/1",
+        cookies={"access_token": token},
+    )
+    rows = response.json()
+    manual_row = next(r for r in rows if r["callsign"] == "W0XYZ")
+    assert manual_row["raw_message"] is None
