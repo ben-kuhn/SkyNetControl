@@ -175,6 +175,93 @@ def test_scan_and_import_deduplicates(db, season_and_session):
     assert checkins[0].city == "Aurora"
 
 
+def test_scan_and_import_purges_source_files(db, season_and_session, tmp_path):
+    """After a successful import, the on-disk PAT files (new and already-imported)
+    are removed so the inbox doesn't grow forever.
+    """
+    _, net_session = season_and_session
+
+    # Pre-existing RawMessage to exercise the "already imported" branch.
+    existing = RawMessage(
+        message_id="OLD",
+        from_address="W0OLD@winlink.org",
+        received_at=datetime(2026, 4, 10, 17, 0, tzinfo=timezone.utc),
+        subject="Old",
+        body="old",
+        message_type=MessageType.PLAIN_TEXT,
+        parsed=True,
+    )
+    db.add(existing)
+    db.commit()
+
+    new_file = tmp_path / "NEW.b2f"
+    new_file.write_text("placeholder")
+    old_file = tmp_path / "OLD.b2f"
+    old_file.write_text("placeholder")
+
+    raw_messages = [
+        {
+            "path": str(new_file),
+            "message_id": "NEW",
+            "from_address": "W0ABC@winlink.org",
+            "to_address": "w0ne@winlink.org",
+            "subject": "Check-in",
+            "received_at": datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc),
+            "body": "Name: John Smith\nCallsign: W0ABC\nCity: Denver\nState: CO\nMode: Winlink\n",
+        },
+        {
+            "path": str(old_file),
+            "message_id": "OLD",
+            "from_address": "W0OLD@winlink.org",
+            "to_address": "w0ne@winlink.org",
+            "subject": "Old",
+            "received_at": datetime(2026, 4, 10, 17, 0, tzinfo=timezone.utc),
+            "body": "old",
+        },
+    ]
+    scan_and_import_messages(db, raw_messages, net_session)
+
+    assert not new_file.exists()
+    assert not old_file.exists()
+
+
+def test_scan_and_import_purges_files_when_all_already_imported(db, season_and_session, tmp_path):
+    """If every message was already imported in a prior scan, the source files
+    are still removed — otherwise duplicates would accumulate forever.
+    """
+    _, net_session = season_and_session
+
+    existing = RawMessage(
+        message_id="ONLY",
+        from_address="W0ABC@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc),
+        subject="x",
+        body="x",
+        message_type=MessageType.PLAIN_TEXT,
+        parsed=True,
+    )
+    db.add(existing)
+    db.commit()
+
+    f = tmp_path / "ONLY.b2f"
+    f.write_text("placeholder")
+
+    raw_messages = [
+        {
+            "path": str(f),
+            "message_id": "ONLY",
+            "from_address": "W0ABC@winlink.org",
+            "to_address": "w0ne@winlink.org",
+            "subject": "x",
+            "received_at": datetime(2026, 4, 10, 18, 0, tzinfo=timezone.utc),
+            "body": "x",
+        },
+    ]
+    result = scan_and_import_messages(db, raw_messages, net_session)
+    assert result == []
+    assert not f.exists()
+
+
 def test_scan_and_import_skips_existing_message_ids(db, season_and_session):
     _, net_session = season_and_session
 

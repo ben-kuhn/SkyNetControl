@@ -79,6 +79,7 @@ def read_message_file(file_path: Path | str) -> dict | None:
         body_text = body.get_content().strip() if body else ""
 
         return {
+            "path": str(file_path),
             "message_id": message_id,
             "from_address": from_address,
             "to_address": to_address,

@@ -1,3 +1,5 @@
+import logging
+import os
 from datetime import date, datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
@@ -13,6 +15,25 @@ from backend.modules.checkins.models import (
 from backend.modules.checkins.message_parser import parse_message
 from backend.config_mgmt.service import get_checkin_modes
 from backend.modules.schedule.models import NetSession, SessionStatus
+
+logger = logging.getLogger(__name__)
+
+
+def _purge_source_files(messages: list[dict]) -> None:
+    """Delete the on-disk PAT mailbox files for messages whose contents
+    are now fully captured in the DB. Best-effort: a stuck file logs a
+    warning but doesn't block subsequent imports.
+    """
+    for msg in messages:
+        path = msg.get("path")
+        if not path:
+            continue
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("Failed to delete imported mailbox file %s: %s", path, exc)
 
 
 def classify_timing(net_session: NetSession, received_at: datetime) -> TimingStatus:
@@ -109,8 +130,11 @@ def scan_and_import_messages(
     )
 
     new_messages = [m for m in raw_messages if m["message_id"] not in existing_ids]
+    already_imported = [m for m in raw_messages if m["message_id"] in existing_ids]
 
     if not new_messages:
+        # DB already has these — drop their source files so the inbox doesn't grow forever.
+        _purge_source_files(already_imported)
         return []
 
     new_messages.sort(key=lambda m: m["received_at"])
@@ -137,6 +161,7 @@ def scan_and_import_messages(
             parsed_checkins[checkin.callsign] = checkin
 
     db.commit()
+    _purge_source_files(new_messages + already_imported)
     result = list(parsed_checkins.values())
 
     if result:
