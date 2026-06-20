@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Iterable
 from datetime import date, datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
@@ -19,13 +20,11 @@ from backend.modules.schedule.models import NetSession, SessionStatus
 logger = logging.getLogger(__name__)
 
 
-def _purge_source_files(messages: list[dict]) -> None:
-    """Delete the on-disk PAT mailbox files for messages whose contents
-    are now fully captured in the DB. Best-effort: a stuck file logs a
-    warning but doesn't block subsequent imports.
+def purge_source_files(paths: Iterable[str]) -> None:
+    """Best-effort delete of PAT mailbox files. Missing files are silent;
+    other OS errors log a warning but never raise.
     """
-    for msg in messages:
-        path = msg.get("path")
+    for path in paths:
         if not path:
             continue
         try:
@@ -33,7 +32,36 @@ def _purge_source_files(messages: list[dict]) -> None:
         except FileNotFoundError:
             pass
         except OSError as exc:
-            logger.warning("Failed to delete imported mailbox file %s: %s", path, exc)
+            logger.warning("Failed to delete mailbox file %s: %s", path, exc)
+
+
+def purge_session_source_files(db: Session, session_id: int) -> int:
+    """Delete the on-disk source files for all RawMessages attached to a
+    session via its CheckIns. Returns the number of paths attempted.
+    """
+    rows = (
+        db.query(RawMessage.source_path)
+        .join(CheckIn, CheckIn.raw_message_id == RawMessage.id)
+        .filter(CheckIn.session_id == session_id)
+        .filter(RawMessage.source_path.isnot(None))
+        .all()
+    )
+    paths = [row[0] for row in rows]
+    purge_source_files(paths)
+    return len(paths)
+
+
+def _upsert_source_paths(db: Session, message_dicts: list[dict]) -> None:
+    """For each already-imported message dict that has a 'path', backfill
+    RawMessage.source_path when currently NULL. No-op otherwise.
+    """
+    by_id = {m["message_id"]: m.get("path") for m in message_dicts if m.get("path")}
+    if not by_id:
+        return
+    rows = db.query(RawMessage).filter(RawMessage.message_id.in_(by_id.keys())).all()
+    for row in rows:
+        if row.source_path is None:
+            row.source_path = by_id[row.message_id]
 
 
 def classify_timing(net_session: NetSession, received_at: datetime) -> TimingStatus:
@@ -133,8 +161,10 @@ def scan_and_import_messages(
     already_imported = [m for m in raw_messages if m["message_id"] in existing_ids]
 
     if not new_messages:
-        # DB already has these — drop their source files so the inbox doesn't grow forever.
-        _purge_source_files(already_imported)
+        # All messages already in DB. Backfill source_path for any rows
+        # that were imported before this field existed.
+        _upsert_source_paths(db, already_imported)
+        db.commit()
         return []
 
     new_messages.sort(key=lambda m: m["received_at"])
@@ -149,6 +179,7 @@ def scan_and_import_messages(
             body=msg_dict["body"],
             message_type=MessageType.UNKNOWN,
             parsed=False,
+            source_path=msg_dict.get("path"),
         )
         db.add(raw)
         db.flush()
@@ -160,8 +191,9 @@ def scan_and_import_messages(
                 db.delete(old)
             parsed_checkins[checkin.callsign] = checkin
 
-    db.commit()
-    _purge_source_files(new_messages + already_imported)
+    _upsert_source_paths(db, already_imported)
+    db.commit()  # picks up both the new RawMessage source_paths (already flushed)
+                 # and any upserts
     result = list(parsed_checkins.values())
 
     if result:

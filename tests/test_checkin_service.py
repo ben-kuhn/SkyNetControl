@@ -27,6 +27,8 @@ from backend.modules.checkins.service import (
     update_checkin,
     approve_session_checkins,
     is_new_member,
+    purge_session_source_files,
+    purge_source_files,
 )
 
 
@@ -175,9 +177,10 @@ def test_scan_and_import_deduplicates(db, season_and_session):
     assert checkins[0].city == "Aurora"
 
 
-def test_scan_and_import_purges_source_files(db, season_and_session, tmp_path):
-    """After a successful import, the on-disk PAT files (new and already-imported)
-    are removed so the inbox doesn't grow forever.
+def test_scan_and_import_retains_source_files(db, season_and_session, tmp_path):
+    """After a successful import, PAT mailbox files are kept on disk (deletion
+    is deferred until the session roster is sent/skipped). The RawMessage rows
+    should have their source_path populated.
     """
     _, net_session = season_and_session
 
@@ -190,6 +193,7 @@ def test_scan_and_import_purges_source_files(db, season_and_session, tmp_path):
         body="old",
         message_type=MessageType.PLAIN_TEXT,
         parsed=True,
+        source_path=None,
     )
     db.add(existing)
     db.commit()
@@ -221,13 +225,21 @@ def test_scan_and_import_purges_source_files(db, season_and_session, tmp_path):
     ]
     scan_and_import_messages(db, raw_messages, net_session)
 
-    assert not new_file.exists()
-    assert not old_file.exists()
+    # Files must be retained — deletion happens at roster send/skip time.
+    assert new_file.exists()
+    assert old_file.exists()
+    # source_path should be set on the new RawMessage row.
+    new_row = db.query(RawMessage).filter_by(message_id="NEW").one()
+    assert new_row.source_path == str(new_file)
+    # source_path should be backfilled on the already-imported row.
+    old_row = db.query(RawMessage).filter_by(message_id="OLD").one()
+    assert old_row.source_path == str(old_file)
 
 
-def test_scan_and_import_purges_files_when_all_already_imported(db, season_and_session, tmp_path):
+def test_scan_and_import_retains_files_when_all_already_imported(db, season_and_session, tmp_path):
     """If every message was already imported in a prior scan, the source files
-    are still removed — otherwise duplicates would accumulate forever.
+    are still retained on disk — deletion is deferred to roster send/skip.
+    source_path is backfilled on the pre-existing row.
     """
     _, net_session = season_and_session
 
@@ -239,6 +251,7 @@ def test_scan_and_import_purges_files_when_all_already_imported(db, season_and_s
         body="x",
         message_type=MessageType.PLAIN_TEXT,
         parsed=True,
+        source_path=None,
     )
     db.add(existing)
     db.commit()
@@ -259,7 +272,11 @@ def test_scan_and_import_purges_files_when_all_already_imported(db, season_and_s
     ]
     result = scan_and_import_messages(db, raw_messages, net_session)
     assert result == []
-    assert not f.exists()
+    # File must be retained — deletion deferred to roster send/skip.
+    assert f.exists()
+    # source_path should be backfilled.
+    row = db.query(RawMessage).filter_by(message_id="ONLY").one()
+    assert row.source_path == str(f)
 
 
 def test_scan_and_import_skips_existing_message_ids(db, season_and_session):
@@ -521,3 +538,176 @@ def test_scan_creates_no_notification_when_no_imports(db, season_and_session):
     result = scan_and_import_messages(db, [], session)
     assert result == []
     assert db.query(Notification).count() == 0
+
+
+def test_scan_and_import_persists_source_path(db, tmp_path):
+    """New imports record their on-disk path on the RawMessage row."""
+    net_session = NetSession(
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    src = tmp_path / "12345.b2f"
+    src.write_text("placeholder")
+
+    msg = {
+        "message_id": "<unique-id-1@example>",
+        "from_address": "w0abc@winlink.org",
+        "received_at": datetime.now(tz=timezone.utc),
+        "subject": "//WL2K Check-in",
+        "body": "John, W0ABC, Denver, CO, Voice",
+        "path": str(src),
+    }
+    scan_and_import_messages(db, [msg], net_session)
+
+    row = db.query(RawMessage).filter_by(message_id="<unique-id-1@example>").one()
+    assert row.source_path == str(src)
+    # File should still be on disk (deletion is deferred to roster-send).
+    assert src.exists()
+
+
+def test_scan_and_import_upserts_source_path_on_rescan(db, tmp_path):
+    """A rescan of the same message backfills source_path if it was NULL."""
+    net_session = NetSession(
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    # Seed a RawMessage as if imported before the migration: no source_path.
+    existing = RawMessage(
+        message_id="<unique-id-2@example>",
+        from_address="w0abc@winlink.org",
+        received_at=datetime.now(tz=timezone.utc),
+        subject="//WL2K Check-in",
+        body="John, W0ABC, Denver, CO, Voice",
+        message_type=MessageType.UNKNOWN,
+        parsed=False,
+        source_path=None,
+    )
+    db.add(existing)
+    db.commit()
+
+    src = tmp_path / "12346.b2f"
+    src.write_text("placeholder")
+
+    msg = {
+        "message_id": "<unique-id-2@example>",
+        "from_address": "w0abc@winlink.org",
+        "received_at": datetime.now(tz=timezone.utc),
+        "subject": "//WL2K Check-in",
+        "body": "John, W0ABC, Denver, CO, Voice",
+        "path": str(src),
+    }
+    scan_and_import_messages(db, [msg], net_session)
+
+    row = db.query(RawMessage).filter_by(message_id="<unique-id-2@example>").one()
+    assert row.source_path == str(src)
+    assert src.exists(), "scan must NOT delete the file at import time"
+
+
+def test_purge_session_source_files_deletes_all_paths(db, tmp_path):
+    net_session = NetSession(
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    paths = []
+    for i in range(3):
+        p = tmp_path / f"file{i}.b2f"
+        p.write_text("x")
+        paths.append(p)
+        raw = RawMessage(
+            message_id=f"<id-{i}@x>",
+            from_address="w0abc@winlink.org",
+            received_at=datetime.now(tz=timezone.utc),
+            subject="s",
+            body="b",
+            message_type=MessageType.UNKNOWN,
+            parsed=True,
+            source_path=str(p),
+        )
+        db.add(raw)
+        db.flush()
+        ci = CheckIn(
+            session_id=net_session.id,
+            raw_message_id=raw.id,
+            callsign="W0ABC",
+            name="Test",
+            mode="Voice",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        )
+        db.add(ci)
+    db.commit()
+
+    deleted = purge_session_source_files(db, net_session.id)
+    assert deleted == 3
+    for p in paths:
+        assert not p.exists()
+
+
+def test_purge_session_source_files_skips_null_paths(db, tmp_path):
+    """Rows with NULL source_path (pre-migration) are silently skipped."""
+    net_session = NetSession(
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    raw = RawMessage(
+        message_id="<id@x>",
+        from_address="w0abc@winlink.org",
+        received_at=datetime.now(tz=timezone.utc),
+        subject="s",
+        body="b",
+        message_type=MessageType.UNKNOWN,
+        parsed=True,
+        source_path=None,
+    )
+    db.add(raw)
+    db.flush()
+    db.add(CheckIn(
+        session_id=net_session.id,
+        raw_message_id=raw.id,
+        callsign="W0ABC",
+        name="Test",
+        mode="Voice",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+    ))
+    db.commit()
+
+    assert purge_session_source_files(db, net_session.id) == 0
+
+
+def test_purge_source_files_swallows_missing_file(tmp_path):
+    """Missing files don't raise; other failures log a warning and continue."""
+    missing = tmp_path / "does-not-exist.b2f"
+    real = tmp_path / "real.b2f"
+    real.write_text("x")
+    # Should not raise even though the first path is missing.
+    purge_source_files([str(missing), str(real)])
+    assert not real.exists()
