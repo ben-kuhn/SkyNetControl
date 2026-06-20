@@ -126,6 +126,12 @@ export interface CheckIn {
   parse_status: "auto" | "manual_review" | "manually_entered";
   timing_status: "on_time" | "early" | "late";
   is_new_member: boolean;
+  raw_message: {
+    subject: string;
+    from_address: string;
+    received_at: string;
+    body: string;
+  } | null;
 }
 
 export interface CallbookResult {

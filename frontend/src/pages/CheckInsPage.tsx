@@ -436,6 +436,26 @@ function EditCheckinModal({
   return (
     <Modal open={open} onClose={onClose} title="Edit Check-in">
       <div className="flex flex-col gap-3">
+        {checkin?.raw_message && (
+          <details
+            className="bg-bg-elevated/50 rounded-md border border-border"
+            open={checkin.parse_status === "manual_review"}
+          >
+            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-text-secondary hover:text-text-primary">
+              Original message
+            </summary>
+            <div className="px-3 pb-3 flex flex-col gap-2">
+              <div className="text-xs text-text-muted">
+                <div><span className="font-medium">Subject:</span> {checkin.raw_message.subject}</div>
+                <div><span className="font-medium">From:</span> {checkin.raw_message.from_address}</div>
+                <div><span className="font-medium">Received:</span> {new Date(checkin.raw_message.received_at).toLocaleString()}</div>
+              </div>
+              <pre className="text-xs font-mono whitespace-pre-wrap bg-bg-base/60 border border-border rounded p-2 max-h-64 overflow-auto text-text-primary">
+                {checkin.raw_message.body}
+              </pre>
+            </div>
+          </details>
+        )}
         <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
         <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         <Input label="Mode" value={form.mode} onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value }))} />
