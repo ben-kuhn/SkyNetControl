@@ -694,3 +694,211 @@ def test_generate_due_drafts_creates_notification(db, season_and_sessions, defau
     )
     assert len(rows) == 1
     assert rows[0].link_url == "/roster"
+
+
+# ---------------------------------------------------------------------------
+# Source-file purge tests (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_mark_sent_purges_session_source_files(db, tmp_path, monkeypatch):
+    """A successful mark_sent deletes the session's PAT mailbox files."""
+    from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus
+    from backend.modules.roster.service import mark_sent
+    from backend.modules.roster.models import RosterLog, RosterStatus
+    from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
+    from datetime import date, datetime, timezone
+
+    net_session = NetSession(
+        season_id=None,
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    src = tmp_path / "file.b2f"
+    src.write_text("x")
+    raw = RawMessage(
+        message_id="<id@x>",
+        from_address="w0abc@winlink.org",
+        received_at=datetime.now(tz=timezone.utc),
+        subject="s",
+        body="b",
+        message_type=MessageType.UNKNOWN,
+        parsed=True,
+        source_path=str(src),
+    )
+    db.add(raw)
+    db.flush()
+    db.add(CheckIn(
+        session_id=net_session.id,
+        raw_message_id=raw.id,
+        callsign="W0ABC",
+        name="Test",
+        mode="Voice",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+    ))
+
+    log = RosterLog(
+        session_id=net_session.id,
+        status=RosterStatus.APPROVED,
+        content_subject="s",
+        content_header="h",
+        content_welcome="w",
+        content_comments="c",
+        content_footer="f",
+        drafted_at=datetime.now(tz=timezone.utc),
+        approved_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    # Stub the delivery dispatcher so the test doesn't try to send email.
+    monkeypatch.setattr(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        lambda *a, **kw: True,
+    )
+
+    result = mark_sent(db, log.id)
+    assert result is not None
+    assert result.status == RosterStatus.SENT
+    assert not src.exists(), "source file must be purged after a successful send"
+
+
+def test_mark_sent_failure_does_not_purge(db, tmp_path, monkeypatch):
+    """A failed delivery (mark_sent returns None) leaves files in place."""
+    from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus
+    from backend.modules.roster.service import mark_sent
+    from backend.modules.roster.models import RosterLog, RosterStatus
+    from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
+    from datetime import date, datetime, timezone
+
+    net_session = NetSession(
+        season_id=None,
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    src = tmp_path / "file.b2f"
+    src.write_text("x")
+    raw = RawMessage(
+        message_id="<id@x>",
+        from_address="w0abc@winlink.org",
+        received_at=datetime.now(tz=timezone.utc),
+        subject="s",
+        body="b",
+        message_type=MessageType.UNKNOWN,
+        parsed=True,
+        source_path=str(src),
+    )
+    db.add(raw)
+    db.flush()
+    db.add(CheckIn(
+        session_id=net_session.id,
+        raw_message_id=raw.id,
+        callsign="W0ABC",
+        name="Test",
+        mode="Voice",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+    ))
+
+    log = RosterLog(
+        session_id=net_session.id,
+        status=RosterStatus.APPROVED,
+        content_subject="s",
+        content_header="h",
+        content_welcome="w",
+        content_comments="c",
+        content_footer="f",
+        drafted_at=datetime.now(tz=timezone.utc),
+        approved_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    monkeypatch.setattr(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        lambda *a, **kw: False,
+    )
+
+    result = mark_sent(db, log.id)
+    assert result is None
+    assert src.exists(), "source files must remain when delivery failed"
+
+
+def test_skip_roster_purges_session_source_files(db, tmp_path):
+    from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus
+    from backend.modules.roster.service import skip_roster
+    from backend.modules.roster.models import RosterLog, RosterStatus
+    from backend.modules.schedule.models import NetSession, SessionStatus, SessionType
+    from datetime import date, datetime, timezone
+
+    net_session = NetSession(
+        season_id=None,
+        start_date=date.today(),
+        end_date=date.today(),
+        status=SessionStatus.SCHEDULED,
+        session_type=SessionType.REGULAR_CHECKIN,
+        grace_period_hours=24,
+    )
+    db.add(net_session)
+    db.commit()
+    db.refresh(net_session)
+
+    src = tmp_path / "file.b2f"
+    src.write_text("x")
+    raw = RawMessage(
+        message_id="<id@x>",
+        from_address="w0abc@winlink.org",
+        received_at=datetime.now(tz=timezone.utc),
+        subject="s",
+        body="b",
+        message_type=MessageType.UNKNOWN,
+        parsed=True,
+        source_path=str(src),
+    )
+    db.add(raw)
+    db.flush()
+    db.add(CheckIn(
+        session_id=net_session.id,
+        raw_message_id=raw.id,
+        callsign="W0ABC",
+        name="Test",
+        mode="Voice",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+    ))
+
+    log = RosterLog(
+        session_id=net_session.id,
+        status=RosterStatus.DRAFT,
+        content_subject="s",
+        content_header="h",
+        content_welcome="w",
+        content_comments="c",
+        content_footer="f",
+        drafted_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    result = skip_roster(db, log.id)
+    assert result is not None
+    assert result.status == RosterStatus.SKIPPED
+    assert not src.exists()

@@ -10,6 +10,7 @@ from backend.config import settings
 from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn
+from backend.modules.checkins.service import purge_session_source_files
 from backend.modules.notifications.models import NotificationKind
 from backend.modules.notifications.service import (
     _format_session_date,
@@ -464,6 +465,7 @@ def mark_sent(db: Session, roster_id: int) -> RosterLog | None:
     log.sent_at = datetime.now(tz=timezone.utc)
     db.commit()
     db.refresh(log)
+    purge_session_source_files(db, log.session_id)
     return log
 
 
@@ -476,6 +478,7 @@ def skip_roster(db: Session, roster_id: int) -> RosterLog | None:
     log.status = RosterStatus.SKIPPED
     db.commit()
     db.refresh(log)
+    purge_session_source_files(db, log.session_id)
     return log
 
 
