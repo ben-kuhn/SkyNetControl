@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = "sqlite:///skynetcontrol.db"
     static_dir: str = "frontend/dist"
+    state_dir: str = "."
     debug: bool = False
 
     # JWT

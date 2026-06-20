@@ -159,6 +159,7 @@ in
 
       environment = {
         SKYNET_DATABASE_URL = cfg.databaseUrl;
+        SKYNET_STATE_DIR = cfg.stateDir;
         SKYNET_APP_BASE_URL = cfg.appBaseUrl;
       } // lib.optionalAttrs (cfg.trustedProxies != "") {
         SKYNET_TRUSTED_PROXIES = cfg.trustedProxies;
