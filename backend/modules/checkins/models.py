@@ -45,6 +45,7 @@ class RawMessage(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     message_type: Mapped[MessageType] = mapped_column(Enum(MessageType), nullable=False)
     parsed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     checkin: Mapped["CheckIn | None"] = relationship(back_populates="raw_message")
 
