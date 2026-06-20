@@ -3,7 +3,7 @@ import os
 from collections.abc import Iterable
 from datetime import date, datetime, timezone, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.modules.checkins.models import (
     CheckIn,
@@ -220,7 +220,13 @@ def scan_and_import_messages(
 
 
 def get_checkins_for_session(db: Session, session_id: int) -> list[CheckIn]:
-    return db.query(CheckIn).filter(CheckIn.session_id == session_id).order_by(CheckIn.callsign).all()
+    return (
+        db.query(CheckIn)
+        .options(selectinload(CheckIn.raw_message))
+        .filter(CheckIn.session_id == session_id)
+        .order_by(CheckIn.callsign)
+        .all()
+    )
 
 
 def create_manual_checkin(
@@ -330,6 +336,7 @@ def get_checkins_by_callsign(db: Session, callsign: str) -> list[tuple[CheckIn, 
     return (
         db.query(CheckIn, NetSession.start_date)
         .join(NetSession, CheckIn.session_id == NetSession.id)
+        .options(selectinload(CheckIn.raw_message))
         .filter(CheckIn.callsign == normalized)
         .order_by(NetSession.start_date.desc(), CheckIn.id.desc())
         .all()
