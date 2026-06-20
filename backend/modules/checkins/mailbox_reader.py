@@ -1,9 +1,12 @@
+import logging
 import os
 import re
 from datetime import datetime, timezone
 from email import message_from_string, policy
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Address-like tokens in a `To:` header: callsigns, local-parts, full emails.
 _ADDRESS_TOKEN_RE = re.compile(r"[a-z0-9._%+\-]+(?:@[a-z0-9.\-]+)?")
@@ -38,6 +41,13 @@ def read_message_file(file_path: Path | str) -> dict | None:
     file_path = Path(file_path)
     try:
         text = file_path.read_text(errors="replace")
+    except OSError as exc:
+        # Most often PermissionError when the service user can't traverse
+        # into the PAT mailbox tree — log loudly so it's not silently a 0-import.
+        logger.warning("Cannot read mailbox message %s: %s", file_path, exc)
+        return None
+
+    try:
         msg = message_from_string(text, policy=policy.default)
 
         message_id = msg.get("Message-Id", "").strip()
@@ -68,6 +78,7 @@ def read_message_file(file_path: Path | str) -> dict | None:
             "body": body_text,
         }
     except Exception:
+        logger.exception("Failed to parse mailbox message %s", file_path)
         return None
 
 
@@ -86,7 +97,15 @@ def read_mailbox(
     extensions = {".mime", ".b2f", ".eml"}
     messages = []
 
-    for filename in os.listdir(mailbox_path):
+    try:
+        filenames = os.listdir(mailbox_path)
+    except OSError as exc:
+        # PermissionError here means the service can see the directory exists
+        # but can't enumerate it (perms on the dir or a parent in the chain).
+        logger.warning("Cannot list mailbox %s: %s", mailbox_path, exc)
+        return []
+
+    for filename in filenames:
         file_path = Path(mailbox_path) / filename
         if not file_path.is_file():
             continue
