@@ -500,17 +500,29 @@ export function CheckInsPage() {
     const all = await fetchRecentSessions();
     const sorted = [...all].sort((a, b) => b.start_date.localeCompare(a.start_date));
 
-    // Find the next scheduled session
     const now = new Date().toISOString().split("T")[0]!;
+
+    // Prefer a session that's currently in window (today falls between
+    // start_date and end_date inclusive) — for week-long nets the active
+    // session shouldn't get bumped to "next week" on its final day.
+    const currentScheduled = sorted.find(
+      (s) =>
+        s.status === "scheduled" &&
+        s.start_date <= now &&
+        (s.end_date == null ? s.start_date === now : s.end_date >= now),
+    );
+
+    // Otherwise fall back to the earliest strictly-future scheduled session.
     const nextScheduled = sorted
-      .filter((s) => s.status === "scheduled" && s.start_date >= now)
-      .pop(); // earliest future scheduled
+      .filter((s) => s.status === "scheduled" && s.start_date > now)
+      .pop();
 
     // Take 7 most recent
     const recent = sorted.slice(0, 7);
 
-    // Merge: include nextScheduled if not already in recent
+    // Merge: include current + next-scheduled if not already in recent
     const sessionMap = new Map(recent.map((s) => [s.id, s]));
+    if (currentScheduled) sessionMap.set(currentScheduled.id, currentScheduled);
     if (nextScheduled) sessionMap.set(nextScheduled.id, nextScheduled);
 
     // Include extra session (from query param or current selection)
@@ -522,7 +534,7 @@ export function CheckInsPage() {
 
     const finalSessions = [...sessionMap.values()].sort((a, b) => b.start_date.localeCompare(a.start_date));
     setSessions(finalSessions);
-    return { finalSessions, nextScheduled };
+    return { finalSessions, currentScheduled, nextScheduled };
   }, [initialSessionParam]);
 
   useEffect(() => {
@@ -535,17 +547,30 @@ export function CheckInsPage() {
   // Load sessions on mount
   useEffect(() => {
     loadSessions()
-      .then(({ finalSessions, nextScheduled }) => {
+      .then(({ finalSessions, currentScheduled, nextScheduled }) => {
         let defaultId: number | null = null;
         if (initialSessionParam) {
           defaultId = Number(initialSessionParam);
         } else if (user) {
-          // Authenticated users: prefer next scheduled, then recent
-          if (nextScheduled) {
-            defaultId = nextScheduled.id;
+          // Authenticated users: don't jump to a future session until it
+          // actually starts. Preference order:
+          //   1. session currently in window (start_date <= today <= end_date)
+          //   2. most recent past session (start_date <= today), any status —
+          //      keeps a finished or not-yet-marked-completed session selected
+          //      until the next one truly begins
+          //   3. next-scheduled future session (only when there's no history)
+          const today = new Date().toISOString().split("T")[0]!;
+          if (currentScheduled) {
+            defaultId = currentScheduled.id;
           } else {
-            const recentCompleted = finalSessions.find((s) => s.status === "completed");
-            defaultId = recentCompleted?.id ?? finalSessions[0]?.id ?? null;
+            const mostRecentPast = finalSessions.find((s) => s.start_date <= today);
+            if (mostRecentPast) {
+              defaultId = mostRecentPast.id;
+            } else if (nextScheduled) {
+              defaultId = nextScheduled.id;
+            } else {
+              defaultId = finalSessions[0]?.id ?? null;
+            }
           }
         } else {
           // Anonymous users: only show completed sessions
