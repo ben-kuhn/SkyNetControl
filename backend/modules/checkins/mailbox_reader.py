@@ -50,7 +50,10 @@ def read_message_file(file_path: Path | str) -> dict | None:
     try:
         msg = message_from_string(text, policy=policy.default)
 
-        message_id = msg.get("Message-Id", "").strip()
+        # PAT writes B2F files with `Mid:` instead of `Message-Id:` and a
+        # `YYYY/MM/DD HH:MM` Date (no RFC 2822 framing). Fall back to those
+        # so we don't silently drop every PAT-delivered message.
+        message_id = msg.get("Message-Id", "").strip() or msg.get("Mid", "").strip()
         from_address = msg.get("From", "").strip()
         to_address = msg.get("To", "").strip()
         subject = msg.get("Subject", "").strip()
@@ -59,12 +62,18 @@ def read_message_file(file_path: Path | str) -> dict | None:
         if not message_id or not from_address:
             return None
 
+        received_at: datetime | None = None
         try:
             received_at = parsedate_to_datetime(date_str)
             if received_at.tzinfo is None:
                 received_at = received_at.replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
-            received_at = datetime.now(timezone.utc)
+            received_at = None
+        if received_at is None:
+            try:
+                received_at = datetime.strptime(date_str.strip(), "%Y/%m/%d %H:%M").replace(tzinfo=timezone.utc)
+            except ValueError:
+                received_at = datetime.now(timezone.utc)
 
         body = msg.get_body(preferencelist=("plain",))
         body_text = body.get_content().strip() if body else ""

@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.modules.checkins.mailbox_reader import read_mailbox, read_message_file
 
@@ -117,6 +117,31 @@ def test_read_mailbox_matches_angle_bracketed_to_header(tmp_path):
     (tmp_path / "ANGLE001.b2f").write_text(msg)
     messages = read_mailbox(str(tmp_path), net_address="w0ne@winlink.org")
     assert len(messages) == 1
+
+
+def test_read_mailbox_parses_pat_b2f_format(tmp_path):
+    # PAT writes .b2f with `Mid:` (not `Message-Id:`), a `YYYY/MM/DD HH:MM`
+    # Date (not RFC 2822), and a bare-callsign To. Previously every PAT
+    # file was silently dropped because Message-Id was missing.
+    msg = (
+        "Mid: 3P2IVMQF2IEF\n"
+        "Body: 64\n"
+        "Date: 2026/06/17 13:09\n"
+        "From: AD8CM\n"
+        "Mbo: AD8CM\n"
+        "Subject: //WL2K R/ Winlink Net Check-In\n"
+        "To: W0NE\n"
+        "\n"
+        "Marcel, AD8CM, Columbus, Franklin, Ohio, USA, Packet KB8UVN-10\n"
+    )
+    (tmp_path / "3P2IVMQF2IEF.b2f").write_text(msg)
+    messages = read_mailbox(str(tmp_path), net_address="w0ne@winlink.org")
+    assert len(messages) == 1
+    parsed = messages[0]
+    assert parsed["message_id"] == "3P2IVMQF2IEF"
+    assert parsed["from_address"] == "AD8CM"
+    assert parsed["received_at"] == datetime(2026, 6, 17, 13, 9, tzinfo=timezone.utc)
+    assert "Marcel" in parsed["body"]
 
 
 def test_read_mailbox_rejects_bare_callsign_for_different_net(tmp_path):
