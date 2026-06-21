@@ -234,6 +234,27 @@ def test_build_template_context_no_next_session(db: Session, season_and_sessions
     assert ctx["next_week_preview"] == ""
 
 
+def test_build_template_context_exposes_start_and_end_date(db: Session, season_and_sessions):
+    """Week-long nets need both endpoints in the context — backlog item 1."""
+    _, session1, _, _ = season_and_sessions
+    session1.end_date = date(2026, 4, 16)
+    db.commit()
+
+    ctx = build_template_context(db, session1)
+    assert ctx["start_date"] == "April 10, 2026"
+    assert ctx["end_date"] == "April 16, 2026"
+    assert ctx["date"] == "April 10, 2026"
+
+
+def test_build_template_context_end_date_falls_back_to_start(db: Session, season_and_sessions):
+    _, session1, _, _ = season_and_sessions
+    session1.end_date = None
+    db.commit()
+
+    ctx = build_template_context(db, session1)
+    assert ctx["end_date"] == ctx["start_date"] == "April 10, 2026"
+
+
 def test_build_template_context_includes_net_identity(db: Session, season_and_sessions):
     """build_template_context exposes net_callsign and net_address from config
     so seeded templates don't have to hardcode net branding."""

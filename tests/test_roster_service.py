@@ -295,6 +295,36 @@ def test_build_roster_context_includes_net_identity(db, season_and_sessions):
     assert ctx["net_address"] == "k0xyz@winlink.org"
 
 
+def test_build_roster_context_exposes_start_and_end_date(db, season_and_sessions):
+    """Week-long nets need both endpoints in the template context so
+    operators can phrase the date span however they like — backlog item 1."""
+    _, session1, _, _ = season_and_sessions
+
+    session1.end_date = date(2026, 4, 16)
+    db.commit()
+
+    ctx = build_roster_context(db, session1)
+
+    assert ctx["start_date"] == "April 10, 2026"
+    assert ctx["end_date"] == "April 16, 2026"
+    # `date` stays backward-compatible — same as start_date.
+    assert ctx["date"] == "April 10, 2026"
+
+
+def test_build_roster_context_end_date_falls_back_to_start(db, season_and_sessions):
+    """Single-day sessions may have end_date=None; the template var should
+    still resolve so {{ end_date }} doesn't render the literal 'None'."""
+    _, session1, _, _ = season_and_sessions
+
+    session1.end_date = None
+    db.commit()
+
+    ctx = build_roster_context(db, session1)
+
+    assert ctx["start_date"] == "April 10, 2026"
+    assert ctx["end_date"] == "April 10, 2026"
+
+
 def test_build_roster_context_session_url(db, season_and_sessions):
     _, session1, _, _ = season_and_sessions
 

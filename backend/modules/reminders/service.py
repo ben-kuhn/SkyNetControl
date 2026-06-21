@@ -164,10 +164,12 @@ def build_template_context(db: Session, net_session: NetSession) -> dict:
     season = net_session.season
 
     # Date formatting
-    month_name = net_session.start_date.strftime("%B")
-    day = net_session.start_date.day
-    year = net_session.start_date.year
-    date_str = f"{month_name} {day}, {year}"
+    def _fmt(d):
+        return f"{d.strftime('%B')} {d.day}, {d.year}"
+
+    start_date_str = _fmt(net_session.start_date)
+    end_date_str = _fmt(net_session.end_date) if net_session.end_date else start_date_str
+    date_str = start_date_str
 
     # Time formatting (from season)
     time_str = ""
@@ -204,6 +206,8 @@ def build_template_context(db: Session, net_session: NetSession) -> dict:
 
     return {
         "date": date_str,
+        "start_date": start_date_str,
+        "end_date": end_date_str,
         "time": time_str,
         "day_of_week": day_of_week,
         "activity_title": activity_title,
