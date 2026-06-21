@@ -26,6 +26,7 @@ export interface Session {
   status: string;
   activity_id: number | null;
   net_control_callsign: string | null;
+  roster_status: RosterStatus | null;
 }
 
 export interface Season {

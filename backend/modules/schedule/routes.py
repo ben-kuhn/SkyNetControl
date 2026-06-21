@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import get_current_user, get_db_session, optional_user_with_scope, require_role
 from backend.auth.models import User, UserRole
 from backend.config_mgmt.service import get_config_value
+from backend.modules.roster.models import RosterLog
 from backend.modules.schedule.models import (
     NetSeason,
     NetSession,
@@ -47,6 +48,10 @@ class SessionResponse(BaseModel):
     status: str
     activity_id: int | None
     net_control_callsign: str | None
+    # null when no roster has been drafted yet. Lets the frontend's
+    # "current session" pinning hold a past session whose roster is
+    # still being written, per backlog item 3.
+    roster_status: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -87,7 +92,19 @@ class SessionCreate(BaseModel):
 # --- Helpers ---
 
 
-def _session_to_response(s: NetSession) -> dict:
+def _load_roster_statuses(db: Session, session_ids: list[int]) -> dict[int, str]:
+    """Batch-fetch roster status keyed by session_id (None when no roster)."""
+    if not session_ids:
+        return {}
+    rows = (
+        db.query(RosterLog.session_id, RosterLog.status)
+        .filter(RosterLog.session_id.in_(session_ids))
+        .all()
+    )
+    return {sid: status.value for sid, status in rows}
+
+
+def _session_to_response(s: NetSession, roster_status: str | None = None) -> dict:
     return {
         "id": s.id,
         "season_id": s.season_id,
@@ -98,10 +115,20 @@ def _session_to_response(s: NetSession) -> dict:
         "status": s.status.value,
         "activity_id": s.activity_id,
         "net_control_callsign": s.net_control_callsign,
+        "roster_status": roster_status,
     }
 
 
-def _season_to_response(season: NetSeason) -> dict:
+def _session_response_for(db: Session, s: NetSession) -> dict:
+    return _session_to_response(s, _load_roster_statuses(db, [s.id]).get(s.id))
+
+
+def _sessions_response_for(db: Session, sessions: list[NetSession]) -> list[dict]:
+    statuses = _load_roster_statuses(db, [s.id for s in sessions])
+    return [_session_to_response(s, statuses.get(s.id)) for s in sessions]
+
+
+def _season_to_response(db: Session, season: NetSeason) -> dict:
     return {
         "id": season.id,
         "name": season.name,
@@ -111,7 +138,7 @@ def _season_to_response(season: NetSeason) -> dict:
         "time": season.time.strftime("%H:%M") if season.time else None,
         "is_week_long": season.is_week_long,
         "activity_cadence": season.activity_cadence,
-        "sessions": [_session_to_response(s) for s in season.sessions],
+        "sessions": _sessions_response_for(db, list(season.sessions)),
     }
 
 
@@ -151,7 +178,7 @@ async def create_season(
     generate_sessions(db, season, default_net_control=default_net_control or "")
 
     db.refresh(season)
-    return _season_to_response(season)
+    return _season_to_response(db, season)
 
 
 @schedule_router.get("/seasons")
@@ -160,7 +187,7 @@ async def list_seasons(
     db: Session = Depends(get_db_session),
 ):
     seasons = db.query(NetSeason).order_by(NetSeason.start_date.desc()).all()
-    return [_season_to_response(s) for s in seasons]
+    return [_season_to_response(db, s) for s in seasons]
 
 
 @schedule_router.get("/seasons/{season_id}")
@@ -172,7 +199,7 @@ async def get_season(
     season = db.get(NetSeason, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
-    return _season_to_response(season)
+    return _season_to_response(db, season)
 
 
 @schedule_router.get("/seasons/{season_id}/sessions")
@@ -184,7 +211,7 @@ async def list_season_sessions(
     season = db.get(NetSeason, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
-    return [_session_to_response(s) for s in season.sessions]
+    return _sessions_response_for(db, list(season.sessions))
 
 
 @schedule_router.post("/sessions", status_code=201)
@@ -206,7 +233,7 @@ async def create_session_route(
         net_control_callsign=body.net_control_callsign,
         activity_id=body.activity_id,
     )
-    return _session_to_response(session_obj)
+    return _session_response_for(db, session_obj)
 
 
 @schedule_router.get("/sessions")
@@ -229,7 +256,7 @@ async def list_sessions_route(
         status_enum = SessionStatus.COMPLETED
 
     sessions = list_sessions_service(db, season_id=season_id, status=status_enum)
-    return [_session_to_response(s) for s in sessions]
+    return _sessions_response_for(db, sessions)
 
 
 @schedule_router.get("/sessions/{session_id}")
@@ -241,7 +268,7 @@ async def get_session_route(
     session_obj = get_session_service(db, session_id)
     if session_obj is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return _session_to_response(session_obj)
+    return _session_response_for(db, session_obj)
 
 
 @schedule_router.patch("/sessions/{session_id}")
@@ -263,7 +290,7 @@ async def update_session(
     )
     if session_obj is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return _session_to_response(session_obj)
+    return _session_response_for(db, session_obj)
 
 
 @schedule_router.delete("/seasons/{season_id}", status_code=204)

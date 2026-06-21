@@ -109,6 +109,71 @@ async def test_list_seasons(test_client, test_settings):
 
 
 @pytest.mark.asyncio
+async def test_session_roster_status_field(test_client, test_settings, db_setup):
+    """Frontend's 'don't advance until roster is SENT' logic (backlog item 3)
+    needs roster_status surfaced on every session response."""
+    from datetime import date, datetime, timezone
+    from backend.modules.roster.models import RosterLog, RosterStatus
+    from backend.modules.schedule.models import NetSession, SessionType
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    with db_setup() as session:
+        net_session = NetSession(
+            start_date=date(2026, 4, 10),
+            end_date=date(2026, 4, 10),
+            session_type=SessionType.REGULAR_CHECKIN,
+            grace_period_hours=24.0,
+        )
+        session.add(net_session)
+        session.flush()
+        roster = RosterLog(
+            session_id=net_session.id,
+            status=RosterStatus.DRAFT,
+            content_subject="subj",
+            content_header="h",
+            content_welcome="w",
+            content_comments="c",
+            content_footer="f",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        session.add(roster)
+        session.commit()
+        session_id = net_session.id
+
+    response = await test_client.get(
+        f"/api/schedule/sessions/{session_id}",
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["roster_status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_session_roster_status_null_when_no_roster(test_client, test_settings, db_setup):
+    from datetime import date
+    from backend.modules.schedule.models import NetSession, SessionType
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    with db_setup() as session:
+        net_session = NetSession(
+            start_date=date(2026, 4, 10),
+            end_date=date(2026, 4, 10),
+            session_type=SessionType.REGULAR_CHECKIN,
+            grace_period_hours=24.0,
+        )
+        session.add(net_session)
+        session.commit()
+        session_id = net_session.id
+
+    response = await test_client.get(
+        f"/api/schedule/sessions/{session_id}",
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["roster_status"] is None
+
+
+@pytest.mark.asyncio
 async def test_list_sessions(test_client, test_settings):
     token = create_access_token("W0NE", "admin", test_settings)
     create_resp = await test_client.post(

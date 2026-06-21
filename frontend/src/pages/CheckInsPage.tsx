@@ -592,13 +592,33 @@ export function CheckInsPage() {
         } else if (user) {
           // Authenticated users: don't jump to a future session until it
           // actually starts. Preference order:
-          //   1. session currently in window (start_date <= today <= end_date)
-          //   2. most recent past session (start_date <= today), any status —
-          //      keeps a finished or not-yet-marked-completed session selected
-          //      until the next one truly begins
-          //   3. next-scheduled future session (only when there's no history)
+          //   1. recent past session whose roster is still unfinished —
+          //      rosters get drafted *after* the net, so the previous
+          //      session needs to stay pinned even after its window ends
+          //      and the next session's window opens (backlog item 3).
+          //      Within ROSTER_GRACE_DAYS for no-roster-yet; indefinitely
+          //      while the roster is in DRAFT/APPROVED.
+          //   2. session currently in window (start_date <= today <= end_date)
+          //   3. most recent past session (start_date <= today), any status
+          //   4. next-scheduled future session (only when there's no history)
+          const ROSTER_GRACE_DAYS = 7;
           const today = new Date().toISOString().split("T")[0]!;
-          if (currentScheduled) {
+          const daysBetween = (from: string, to: string) =>
+            Math.floor((Date.parse(to) - Date.parse(from)) / 86400000);
+          const isRosterDone = (s: typeof finalSessions[number]) =>
+            s.roster_status === "sent" || s.roster_status === "skipped";
+          const needsRosterAttention = (s: typeof finalSessions[number]) => {
+            const endDate = s.end_date ?? s.start_date;
+            if (endDate >= today) return false; // not actually past yet
+            if (isRosterDone(s)) return false;
+            if (s.roster_status != null) return true; // DRAFT/APPROVED — stay
+            return daysBetween(endDate, today) <= ROSTER_GRACE_DAYS;
+          };
+          const pendingPastSession = finalSessions.find(needsRosterAttention);
+
+          if (pendingPastSession) {
+            defaultId = pendingPastSession.id;
+          } else if (currentScheduled) {
             defaultId = currentScheduled.id;
           } else {
             const mostRecentPast = finalSessions.find((s) => s.start_date <= today);
