@@ -87,6 +87,8 @@ def _checkin_to_response(checkin: CheckIn) -> dict:
             "message_type": raw.message_type.value,
         }
         if raw.message_type == MessageType.WINLINK_FORM:
+            # Note: spec called for lazy rendering on the list endpoint; at this scale
+            # (dozens of check-ins per session, no pagination) we compute eagerly.
             form_view_html = _render_winlink_form_view(raw.body)
 
     return {

@@ -46,6 +46,5 @@ async def fetch_forms_library(
 
     set_config_value(db, "forms.library_version", result["library_version"])
     set_config_value(db, "forms.last_fetched_at", result["last_fetched_at"])
-    db.commit()
 
     return result

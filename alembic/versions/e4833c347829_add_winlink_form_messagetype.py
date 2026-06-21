@@ -21,6 +21,9 @@ def upgrade() -> None:
     # SQLite stores Enum as VARCHAR(N), so adding a value is a no-op at the
     # DB layer — the Python enum extension in models.py is sufficient.
     # PostgreSQL stores it as a native enum type and requires ALTER TYPE.
+    # Note: ADD VALUE only — do not reference the new value in this same
+    # migration. PostgreSQL forbids using a newly-added enum value within
+    # the same transaction (raises "unsafe use of new value").
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute("ALTER TYPE messagetype ADD VALUE IF NOT EXISTS 'winlink_form'")

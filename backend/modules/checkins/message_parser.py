@@ -239,7 +239,7 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
             elif field == "callsign":
                 fields[field] = raw_value.upper()
             elif field in ("city", "county", "state", "comments"):
-                fields[field] = raw_value or None
+                fields[field] = raw_value
             else:
                 fields[field] = raw_value
 
