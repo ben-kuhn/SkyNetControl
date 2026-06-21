@@ -6,9 +6,19 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
+  // Backdrop clicks discard unsaved work silently — operator lost template
+  // edits multiple times before this defaulted to false (backlog item 2).
+  // Opt-in only for modals where a stray click *should* dismiss.
+  closeOnBackdropClick?: boolean;
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  closeOnBackdropClick = false,
+}: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,7 +37,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => {
-        if (e.target === overlayRef.current) onClose();
+        if (closeOnBackdropClick && e.target === overlayRef.current) onClose();
       }}
     >
       <div className="w-full max-w-md rounded-lg bg-bg-surface border border-border p-6 shadow-xl">
