@@ -109,7 +109,7 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
     raw.message_type = msg_type
     raw.parsed = True
 
-    callsign = fields.get("callsign", "").upper()
+    body_callsign = fields.get("callsign", "").upper()
     confidence = fields.get("confidence", "low")
 
     if confidence == "high" or confidence == "medium":
@@ -117,9 +117,26 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
     else:
         parse_status = ParseStatus.MANUAL_REVIEW
 
-    if not callsign and "@" in raw.from_address:
-        callsign = raw.from_address.split("@")[0].upper()
-        parse_status = ParseStatus.MANUAL_REVIEW
+    # Sender (From: header) is authoritative — it's the Winlink account that
+    # actually transmitted, and the user wins when the body disagrees
+    # (backlog item 5). The body's callsign drops to a comment in that case
+    # so a "Ben sent on behalf of Alice" situation is still visible.
+    sender_callsign = (
+        raw.from_address.split("@")[0].upper() if "@" in raw.from_address else ""
+    )
+    comments = fields.get("comments")
+    if sender_callsign:
+        callsign = sender_callsign
+        if body_callsign and body_callsign != sender_callsign:
+            note = f"Body callsign mismatch: {body_callsign}"
+            comments = f"{comments}\n{note}" if comments else note
+            parse_status = ParseStatus.MANUAL_REVIEW
+    else:
+        callsign = body_callsign
+        if callsign:
+            # Fall back to body when the sender envelope is unparseable —
+            # better than dropping the message entirely; flag for review.
+            parse_status = ParseStatus.MANUAL_REVIEW
 
     timing = classify_timing(net_session, raw.received_at)
     new_member = is_new_member(db, callsign) if callsign else False
@@ -133,7 +150,7 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
         county=fields.get("county"),
         state=fields.get("state"),
         mode=fields.get("mode", ""),
-        comments=fields.get("comments"),
+        comments=comments,
         latitude=fields.get("latitude"),
         longitude=fields.get("longitude"),
         parse_status=parse_status,

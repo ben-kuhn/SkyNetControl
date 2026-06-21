@@ -132,6 +132,88 @@ def test_process_raw_message_form(db, season_and_session):
     assert raw.parsed is True
 
 
+def test_sender_callsign_overrides_body_when_different(db, season_and_session):
+    """Sender (From: header) is authoritative for the callsign — body's
+    callsign drops to a comment if it disagrees (backlog item 5)."""
+    _, net_session = season_and_session
+    raw = RawMessage(
+        message_id="MISMATCH001",
+        from_address="W0SENDER@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body=(
+            "Name: John Smith\n"
+            "Callsign: W0BODY\n"
+            "City: Denver\n"
+            "State: CO\n"
+            "Mode: Winlink\n"
+            "Comments: Hello net\n"
+        ),
+        message_type=MessageType.FORM,
+    )
+    db.add(raw)
+    db.commit()
+
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.callsign == "W0SENDER"
+    assert "W0BODY" in (checkin.comments or "")
+    assert "Hello net" in (checkin.comments or "")
+    assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
+
+
+def test_sender_callsign_used_when_body_matches(db, season_and_session):
+    """No mismatch comment when body and sender agree."""
+    _, net_session = season_and_session
+    raw = RawMessage(
+        message_id="MATCH001",
+        from_address="W0ABC@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body=(
+            "Name: John Smith\n"
+            "Callsign: W0ABC\n"
+            "City: Denver\n"
+            "State: CO\n"
+            "Mode: Winlink\n"
+            "Comments: All good\n"
+        ),
+        message_type=MessageType.FORM,
+    )
+    db.add(raw)
+    db.commit()
+
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.callsign == "W0ABC"
+    assert "mismatch" not in (checkin.comments or "").lower()
+    assert checkin.parse_status == ParseStatus.AUTO
+
+
+def test_falls_back_to_body_when_sender_unparseable(db, season_and_session):
+    """If the From: envelope has no @, fall back to the body's callsign and
+    flag for review — better than dropping the message entirely."""
+    _, net_session = season_and_session
+    raw = RawMessage(
+        message_id="NOENV001",
+        from_address="malformed-no-at-sign",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body=(
+            "Name: John Smith\n"
+            "Callsign: W0BODY\n"
+            "City: Denver\n"
+            "State: CO\n"
+            "Mode: Winlink\n"
+        ),
+        message_type=MessageType.FORM,
+    )
+    db.add(raw)
+    db.commit()
+
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.callsign == "W0BODY"
+    assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
+
+
 def test_process_raw_message_low_confidence(db, season_and_session):
     _, net_session = season_and_session
     raw = RawMessage(
