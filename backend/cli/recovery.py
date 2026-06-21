@@ -33,11 +33,7 @@ from backend.config_mgmt.models import AppConfig
 from backend.db.session import create_engine_from_url, create_session_factory
 
 
-# Keys whose values should be encrypted at rest. Mirrors the typed routes
-# (oauth_routes, smtp_routes) and the routes.py bulk-PUT sensitivity check.
-def _is_sensitive_key(key: str) -> bool:
-    lk = key.lower()
-    return any(fragment in lk for fragment in ("api_key", "password", "secret", "token"))
+from backend.config_mgmt.service import is_sensitive_key
 
 
 def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int, int]:
@@ -70,7 +66,7 @@ def _rotate_secrets(db, from_key: str | None = None) -> tuple[int, int, int, int
     from backend.auth.secret_box import _key_material as _current_material
 
     for row in rows:
-        if not _is_sensitive_key(row.key) or not row.value:
+        if not is_sensitive_key(row.key) or not row.value:
             continue
         if not row.value.startswith(ENC_PREFIX):
             # Plaintext legacy row — encrypt under the current key.

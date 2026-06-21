@@ -74,3 +74,32 @@ def test_env_fallback_dotted_key(db: Session, monkeypatch):
 def test_default_returned_when_neither_db_nor_env(db: Session, monkeypatch):
     monkeypatch.delenv("SKYNET_PAT_MAILBOX_PATH", raising=False)
     assert get_config_value(db, "pat_mailbox_path", default="fallback") == "fallback"
+
+
+# The bulk PUT /api/config/{key} route encrypts sensitive keys via secret_box
+# before storing. Without symmetric decrypt-on-read, the delivery dispatcher
+# (and other consumers like the Claude API and callbook lookups) would receive
+# enc:v1:… ciphertext where they expect plaintext — exactly the groups.io
+# dispatch bug captured as item 7 of the 2026-06-20 UX backlog.
+def test_sensitive_key_decrypted_on_read(db: Session):
+    from backend.auth.secret_box import encrypt
+
+    ciphertext = encrypt("real-api-key")
+    assert ciphertext != "real-api-key"
+
+    set_config_value(db, "delivery.groupsio.api_key", ciphertext)
+    assert get_config_value(db, "delivery.groupsio.api_key") == "real-api-key"
+
+
+def test_sensitive_key_plaintext_passthrough(db: Session):
+    # Legacy rows written before secret_box landed (or env-var fallback) are
+    # plaintext; the read path must return them unchanged, not 500 on decrypt.
+    set_config_value(db, "delivery.groupsio.api_key", "legacy-plaintext-key")
+    assert get_config_value(db, "delivery.groupsio.api_key") == "legacy-plaintext-key"
+
+
+def test_non_sensitive_key_not_decrypted(db: Session):
+    # Non-sensitive keys must round-trip verbatim even if their value happens
+    # to look enveloped — the read path keys off the *name*, not the contents.
+    set_config_value(db, "net_address", "enc:v1:not-actually-encrypted")
+    assert get_config_value(db, "net_address") == "enc:v1:not-actually-encrypted"

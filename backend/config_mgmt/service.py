@@ -3,7 +3,20 @@ import os
 
 from sqlalchemy.orm import Session
 
+from backend.auth.secret_box import decrypt
 from backend.config_mgmt.models import AppConfig
+
+
+# Keys whose values are stored encrypted at rest. The bulk PUT route in
+# routes.py encrypts on write; reads here decrypt symmetrically so callers
+# (delivery backends, callbook lookups, Claude API) always see plaintext.
+# Recovery rotation (cli/recovery.py) keys off the same fragments.
+SENSITIVE_KEY_FRAGMENTS = ("api_key", "password", "secret", "token")
+
+
+def is_sensitive_key(key: str) -> bool:
+    lk = key.lower()
+    return any(fragment in lk for fragment in SENSITIVE_KEY_FRAGMENTS)
 
 
 def _env_key_for(key: str) -> str:
@@ -32,11 +45,15 @@ DEFAULT_CHECKIN_MODES = [
 def get_config_value(db: Session, key: str, default: str | None = None) -> str | None:
     config = db.get(AppConfig, key)
     if config is not None:
-        return config.value
-    env_value = os.environ.get(_env_key_for(key))
-    if env_value is not None:
-        return env_value
-    return default
+        value = config.value
+    else:
+        env_value = os.environ.get(_env_key_for(key))
+        value = env_value if env_value is not None else default
+    if value and is_sensitive_key(key):
+        # decrypt() is a no-op for plaintext (legacy rows, env-var fallback),
+        # so it's safe to call unconditionally on sensitive keys.
+        return decrypt(value)
+    return value
 
 
 def set_config_value(db: Session, key: str, value: str) -> None:
