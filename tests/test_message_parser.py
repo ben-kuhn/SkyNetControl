@@ -213,3 +213,135 @@ def test_parse_plain_text_canonical_mode_casing_preserved():
     body = "Ben, KU0HN, Lewiston, MN, vhf packet"
     result = parse_plain_text_message(body, known_modes={"VHF Packet"})
     assert result["mode"] == "VHF Packet"
+
+
+CHECKIN_FORM_BODY = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters>
+    <xml_file_version>1.0</xml_file_version>
+    <display_form>Winlink_Check_in.html</display_form>
+  </form_parameters>
+  <variables>
+    <var name="Callsign">KU0HN</var>
+    <var name="Operator">Ben Kuhn</var>
+    <var name="City">Lewiston</var>
+    <var name="County">Winona</var>
+    <var name="State">MN</var>
+    <var name="ModeOfCheckin">VHF Packet</var>
+    <var name="Comments">via KU0HN-10</var>
+    <var name="Latitude">44.0</var>
+    <var name="Longitude">-91.8</var>
+  </variables>
+</RMS_Express_Form>
+"""
+
+
+def test_detect_winlink_form_body():
+    """A body with <RMS_Express_Form> is detected before any other branch runs."""
+    assert detect_message_type(CHECKIN_FORM_BODY) == MessageType.WINLINK_FORM
+
+
+def test_parse_winlink_form_canonical():
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    result = parse_winlink_form_message(CHECKIN_FORM_BODY, known_modes={"VHF Packet"})
+    assert result["callsign"] == "KU0HN"
+    assert result["name"] == "Ben Kuhn"
+    assert result["city"] == "Lewiston"
+    assert result["county"] == "Winona"
+    assert result["state"] == "MN"
+    assert result["mode"] == "VHF Packet"
+    assert result["comments"] == "via KU0HN-10"
+    assert result["latitude"] == 44.0
+    assert result["longitude"] == -91.8
+    assert result["confidence"] == "high"
+
+
+def test_parse_winlink_form_heuristic_only():
+    """Variable names that don't match the override map still resolve via heuristic substring."""
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    body = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters><display_form>Something_Else.html</display_form></form_parameters>
+  <variables>
+    <var name="Senders_Callsign">W0ABC</var>
+    <var name="Operator_Name">John</var>
+    <var name="QTH_City">Denver</var>
+    <var name="QTH_State">CO</var>
+    <var name="Reporting_Mode">Voice</var>
+  </variables>
+</RMS_Express_Form>
+"""
+    result = parse_winlink_form_message(body, known_modes={"Voice"})
+    assert result["callsign"] == "W0ABC"
+    assert result["name"] == "John"
+    assert result["city"] == "Denver"
+    assert result["state"] == "CO"
+    assert result["mode"] == "Voice"
+    assert result["confidence"] == "high"
+
+
+def test_parse_winlink_form_combined_location_splits():
+    """A single 'location' variable comma-splits into city/county/state."""
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    body = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters><display_form>x.html</display_form></form_parameters>
+  <variables>
+    <var name="Call">KU0HN</var>
+    <var name="Name">Ben</var>
+    <var name="Location">Lewiston, Winona, MN</var>
+    <var name="Mode">VHF Packet</var>
+  </variables>
+</RMS_Express_Form>
+"""
+    result = parse_winlink_form_message(body, known_modes={"VHF Packet"})
+    assert result["city"] == "Lewiston"
+    assert result["county"] == "Winona"
+    assert result["state"] == "MN"
+    assert result["mode"] == "VHF Packet"
+
+
+def test_parse_winlink_form_comments_reparse_fills_mode():
+    """If mode is missing from variables but appears in comments, the re-parse picks it up."""
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    body = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters><display_form>x.html</display_form></form_parameters>
+  <variables>
+    <var name="Callsign">KU0HN</var>
+    <var name="Name">Ben</var>
+    <var name="Comments">Ben, KU0HN, Lewiston, MN, Voice all good</var>
+  </variables>
+</RMS_Express_Form>
+"""
+    result = parse_winlink_form_message(body, known_modes={"Voice"})
+    assert result["mode"] == "Voice"
+    assert result["city"] == "Lewiston"
+    assert result["state"] == "MN"
+    # Confidence is medium because mode came from comments re-parse, not structured form.
+    assert result["confidence"] == "medium"
+
+
+def test_parse_winlink_form_malformed_xml_falls_through():
+    """A body that looks like a winlink form but is broken XML falls through to plain-text."""
+    body = "<RMS_Express_Form><variables><var name=callsign>oops, no quotes"
+    msg_type, fields = parse_message(body, known_modes={"Voice"})
+    # detect_message_type still returns WINLINK_FORM (substring matched),
+    # but the parser falls through and dispatches to plain-text on the body.
+    # The plain-text parser will degrade further (no commas in the way it expects),
+    # so we mostly assert "doesn't raise" + low confidence.
+    assert fields["confidence"] == "low"
+
+
+def test_parse_winlink_form_non_form_body_unchanged():
+    """A body with no <RMS_Express_Form> wrapper still goes through the Spec A paths."""
+    body = "Ben, KU0HN, Lewiston, MN, Voice"
+    msg_type, fields = parse_message(body, known_modes={"Voice"})
+    assert msg_type == MessageType.PLAIN_TEXT
+    assert fields["callsign"] == "KU0HN"
+
+
+def test_parse_winlink_form_dispatched_by_parse_message():
+    msg_type, fields = parse_message(CHECKIN_FORM_BODY, known_modes={"VHF Packet"})
+    assert msg_type == MessageType.WINLINK_FORM
+    assert fields["callsign"] == "KU0HN"

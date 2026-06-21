@@ -1,4 +1,5 @@
 import re
+import xml.etree.ElementTree as ET
 
 from backend.modules.checkins.models import MessageType
 
@@ -18,7 +19,9 @@ REQUIRED_FORM_FIELDS = {"name", "callsign", "mode"}
 
 
 def detect_message_type(body: str) -> MessageType:
-    """Detect whether the message body is a structured form or plain text."""
+    """Detect whether the message body is a Winlink form, structured form, or plain text."""
+    if "<rms_express_form>" in body.lower():
+        return MessageType.WINLINK_FORM
     lines = body.strip().splitlines()
     field_count = 0
     for line in lines:
@@ -143,6 +146,194 @@ def _degraded_extract(body: str) -> dict:
     }
 
 
+# Per-template override map. Filename keys are lowercased.
+TEMPLATE_OVERRIDES: dict[str, dict[str, str]] = {
+    "winlink_check_in.html": {
+        "callsign": "callsign",
+        "name": "operator",
+        "city": "city",
+        "county": "county",
+        "state": "state",
+        "mode": "modeofcheckin",
+        "comments": "comments",
+        "latitude": "latitude",
+        "longitude": "longitude",
+    },
+}
+
+# Heuristic patterns, ordered most-specific-first to avoid losing a value
+# to a less-specific match (latitude before lat, longitude before lon).
+_HEURISTIC_PATTERNS: dict[str, list[str]] = {
+    "callsign": ["callsign", "call", "station"],
+    "name": ["name", "operator"],
+    "city": ["city"],
+    "county": ["county", "parish", "borough"],
+    "state": ["state", "province"],
+    "mode": ["modeofcheckin", "mode"],  # specific first
+    "comments": ["comments", "comment", "notes", "message"],
+    "latitude": ["latitude", "lat"],
+    "longitude": ["longitude", "long", "lon"],
+}
+
+_LOCATION_VARIABLE_HINTS = ["location", "qth"]
+
+
+def _parse_float_or_none(value: str) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -> dict:
+    """Parse a Winlink Express form (`<RMS_Express_Form>` XML) check-in body.
+
+    Falls back to `parse_plain_text_message` on malformed XML so we never
+    silently drop a message.
+    """
+    if known_modes is None:
+        known_modes = set()
+
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        # Malformed XML — degrade to the plain-text path so the body is still
+        # processed (low confidence, but not silently lost).
+        return parse_plain_text_message(body, known_modes=known_modes)
+
+    template_filename = ""
+    df = root.find(".//form_parameters/display_form")
+    if df is not None and df.text:
+        template_filename = df.text.strip()
+
+    # Lowercase variable names; preserve empty-string values (the spec
+    # treats "" as a present-but-empty signal distinct from missing).
+    variables: dict[str, str] = {}
+    for var in root.findall(".//variables/var"):
+        name = (var.get("name") or "").strip().lower()
+        if not name:
+            continue
+        variables[name] = (var.text or "").strip()
+
+    fields: dict[str, str | float | None] = {
+        "name": "",
+        "callsign": "",
+        "city": None,
+        "county": None,
+        "state": None,
+        "mode": "",
+        "comments": None,
+        "latitude": None,
+        "longitude": None,
+    }
+
+    # Override pass.
+    override = TEMPLATE_OVERRIDES.get(template_filename.lower())
+    if override:
+        for field, var_name in override.items():
+            raw_value = variables.get(var_name.lower(), "")
+            if not raw_value:
+                continue
+            if field in ("latitude", "longitude"):
+                fields[field] = _parse_float_or_none(raw_value)
+            elif field == "callsign":
+                fields[field] = raw_value.upper()
+            elif field in ("city", "county", "state", "comments"):
+                fields[field] = raw_value or None
+            else:
+                fields[field] = raw_value
+
+    # Heuristic pass — fill anything still unset.
+    for field, patterns in _HEURISTIC_PATTERNS.items():
+        # "Unset" means empty string for callsign/name/mode, None for the rest.
+        if field in ("callsign", "name", "mode"):
+            if fields[field]:
+                continue
+        else:
+            if fields[field] is not None:
+                continue
+
+        for pattern in patterns:
+            for var_name, var_value in variables.items():
+                if pattern in var_name and var_value:
+                    if field in ("latitude", "longitude"):
+                        fields[field] = _parse_float_or_none(var_value)
+                    elif field == "callsign":
+                        fields[field] = var_value.upper()
+                    elif field in ("city", "county", "state", "comments"):
+                        fields[field] = var_value
+                    else:
+                        fields[field] = var_value
+                    break
+            if (field in ("callsign", "name", "mode") and fields[field]) or \
+               (field not in ("callsign", "name", "mode") and fields[field] is not None):
+                break
+
+    # Combined-location fallback (only if city/county/state all still unset).
+    if fields["city"] is None and fields["county"] is None and fields["state"] is None:
+        for var_name, var_value in variables.items():
+            if not var_value:
+                continue
+            if any(hint in var_name for hint in _LOCATION_VARIABLE_HINTS):
+                parts = [p.strip() for p in var_value.split(",") if p.strip()]
+                if len(parts) >= 3:
+                    fields["city"], fields["county"], fields["state"] = parts[0], parts[1], parts[2]
+                elif len(parts) == 2:
+                    fields["city"], fields["state"] = parts[0], parts[1]
+                elif len(parts) == 1:
+                    fields["city"] = parts[0]
+                break
+
+    # Comments re-parse: if comments are present and any core field is still
+    # missing, re-run Spec A's plain-text parser over the comments string and
+    # merge in anything it produced.
+    used_comments_reparse = False
+    if fields["comments"]:
+        missing_core = (
+            not fields["name"]
+            or not fields["callsign"]
+            or not fields["mode"]
+            or fields["city"] is None
+            or fields["county"] is None
+            or fields["state"] is None
+        )
+        if missing_core:
+            reparse = parse_plain_text_message(fields["comments"], known_modes=known_modes)
+            for field in ("name", "callsign", "city", "county", "state", "mode"):
+                # Only fill if currently empty/None.
+                empty = (
+                    (field in ("name", "callsign", "mode") and not fields[field])
+                    or (field in ("city", "county", "state") and fields[field] is None)
+                )
+                if empty:
+                    reparse_value = reparse.get(field)
+                    if reparse_value:
+                        fields[field] = reparse_value
+                        used_comments_reparse = True
+
+    # Confidence.
+    have_core = bool(fields["callsign"] and fields["name"] and fields["mode"])
+    if have_core and not used_comments_reparse:
+        confidence = "high"
+    elif have_core and used_comments_reparse:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "name": fields["name"] or "",
+        "callsign": fields["callsign"] or "",
+        "city": fields["city"],
+        "county": fields["county"],
+        "state": fields["state"],
+        "mode": fields["mode"] or "",
+        "comments": fields["comments"],
+        "latitude": fields["latitude"],
+        "longitude": fields["longitude"],
+        "confidence": confidence,
+    }
+
+
 def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> dict:
     """Parse a plain-text check-in body.
 
@@ -202,21 +393,21 @@ def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> 
 def parse_message(body: str, known_modes: set[str] | None = None) -> tuple[MessageType, dict]:
     """Detect message type and parse accordingly."""
     msg_type = detect_message_type(body)
-
+    if msg_type == MessageType.WINLINK_FORM:
+        return msg_type, parse_winlink_form_message(body, known_modes=known_modes)
     if msg_type == MessageType.FORM:
         return msg_type, parse_form_message(body)
-    elif msg_type == MessageType.PLAIN_TEXT:
+    if msg_type == MessageType.PLAIN_TEXT:
         return msg_type, parse_plain_text_message(body, known_modes=known_modes)
-    else:
-        return msg_type, {
-            "name": "",
-            "callsign": "",
-            "city": None,
-            "county": None,
-            "state": None,
-            "mode": "",
-            "comments": None,
-            "latitude": None,
-            "longitude": None,
-            "confidence": "low",
-        }
+    return msg_type, {
+        "name": "",
+        "callsign": "",
+        "city": None,
+        "county": None,
+        "state": None,
+        "mode": "",
+        "comments": None,
+        "latitude": None,
+        "longitude": None,
+        "confidence": "low",
+    }
