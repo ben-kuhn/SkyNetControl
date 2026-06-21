@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useToast } from "../context/ToastContext";
 import { fetchConfig, setConfigValue } from "../api/config";
+import { getFormsStatus, fetchFormsLibrary } from "../api/forms";
+import type { FormsStatus } from "../api/forms";
 import { Button } from "../components/Button";
 import { OAuthProviderList } from "../components/OAuthProviderList";
 import { SmtpForm } from "../components/SmtpForm";
@@ -251,6 +253,80 @@ function ConfigFieldRow({
   );
 }
 
+function WinlinkFormsSection() {
+  const { addToast } = useToast();
+  const [status, setStatus] = useState<FormsStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
+
+  const loadStatus = () => {
+    setLoading(true);
+    getFormsStatus()
+      .then(setStatus)
+      .catch(() => addToast("Failed to load Winlink Forms status", "error"))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  const handleFetch = async () => {
+    setFetching(true);
+    try {
+      const result = await fetchFormsLibrary();
+      setStatus((prev) => prev ? { ...prev, library_version: result.library_version, last_fetched_at: result.last_fetched_at } : prev);
+      addToast(`Forms library updated to version ${result.library_version}`, "success");
+    } catch {
+      addToast("Failed to fetch Winlink Standard Forms library", "error");
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  return (
+    <div className="bg-bg-surface border border-border rounded-lg p-6 mb-4">
+      <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-4">
+        Winlink Standard Forms
+      </h2>
+      {loading ? (
+        <div className="flex justify-center py-4">
+          <Spinner />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="text-sm text-text-secondary">
+            <div>
+              <span className="font-medium text-text-primary">Library version:</span>{" "}
+              {status?.library_version ?? <span className="text-text-muted">Not downloaded</span>}
+            </div>
+            <div>
+              <span className="font-medium text-text-primary">Last fetched:</span>{" "}
+              {status?.last_fetched_at
+                ? new Date(status.last_fetched_at).toLocaleString()
+                : <span className="text-text-muted">—</span>}
+            </div>
+          </div>
+          <div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleFetch}
+              loading={fetching}
+              title={status?.source_url ? `Download from ${status.source_url}` : "Fetch latest Winlink Standard Forms library"}
+            >
+              Fetch latest
+            </Button>
+            <div className="text-xs text-text-muted mt-1">
+              Downloads and extracts the Winlink Standard Forms library used for rendering form check-ins.
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ConfigPage() {
   const { addToast } = useToast();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -319,6 +395,8 @@ export function ConfigPage() {
       <OAuthProviderList />
 
       <SmtpForm />
+
+      <WinlinkFormsSection />
 
       {GROUPS.map((group) => {
         const visibleFields = CONFIG_FIELDS.filter(

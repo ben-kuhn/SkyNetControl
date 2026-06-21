@@ -131,7 +131,9 @@ export interface CheckIn {
     from_address: string;
     received_at: string;
     body: string;
+    message_type: "form" | "plain_text" | "unknown" | "winlink_form";
   } | null;
+  form_view_html: string | null;
 }
 
 export interface CallbookResult {

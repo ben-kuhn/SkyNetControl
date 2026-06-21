@@ -456,6 +456,24 @@ function EditCheckinModal({
             </div>
           </details>
         )}
+        {checkin?.form_view_html && (
+          <details
+            className="bg-bg-elevated/50 rounded-md border border-border"
+            open
+          >
+            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-text-secondary hover:text-text-primary">
+              Form view
+            </summary>
+            <div className="px-3 pb-3">
+              <iframe
+                sandbox=""
+                srcDoc={checkin.form_view_html}
+                className="w-full h-96 border border-border rounded bg-white"
+                title="Winlink form view"
+              />
+            </div>
+          </details>
+        )}
         <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
         <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         <Input label="Mode" value={form.mode} onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value }))} />
