@@ -33,6 +33,7 @@ from backend.config_mgmt.smtp_routes import smtp_router
 from backend.config_mgmt.test_routes import test_router
 from backend.config_mgmt.setup_routes import setup_router
 from backend.auth.recovery_routes import recovery_router
+from backend.modules.forms.routes import forms_router
 
 
 _DEFAULT_JWT_SECRET = "change-me-in-production"
@@ -282,6 +283,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(oauth_router, prefix="/api/admin")
     app.include_router(smtp_router, prefix="/api/admin")
     app.include_router(test_router, prefix="/api/admin")
+    app.include_router(forms_router)
     app.include_router(setup_router, prefix="/api/setup")
     app.include_router(recovery_router, prefix="/api")
 
