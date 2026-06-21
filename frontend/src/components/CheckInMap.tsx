@@ -27,7 +27,8 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const map = L.map(containerRef.current, {
+    const container = containerRef.current;
+    const map = L.map(container, {
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
       zoomControl: true,
@@ -37,7 +38,18 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
     L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 18 }).addTo(map);
     mapRef.current = map;
 
+    // If the container's parent settles to its real size *after* mount
+    // (flex layout still resolving, lazy-mounted tab, etc.), Leaflet
+    // initializes with a 0×0 viewport and never requests tiles — looks
+    // blank. invalidateSize on the next frame + on any future container
+    // resize keeps the tile grid in sync. ResizeObserver covers
+    // orientation changes on mobile too.
+    requestAnimationFrame(() => map.invalidateSize());
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(container);
+
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
     };
