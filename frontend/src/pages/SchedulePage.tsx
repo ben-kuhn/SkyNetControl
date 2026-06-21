@@ -664,7 +664,7 @@ export function SchedulePage() {
     const seasonsCall: Promise<Season[]> = editSessions
       ? fetchSeasons()
       : Promise.resolve([]);
-    Promise.all([fetchSessions({ status: "scheduled" }), seasonsCall])
+    Promise.all([fetchSessions(), seasonsCall])
       .then(([s, seas]) => {
         setSessions(s);
         setSeasons(seas);
@@ -676,6 +676,22 @@ export function SchedulePage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Split into upcoming vs. past so operators can scroll back to a
+  // finished net (e.g. to finalize its roster) — page previously fetched
+  // only `status=scheduled` and hid every completed/cancelled session.
+  const { upcomingSessions, pastSessions } = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0]!;
+    const isUpcoming = (s: Session) =>
+      s.status === "scheduled" && (s.end_date ?? s.start_date) >= today;
+    const upcoming = sessions
+      .filter(isUpcoming)
+      .sort((a, b) => a.start_date.localeCompare(b.start_date));
+    const past = sessions
+      .filter((s) => !isUpcoming(s))
+      .sort((a, b) => b.start_date.localeCompare(a.start_date));
+    return { upcomingSessions: upcoming, pastSessions: past };
+  }, [sessions]);
 
   const sortedSeasons = useMemo(
     () =>
@@ -740,14 +756,14 @@ export function SchedulePage() {
             <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-2">
               Upcoming sessions
             </h2>
-            {sessions.length === 0 ? (
+            {upcomingSessions.length === 0 ? (
               <p className="text-text-muted text-sm py-4">
                 No upcoming sessions scheduled.
                 {manageSeasons && " Create a season to auto-generate them."}
               </p>
             ) : (
               <div className="flex flex-col gap-3">
-                {sessions.map((session) => (
+                {upcomingSessions.map((session) => (
                   <SessionCard
                     key={session.id}
                     session={session}
@@ -758,6 +774,24 @@ export function SchedulePage() {
               </div>
             )}
           </section>
+
+          {pastSessions.length > 0 && (
+            <section className="mt-8">
+              <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-2">
+                Past sessions
+              </h2>
+              <div className="flex flex-col gap-3">
+                {pastSessions.map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    canEdit={editSessions}
+                    onEdit={() => setEditingSession(session)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
           {manageSeasons && (
             <section className="mt-8">
