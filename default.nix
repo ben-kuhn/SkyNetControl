@@ -29,6 +29,7 @@ python.pkgs.buildPythonApplication {
     jinja2
     prompt-toolkit
     pyyaml
+    bleach
   ];
 
   postInstall = ''
