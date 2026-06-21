@@ -11,6 +11,7 @@ from backend.modules.checkins.mailbox_reader import read_mailbox
 from backend.modules.checkins.models import (
     CheckIn,
     Member,
+    MessageType,
     ParseStatus,
 )
 from backend.modules.checkins.service import (
@@ -49,9 +50,32 @@ class CheckinUpdate(BaseModel):
     parse_status: ParseStatus | None = None
 
 
+def _render_winlink_form_view(body: str) -> str | None:
+    """Best-effort render a winlink form body. Never raises."""
+    import xml.etree.ElementTree as ET
+    from backend.modules.forms.render import render_form_view
+
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return None
+    template_filename = ""
+    df = root.find(".//form_parameters/display_form")
+    if df is not None and df.text:
+        template_filename = df.text.strip()
+    variables: dict[str, str] = {}
+    for var in root.findall(".//variables/var"):
+        name = (var.get("name") or "").strip()
+        if not name:
+            continue
+        variables[name] = (var.text or "").strip()
+    return render_form_view(template_filename, variables)
+
+
 def _checkin_to_response(checkin: CheckIn) -> dict:
     raw = checkin.raw_message
     raw_payload: dict | None
+    form_view_html: str | None = None
     if raw is None:
         raw_payload = None
     else:
@@ -60,7 +84,11 @@ def _checkin_to_response(checkin: CheckIn) -> dict:
             "from_address": raw.from_address,
             "received_at": raw.received_at.isoformat(),
             "body": raw.body,
+            "message_type": raw.message_type.value,
         }
+        if raw.message_type == MessageType.WINLINK_FORM:
+            form_view_html = _render_winlink_form_view(raw.body)
+
     return {
         "id": checkin.id,
         "session_id": checkin.session_id,
@@ -78,6 +106,7 @@ def _checkin_to_response(checkin: CheckIn) -> dict:
         "timing_status": checkin.timing_status.value,
         "is_new_member": checkin.is_new_member,
         "raw_message": raw_payload,
+        "form_view_html": form_view_html,
     }
 
 

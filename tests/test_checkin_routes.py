@@ -495,3 +495,105 @@ async def test_list_checkins_raw_message_null_for_manual(test_client, test_setti
     rows = response.json()
     manual_row = next(r for r in rows if r["callsign"] == "W0XYZ")
     assert manual_row["raw_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_winlink_form_checkin_response_includes_form_view_html(
+    test_client, test_settings, db_setup, tmp_path, monkeypatch
+):
+    """A winlink_form check-in surfaces form_view_html + raw_message.message_type."""
+    from backend.config import settings
+    from backend.modules.checkins.models import RawMessage, MessageType
+    from backend.modules.forms import library
+
+    # Make forms_library_dir resolve to a tmp dir + seed a fake template
+    # so the renderer returns the template path, not the KV fallback.
+    monkeypatch.setattr(settings, "state_dir", str(tmp_path))
+    library.clear_template_cache()
+    forms_dir = tmp_path / "forms"
+    forms_dir.mkdir()
+    (forms_dir / "Test_Check_in.html").write_text("<html><body>{callsign}</body></html>")
+
+    body = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters><display_form>Test_Check_in.html</display_form></form_parameters>
+  <variables>
+    <var name="Callsign">KU0HN</var>
+    <var name="Name">Ben</var>
+    <var name="Mode">Voice</var>
+  </variables>
+</RMS_Express_Form>"""
+
+    with db_setup() as session:
+        raw = RawMessage(
+            message_id="<wlf@x>",
+            from_address="ku0hn@winlink.org",
+            received_at=datetime.now(tz=timezone.utc),
+            subject="check-in",
+            body=body,
+            message_type=MessageType.WINLINK_FORM,
+            parsed=True,
+        )
+        session.add(raw)
+        session.flush()
+        session.add(CheckIn(
+            session_id=1,
+            raw_message_id=raw.id,
+            callsign="KU0HN",
+            name="Ben",
+            mode="Voice",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        ))
+        session.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.get(
+        "/api/checkins/session/1",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    row = next(r for r in resp.json() if r["callsign"] == "KU0HN")
+    assert row["raw_message"]["message_type"] == "winlink_form"
+    assert row["form_view_html"] is not None
+    assert "KU0HN" in row["form_view_html"]
+
+
+@pytest.mark.asyncio
+async def test_non_winlink_checkin_response_has_null_form_view_html(
+    test_client, test_settings, db_setup
+):
+    from backend.modules.checkins.models import RawMessage, MessageType
+
+    with db_setup() as session:
+        raw = RawMessage(
+            message_id="<pt@x>",
+            from_address="w0abc@winlink.org",
+            received_at=datetime.now(tz=timezone.utc),
+            subject="check-in",
+            body="W0ABC, John, Denver, CO, Voice",
+            message_type=MessageType.PLAIN_TEXT,
+            parsed=True,
+        )
+        session.add(raw)
+        session.flush()
+        session.add(CheckIn(
+            session_id=1,
+            raw_message_id=raw.id,
+            callsign="W0ABC",
+            name="John",
+            mode="Voice",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        ))
+        session.commit()
+
+    token = create_access_token("W0NE", "admin", test_settings)
+    resp = await test_client.get(
+        "/api/checkins/session/1",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    row = next(r for r in resp.json() if r["callsign"] == "W0ABC")
+    assert row["raw_message"]["message_type"] == "plain_text"
+    assert row["form_view_html"] is None
