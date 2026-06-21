@@ -3,6 +3,16 @@
 let
   python = pkgs.python312;
   frontend = import ./frontend.nix { inherit pkgs; };
+  # Bake the running git SHA into the binary so the admin sidebar can
+  # surface "this is commit X" — gives the operator a way to confirm
+  # the deployed code matches what was pushed without shelling into the
+  # box. Falls back to "unknown" when built from a non-git source (CI
+  # tarball, archive, etc.); the runtime fallback to "dev" in
+  # backend/version.py handles `run-dev.sh`.
+  gitSha =
+    if builtins.pathExists ./.git
+    then pkgs.lib.substring 0 8 (pkgs.lib.commitIdFromGitRepo ./.git)
+    else "unknown";
 in
 python.pkgs.buildPythonApplication {
   pname = "skynetcontrol";
@@ -72,6 +82,7 @@ python.pkgs.buildPythonApplication {
   makeWrapperArgs = [
     "--set" "SKYNET_STATIC_DIR" "${placeholder "out"}/share/skynetcontrol/static"
     "--set" "ALEMBIC_CONFIG" "${placeholder "out"}/share/skynetcontrol/alembic.ini"
+    "--set" "SKYNET_GIT_SHA" gitSha
   ];
 
   meta = {

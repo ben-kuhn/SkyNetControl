@@ -90,6 +90,45 @@ async def test_security_headers_set_on_responses():
 
 
 @pytest.mark.asyncio
+async def test_version_endpoint_returns_version_and_git_sha(monkeypatch):
+    """The admin sidebar reads /api/version to surface the running SHA so
+    the operator can confirm a deploy actually rolled forward."""
+    monkeypatch.setenv("SKYNET_GIT_SHA", "abc12345")
+    # backend.version captures GIT_SHA at import time; reload so the
+    # monkeypatched env var actually shows up in the response.
+    import importlib
+
+    import backend.version
+
+    importlib.reload(backend.version)
+    settings = Settings(database_url="sqlite:///", jwt_secret_key="test-secret")
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/version")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["version"] == "0.1.0"
+        assert body["git_sha"] == "abc12345"
+
+
+@pytest.mark.asyncio
+async def test_version_endpoint_falls_back_to_dev_when_unset(monkeypatch):
+    monkeypatch.delenv("SKYNET_GIT_SHA", raising=False)
+    import importlib
+
+    import backend.version
+
+    importlib.reload(backend.version)
+    settings = Settings(database_url="sqlite:///", jwt_secret_key="test-secret")
+    app = create_app(settings=settings)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/version")
+        assert resp.json()["git_sha"] == "dev"
+
+
+@pytest.mark.asyncio
 async def test_csp_report_endpoint_accepts_violation_report():
     """The CSP header points at /api/csp-report; the endpoint must accept
     the standard `application/csp-report` envelope and respond 204 so the

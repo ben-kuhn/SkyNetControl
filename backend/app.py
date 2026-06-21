@@ -269,6 +269,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pass
         return {"status": "ok", "version": "0.1.0", "database": db_status}
 
+    @app.get("/api/version")
+    async def version():
+        # Public on purpose — lets the admin sidebar show "is the running
+        # binary actually the commit I just pushed?" without an extra
+        # auth round-trip. The SHA is already public on GitHub.
+        from backend.version import GIT_SHA, VERSION
+        return {"version": VERSION, "git_sha": GIT_SHA}
+
     # Register API routers
     app.include_router(auth_router, prefix="/api/auth")
     app.include_router(pat_router, prefix="/api/auth/tokens")

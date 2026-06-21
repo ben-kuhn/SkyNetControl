@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { NotificationBell } from "../components/NotificationBell";
+import { VersionLabel } from "../components/VersionLabel";
 import type { UserRole } from "../types";
 
 interface NavItem {
@@ -70,6 +71,7 @@ export function Sidebar() {
               </NavLink>
             </div>
           </div>
+          <VersionLabel />
           <button
             onClick={logout}
             className="w-full text-left px-2 py-1.5 text-sm text-text-muted hover:text-danger transition-colors rounded-md hover:bg-bg-elevated"
