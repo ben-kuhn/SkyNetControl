@@ -41,12 +41,11 @@ DEFAULT_NET_ROSTER: SeedRosterTemplate = {
         "{% for m in new_members %}Welcome to the {{ net_callsign }} Winlink Net, "
         "{{ m.name }} ({{ m.callsign }})!\n{% endfor %}"
     ),
-    # f62789139379 didn't touch comments_template; this is the original
-    # from f5b2383f6dd3 verbatim (no W0NE branding to genericize).
-    "comments_template": (
-        "{% for c in checkins %}{% if c.comments %}{{ c.callsign }} ({{ c.name }}): {{ c.comments }}\n"
-        "{% endif %}{% endfor %}"
-    ),
+    # Cleared by a91c4d3f5e02 — the per-row assembled table already
+    # includes each check-in's `comments`, so re-rendering them here just
+    # duplicated the output (backlog item 6). Operators who want a
+    # separate section can still set their own comments_template.
+    "comments_template": "",
     "footer_template": (
         "{% if next_week_preview %}Next week: {{ next_week_preview }}\n{% endif %}"
         "{% if map_url %}Check-in details: {{ session_url }}\n{% endif %}"
