@@ -20,6 +20,7 @@ class MessageType(str, enum.Enum):
     FORM = "form"
     PLAIN_TEXT = "plain_text"
     UNKNOWN = "unknown"
+    WINLINK_FORM = "winlink_form"
 
 
 class ParseStatus(str, enum.Enum):

@@ -209,3 +209,21 @@ def test_member_callsign_is_pk(db: Session):
     db.add(member2)
     with pytest.raises(Exception):
         db.commit()
+
+
+def test_winlink_form_message_type_persists(db: Session):
+    """A RawMessage with the new WINLINK_FORM enum value roundtrips through SQLite."""
+    msg = RawMessage(
+        message_id="<wlf-1@example>",
+        from_address="w0abc@winlink.org",
+        received_at=datetime.now(tz=timezone.utc),
+        subject="check-in",
+        body="<RMS_Express_Form><variables/></RMS_Express_Form>",
+        message_type=MessageType.WINLINK_FORM,
+        parsed=False,
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    assert msg.message_type == MessageType.WINLINK_FORM
+    assert msg.message_type.value == "winlink_form"
