@@ -203,11 +203,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # report-uri is deprecated in favour of report-to + Reporting-Endpoints,
     # but every current browser still honours it as a fallback; emit both
     # so a future browser that drops report-uri still calls our endpoint.
+    # cartocdn.com hosts the Leaflet map tiles referenced by
+    # frontend/src/components/CheckInMap.tsx — without it img-src 'self'
+    # blocks every tile and the map renders blank.
     csp = (
         "default-src 'self'; "
         f"script-src {script_src}; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
+        "img-src 'self' data: https://*.basemaps.cartocdn.com; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "

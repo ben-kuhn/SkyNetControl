@@ -81,6 +81,10 @@ async def test_security_headers_set_on_responses():
         # When the test runs without a static_dir, there's no index.html
         # and script-src is just 'self' — also no unsafe-inline.
         assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+        # Leaflet tile CDN must be allowed under img-src or the check-in
+        # map renders blank — see CheckInMap.tsx's TILE_URL.
+        img_src = csp.split("img-src")[1].split(";")[0]
+        assert "basemaps.cartocdn.com" in img_src
         # HSTS only when https — default app_base_url is http://localhost:8000.
         assert "strict-transport-security" not in resp.headers
 
