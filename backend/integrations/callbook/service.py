@@ -104,6 +104,30 @@ def _update_cache(db: Session, result: CallbookResult) -> None:
     db.commit()
 
 
+def is_callbook_configured(db: Session) -> bool:
+    """True iff at least one provider is enabled with both username and password.
+
+    Lets the route distinguish 'no callbook configured' (503) from 'callsign
+    not in any callbook' (404) — operator gets an actionable error instead
+    of the opaque 'not found' both used to produce (backlog item 4).
+    """
+    providers_json = get_config_value(db, "callbook.providers")
+    if not providers_json:
+        return False
+    try:
+        provider_names = json.loads(providers_json)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    for name in provider_names:
+        if name not in _PROVIDERS:
+            continue
+        username = get_config_value(db, f"callbook.{name}.username", "")
+        password = get_config_value(db, f"callbook.{name}.password", "")
+        if username and password:
+            return True
+    return False
+
+
 def lookup_callsign(db: Session, callsign: str) -> dict | None:
     callsign = callsign.upper()
 

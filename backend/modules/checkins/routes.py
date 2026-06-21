@@ -22,7 +22,7 @@ from backend.modules.checkins.service import (
     scan_and_import_messages,
     update_checkin,
 )
-from backend.integrations.callbook.service import lookup_callsign
+from backend.integrations.callbook.service import is_callbook_configured, lookup_callsign
 from backend.modules.schedule.models import NetSession, SessionStatus
 
 checkins_router = APIRouter(tags=["checkins"])
@@ -279,6 +279,11 @@ async def lookup_callsign_route(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
+    if not is_callbook_configured(db):
+        raise HTTPException(
+            status_code=503,
+            detail="Callbook lookup not configured — set a provider and credentials on the Config page.",
+        )
     result = lookup_callsign(db, callsign)
     if result is None:
         raise HTTPException(status_code=404, detail="Callsign not found in configured callbooks")

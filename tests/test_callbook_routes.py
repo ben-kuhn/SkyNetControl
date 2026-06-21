@@ -75,7 +75,9 @@ async def test_lookup_success(client, test_settings):
         "cached": False,
     }
 
-    with patch("backend.modules.checkins.routes.lookup_callsign", return_value=mock_result):
+    with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), patch(
+        "backend.modules.checkins.routes.lookup_callsign", return_value=mock_result
+    ):
         resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
 
     assert resp.status_code == 200
@@ -86,10 +88,24 @@ async def test_lookup_success(client, test_settings):
 async def test_lookup_not_found(client, test_settings):
     token = create_access_token("W0NC", "net_control", test_settings)
 
-    with patch("backend.modules.checkins.routes.lookup_callsign", return_value=None):
+    with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), patch(
+        "backend.modules.checkins.routes.lookup_callsign", return_value=None
+    ):
         resp = await client.get("/api/checkins/lookup/XXXXXX", cookies={"access_token": token})
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_lookup_503_when_not_configured(client, test_settings):
+    """Operator who hasn't configured a provider should get an actionable 503,
+    not the 404 'not found' that masks the real cause (backlog item 4)."""
+    token = create_access_token("W0NC", "net_control", test_settings)
+
+    resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
+
+    assert resp.status_code == 503
+    assert "Config" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -116,7 +132,9 @@ async def test_lookup_admin_allowed(client, test_settings):
         "cached": True,
     }
 
-    with patch("backend.modules.checkins.routes.lookup_callsign", return_value=mock_result):
+    with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), patch(
+        "backend.modules.checkins.routes.lookup_callsign", return_value=mock_result
+    ):
         resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
 
     assert resp.status_code == 200

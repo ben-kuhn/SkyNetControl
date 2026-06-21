@@ -34,7 +34,12 @@ const DELIVERY_BACKEND_OPTIONS: MultiSelectOption[] = [
   { value: "winlink", label: "Winlink" },
 ];
 
-function parseBackends(raw: string): string[] {
+const CALLBOOK_PROVIDER_OPTIONS: MultiSelectOption[] = [
+  { value: "hamqth", label: "HamQTH" },
+  { value: "qrz", label: "QRZ" },
+];
+
+function parseStringArray(raw: string): string[] {
   try {
     const v = JSON.parse(raw || "[]");
     return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
@@ -115,7 +120,7 @@ const CONFIG_FIELDS: ConfigField[] = [
     placeholder: "net-list@example.com",
     helpText: "Email address to send reminders and rosters to",
     visibleWhen: (v) =>
-      parseBackends(v["delivery.backends"] ?? "").includes("email"),
+      parseStringArray(v["delivery.backends"] ?? "").includes("email"),
   },
   {
     key: "delivery.groupsio.api_key",
@@ -125,7 +130,7 @@ const CONFIG_FIELDS: ConfigField[] = [
     helpText: "API key for posting to groups.io",
     secret: true,
     visibleWhen: (v) =>
-      parseBackends(v["delivery.backends"] ?? "").includes("groupsio"),
+      parseStringArray(v["delivery.backends"] ?? "").includes("groupsio"),
   },
   {
     key: "delivery.groupsio.group_name",
@@ -134,7 +139,7 @@ const CONFIG_FIELDS: ConfigField[] = [
     placeholder: "your-net",
     helpText: "Target group name on groups.io",
     visibleWhen: (v) =>
-      parseBackends(v["delivery.backends"] ?? "").includes("groupsio"),
+      parseStringArray(v["delivery.backends"] ?? "").includes("groupsio"),
   },
   {
     key: "delivery.winlink.target_address",
@@ -143,11 +148,58 @@ const CONFIG_FIELDS: ConfigField[] = [
     placeholder: "NET@winlink.org",
     helpText: "Winlink address to send reminders and rosters to",
     visibleWhen: (v) =>
-      parseBackends(v["delivery.backends"] ?? "").includes("winlink"),
+      parseStringArray(v["delivery.backends"] ?? "").includes("winlink"),
+  },
+  {
+    key: "callbook.providers",
+    label: "Enabled Callbook Providers",
+    group: "Callbook",
+    type: "multiselect",
+    options: CALLBOOK_PROVIDER_OPTIONS,
+    helpText:
+      "Providers tried in order when a check-in needs name/city resolution. Leave empty to disable callbook lookup.",
+  },
+  {
+    key: "callbook.hamqth.username",
+    label: "HamQTH Username",
+    group: "Callbook",
+    placeholder: "yourcall",
+    helpText: "HamQTH.com login (the callsign you registered with)",
+    visibleWhen: (v) =>
+      parseStringArray(v["callbook.providers"] ?? "").includes("hamqth"),
+  },
+  {
+    key: "callbook.hamqth.password",
+    label: "HamQTH Password",
+    group: "Callbook",
+    placeholder: "",
+    helpText: "HamQTH.com account password",
+    secret: true,
+    visibleWhen: (v) =>
+      parseStringArray(v["callbook.providers"] ?? "").includes("hamqth"),
+  },
+  {
+    key: "callbook.qrz.username",
+    label: "QRZ Username",
+    group: "Callbook",
+    placeholder: "yourcall",
+    helpText: "QRZ.com login (paid XML subscription required for lookups)",
+    visibleWhen: (v) =>
+      parseStringArray(v["callbook.providers"] ?? "").includes("qrz"),
+  },
+  {
+    key: "callbook.qrz.password",
+    label: "QRZ Password",
+    group: "Callbook",
+    placeholder: "",
+    helpText: "QRZ.com account password",
+    secret: true,
+    visibleWhen: (v) =>
+      parseStringArray(v["callbook.providers"] ?? "").includes("qrz"),
   },
 ];
 
-const GROUPS = ["Net Operations", "PAT", "Integrations", "Delivery"];
+const GROUPS = ["Net Operations", "PAT", "Integrations", "Delivery", "Callbook"];
 
 function ConfigFieldRow({
   field,
@@ -183,7 +235,7 @@ function ConfigFieldRow({
       </label>
     );
   } else if (type === "multiselect") {
-    const selected = parseBackends(value);
+    const selected = parseStringArray(value);
     const toggle = (v: string) => {
       const next = selected.includes(v)
         ? selected.filter((s) => s !== v)

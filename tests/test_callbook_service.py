@@ -131,6 +131,29 @@ def test_lookup_returns_none_when_no_providers_configured(db):
     assert result is None
 
 
+def test_is_callbook_configured_false_when_empty(db):
+    from backend.integrations.callbook.service import is_callbook_configured
+
+    assert is_callbook_configured(db) is False
+
+
+def test_is_callbook_configured_false_when_credentials_missing(db):
+    from backend.integrations.callbook.service import is_callbook_configured
+
+    _set_config(db, "callbook.providers", json.dumps(["hamqth"]))
+    # username and password not set
+    assert is_callbook_configured(db) is False
+
+
+def test_is_callbook_configured_true_when_provider_has_credentials(db):
+    from backend.integrations.callbook.service import is_callbook_configured
+
+    _set_config(db, "callbook.providers", json.dumps(["hamqth"]))
+    _set_config(db, "callbook.hamqth.username", "user")
+    _set_config(db, "callbook.hamqth.password", "pass")
+    assert is_callbook_configured(db) is True
+
+
 def test_lookup_returns_none_when_all_providers_fail(db):
     from backend.integrations.callbook.service import lookup_callsign
 
