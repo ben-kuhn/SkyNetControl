@@ -45,3 +45,15 @@ def test_decode_wrong_secret(auth_settings):
     )
     payload = decode_access_token(token, settings=wrong_settings)
     assert payload is None
+
+
+def test_jwt_carries_is_admin():
+    from backend.auth.models import User, UserRole
+    from backend.auth.service import create_access_token, decode_access_token
+    from backend.config import Settings
+    settings = Settings(jwt_secret_key="x" * 32)
+    user = User(callsign="W0ADM", oidc_subject="s", name="A",
+                role=UserRole.ADMIN, is_admin=True, token_version=0)
+    tok = create_access_token(user, settings=settings)
+    payload = decode_access_token(tok, settings=settings)
+    assert payload["is_admin"] is True

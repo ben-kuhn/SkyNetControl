@@ -3,10 +3,14 @@ import ipaddress
 import logging
 import socket
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Union
 from urllib.parse import urlparse
 
 import httpx
 from jose import JWTError, jwt
+
+if TYPE_CHECKING:
+    from backend.auth.models import User
 
 from backend.auth.providers import (
     FIXED_PROVIDERS,
@@ -23,22 +27,44 @@ logger = logging.getLogger(__name__)
 
 
 def create_access_token(
-    callsign: str,
-    role: str,
-    settings: Settings,
-    token_version: int = 0,
+    callsign: Union[str, "User", None] = None,
+    role: Union[str, Settings, None] = None,
+    settings: Union[Settings, None] = None,
+    token_version: int = None,
 ) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
+    # Support both old (callsign, role, settings) and new (user, settings=settings) calling styles
+    from backend.auth.models import User
+
+    if isinstance(callsign, User):
+        # New style: user object as first positional argument
+        # settings could be passed as second positional (role param) or as keyword
+        actual_callsign = callsign.callsign
+        actual_role = callsign.role
+        actual_token_version = callsign.token_version
+        actual_is_admin = callsign.is_admin
+        actual_settings = role if isinstance(role, Settings) else settings
+    else:
+        # Old style: individual parameters (for backwards compatibility)
+        actual_callsign = callsign
+        actual_role = role if isinstance(role, str) else None
+        actual_token_version = token_version if token_version is not None else 0
+        actual_is_admin = None  # Not available in old style
+        actual_settings = settings if isinstance(settings, Settings) else (role if isinstance(role, Settings) else None)
+
+    expire = datetime.now(timezone.utc) + timedelta(minutes=actual_settings.jwt_expire_minutes)
     payload = {
-        "sub": callsign,
-        "role": role,
+        "sub": actual_callsign,
+        "role": actual_role,
         "exp": expire,
         # `tv` lets logout/role-change/delete invalidate every outstanding
         # token for this user by bumping users.token_version. See the
         # comparison in get_current_user.
-        "tv": token_version,
+        "tv": actual_token_version,
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    # Add is_admin if available
+    if actual_is_admin is not None:
+        payload["is_admin"] = actual_is_admin
+    return jwt.encode(payload, actual_settings.jwt_secret_key, algorithm=actual_settings.jwt_algorithm)
 
 
 def decode_access_token(token: str, settings: Settings) -> dict | None:

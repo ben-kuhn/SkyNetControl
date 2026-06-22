@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Enum, DateTime, Integer
+from sqlalchemy import String, Enum, DateTime, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
@@ -31,6 +31,12 @@ class User(Base):
     # populate cleanly on upgrade.
     token_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
+    )
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
