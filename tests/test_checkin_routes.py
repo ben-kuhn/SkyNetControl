@@ -202,6 +202,60 @@ async def test_update_checkin(test_client, test_settings, db_setup):
 
 
 @pytest.mark.asyncio
+async def test_delete_checkin(test_client, test_settings, db_setup):
+    with db_setup() as session:
+        checkin = CheckIn(
+            session_id=1,
+            callsign="W0SPAM",
+            name="Misparsed Entry",
+            mode="Winlink",
+            parse_status=ParseStatus.MANUAL_REVIEW,
+            timing_status=TimingStatus.ON_TIME,
+        )
+        session.add(checkin)
+        session.commit()
+        checkin_id = checkin.id
+
+    token = create_access_token("W0NC", "net_control", test_settings)
+    resp = await test_client.delete(
+        f"/api/checkins/{checkin_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 204
+
+    # Second delete is a 404, not a 500 — operator can press delete
+    # twice on a flaky network without breaking the page.
+    resp2 = await test_client.delete(
+        f"/api/checkins/{checkin_id}",
+        cookies={"access_token": token},
+    )
+    assert resp2.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_checkin_viewer_denied(test_client, test_settings, db_setup):
+    with db_setup() as session:
+        checkin = CheckIn(
+            session_id=1,
+            callsign="W0DEL",
+            name="x",
+            mode="Winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        )
+        session.add(checkin)
+        session.commit()
+        checkin_id = checkin.id
+
+    token = create_access_token("KD0TST", "viewer", test_settings)
+    resp = await test_client.delete(
+        f"/api/checkins/{checkin_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_approve_session(test_client, test_settings, db_setup):
     with db_setup() as session:
         checkin = CheckIn(

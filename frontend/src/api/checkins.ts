@@ -35,6 +35,10 @@ export async function updateCheckin(
   });
 }
 
+export async function deleteCheckin(checkinId: number): Promise<void> {
+  await apiFetch<void>(`/checkins/${checkinId}`, { method: "DELETE" });
+}
+
 export async function approveSession(sessionId: number): Promise<{ session_status: string; members_updated: number }> {
   return apiFetch(`/checkins/approve/${sessionId}`, { method: "POST" });
 }

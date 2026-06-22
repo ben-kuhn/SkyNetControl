@@ -1,6 +1,6 @@
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from backend.modules.checkins.models import (
 from backend.modules.checkins.service import (
     approve_session_checkins,
     create_manual_checkin,
+    delete_checkin,
     get_checkins_by_callsign,
     get_checkins_for_session,
     scan_and_import_messages,
@@ -232,6 +233,17 @@ async def update_checkin_route(
     if checkin is None:
         raise HTTPException(status_code=404, detail="Check-in not found")
     return _checkin_to_response(checkin)
+
+
+@checkins_router.delete("/{checkin_id}", status_code=204)
+async def delete_checkin_route(
+    checkin_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    if not delete_checkin(db, checkin_id):
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    return Response(status_code=204)
 
 
 @checkins_router.post("/approve/{session_id}")

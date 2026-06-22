@@ -12,6 +12,7 @@ import {
   fetchSessionCheckins,
   scanMailbox,
   createManualCheckin,
+  deleteCheckin,
   updateCheckin,
   approveSession,
   lookupCallsign,
@@ -110,12 +111,14 @@ function CheckinTable({
   selectedCheckinId,
   onSelectCheckin,
   onEdit,
+  onDelete,
 }: {
   checkins: CheckIn[];
   canEditCheckins: boolean;
   selectedCheckinId: number | null;
   onSelectCheckin: (id: number | null) => void;
   onEdit: (c: CheckIn) => void;
+  onDelete: (c: CheckIn) => void;
 }) {
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
 
@@ -141,7 +144,7 @@ function CheckinTable({
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Status</th>
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">Timing</th>
             <th className="text-left px-3 py-2.5 font-semibold text-text-muted text-xs uppercase tracking-wider border-b border-border">New</th>
-            {canEditCheckins && <th className="border-b border-border w-10"></th>}
+            {canEditCheckins && <th className="border-b border-border w-20"></th>}
           </tr>
         </thead>
         <tbody>
@@ -181,16 +184,28 @@ function CheckinTable({
                 </td>
                 {canEditCheckins && (
                   <td className="px-3 py-2.5">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onEdit(c); }}
-                      className="text-text-muted hover:text-accent transition-colors p-1 rounded"
-                      aria-label={`Edit check-in for ${c.callsign}`}
-                      title="Edit"
-                    >
-                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onEdit(c); }}
+                        className="text-text-muted hover:text-accent transition-colors p-1 rounded"
+                        aria-label={`Edit check-in for ${c.callsign}`}
+                        title="Edit"
+                      >
+                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(c); }}
+                        className="text-text-muted hover:text-danger transition-colors p-1 rounded"
+                        aria-label={`Delete check-in for ${c.callsign}`}
+                        title="Delete"
+                      >
+                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                        </svg>
+                      </button>
+                    </div>
                   </td>
                 )}
               </tr>
@@ -772,6 +787,16 @@ export function CheckInsPage() {
               selectedCheckinId={selectedCheckinId}
               onSelectCheckin={setSelectedCheckinId}
               onEdit={setEditingCheckin}
+              onDelete={async (c) => {
+                if (!window.confirm(`Delete check-in for ${c.callsign}? This can't be undone.`)) return;
+                try {
+                  await deleteCheckin(c.id);
+                  addToast(`Deleted check-in for ${c.callsign}`, "success");
+                  loadCheckins();
+                } catch {
+                  addToast("Failed to delete check-in", "error");
+                }
+              }}
             />
           </div>
           <div className="flex-1 min-h-[400px]">

@@ -315,6 +315,20 @@ def update_checkin(
     return checkin
 
 
+def delete_checkin(db: Session, checkin_id: int) -> bool:
+    """Remove a check-in row outright. Returns True on success, False if
+    no such row. Used by operators to scrub a misparsed/spam entry — the
+    underlying RawMessage is kept so a re-scan or manual re-import is
+    possible without re-importing the mailbox.
+    """
+    checkin = db.get(CheckIn, checkin_id)
+    if checkin is None:
+        return False
+    db.delete(checkin)
+    db.commit()
+    return True
+
+
 def approve_session_checkins(db: Session, session_id: int) -> None:
     """Approve all check-ins for a session: update Member records, mark session completed."""
     checkins = get_checkins_for_session(db, session_id)
