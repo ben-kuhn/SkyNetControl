@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session, optional_user_with_scope, require_role
 from backend.auth.models import User, UserRole
-from backend.config_mgmt.service import get_config_value
 from backend.modules.roster.models import RosterLog
 from backend.modules.schedule.models import (
     NetSeason,
@@ -36,6 +35,9 @@ class SeasonCreate(BaseModel):
     time: str | None = None  # "HH:MM" format
     is_week_long: bool = False
     activity_cadence: int = 2
+    # Optional per-season default NCO. Stamped onto every auto-generated
+    # session; nets that rotate NCOs leave this blank and assign per-session.
+    default_net_control_callsign: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -174,8 +176,8 @@ async def create_season(
     db.commit()
     db.refresh(season)
 
-    default_net_control = get_config_value(db, "default_net_control", default="")
-    generate_sessions(db, season, default_net_control=default_net_control or "")
+    nco = (body.default_net_control_callsign or "").strip().upper() or None
+    generate_sessions(db, season, default_net_control=nco)
 
     db.refresh(season)
     return _season_to_response(db, season)

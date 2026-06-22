@@ -49,6 +49,7 @@ export interface SeasonCreate {
   time: string | null;
   is_week_long: boolean;
   activity_cadence: number;
+  default_net_control_callsign: string | null;
 }
 
 export interface SessionCreate {

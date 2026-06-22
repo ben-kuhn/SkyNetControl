@@ -41,7 +41,7 @@ def test_generate_weekly_sessions(db: Session):
     db.add(season)
     db.commit()
 
-    sessions = generate_sessions(db, season, default_net_control="W0NE")
+    sessions = generate_sessions(db, season)
 
     assert len(sessions) == 5  # Sep 3, 10, 17, 24, Oct 1
     # First session is regular, second is activity, alternating
@@ -53,8 +53,32 @@ def test_generate_weekly_sessions(db: Session):
 
     for s in sessions:
         assert s.status == SessionStatus.SCHEDULED
-        assert s.net_control_callsign == "W0NE"
+        # No NCO passed in → auto-generated sessions ship unassigned.
+        assert s.net_control_callsign is None
         assert s.season_id == season.id
+
+
+def test_generate_sessions_with_default_nco(db: Session):
+    """Operator picks a per-season default NCO on the create form; every
+    auto-generated session is stamped with it. Nets that rotate NCOs
+    leave it None (see test_generate_sessions above)."""
+    season = NetSeason(
+        name="Fall 2026",
+        start_date=date(2026, 9, 3),
+        end_date=date(2026, 9, 17),
+        day_of_week=3,
+        time=time(19, 0),
+        is_week_long=False,
+        activity_cadence=2,
+    )
+    db.add(season)
+    db.commit()
+
+    sessions = generate_sessions(db, season, default_net_control="KD0NCO")
+
+    assert len(sessions) >= 1
+    for s in sessions:
+        assert s.net_control_callsign == "KD0NCO"
 
 
 def test_generate_sessions_correct_dates(db: Session):
@@ -70,7 +94,7 @@ def test_generate_sessions_correct_dates(db: Session):
     db.add(season)
     db.commit()
 
-    sessions = generate_sessions(db, season, default_net_control="W0NE")
+    sessions = generate_sessions(db, season)
 
     assert len(sessions) == 3
     assert sessions[0].start_date == date(2026, 9, 3)
@@ -91,7 +115,7 @@ def test_generate_sessions_default_grace_period(db: Session):
     db.add(season)
     db.commit()
 
-    sessions = generate_sessions(db, season, default_net_control="W0NE")
+    sessions = generate_sessions(db, season)
 
     assert len(sessions) == 1
     assert sessions[0].grace_period_hours == 24.0
@@ -110,7 +134,7 @@ def test_generate_week_long_sessions(db: Session):
     db.add(season)
     db.commit()
 
-    sessions = generate_sessions(db, season, default_net_control="W0NE")
+    sessions = generate_sessions(db, season)
 
     assert len(sessions) == 3  # 3 weeks: Jun 1-7, Jun 8-14, Jun 15-21
     assert sessions[0].start_date == date(2026, 6, 1)
@@ -174,7 +198,7 @@ def test_list_sessions_no_filter(db: Session):
     )
     db.add(season)
     db.commit()
-    generate_sessions(db, season, default_net_control="W0NE")
+    generate_sessions(db, season)
 
     create_session(
         db,
@@ -198,7 +222,7 @@ def test_list_sessions_filter_by_season(db: Session):
     )
     db.add(season)
     db.commit()
-    generate_sessions(db, season, default_net_control="W0NE")
+    generate_sessions(db, season)
 
     create_session(
         db,

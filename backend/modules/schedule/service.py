@@ -88,9 +88,13 @@ def update_session(
 def generate_sessions(
     db: Session,
     season: NetSeason,
-    default_net_control: str,
+    default_net_control: str | None = None,
     default_grace_period_hours: float = 24.0,
 ) -> list[NetSession]:
+    # default_net_control is the operator's per-season choice (asked on
+    # the create-season form), NOT derived from the net-callsign config.
+    # A net that rotates NCOs every week can leave it None and assign
+    # each session individually.
     sessions: list[NetSession] = []
 
     if season.is_week_long:
@@ -107,7 +111,7 @@ def generate_sessions(
 
 def _generate_weekly_sessions(
     season: NetSeason,
-    default_net_control: str,
+    default_net_control: str | None,
     default_grace_period_hours: float,
 ) -> list[NetSession]:
     sessions: list[NetSession] = []
@@ -146,7 +150,7 @@ def _generate_weekly_sessions(
 
 def _generate_week_long_sessions(
     season: NetSeason,
-    default_net_control: str,
+    default_net_control: str | None,
     default_grace_period_hours: float,
 ) -> list[NetSession]:
     sessions: list[NetSession] = []

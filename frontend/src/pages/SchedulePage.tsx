@@ -179,6 +179,7 @@ function CreateSeasonModal({
     day_of_week: "0",
     time: "19:00",
     activity_cadence: "2",
+    default_net_control_callsign: "",
   };
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
@@ -203,6 +204,8 @@ function CreateSeasonModal({
         day_of_week: form.is_week_long ? null : Number(form.day_of_week),
         time: form.is_week_long ? null : form.time || null,
         activity_cadence: Number(form.activity_cadence),
+        default_net_control_callsign:
+          form.default_net_control_callsign.trim() || null,
       });
       addToast("Season created", "success");
       setForm(emptyForm);
@@ -294,6 +297,19 @@ function CreateSeasonModal({
         <p className="text-xs text-text-muted -mt-1">
           0 = no activities. Otherwise every Nth session is an activity (the
           second session in each block of N).
+        </p>
+
+        <Input
+          label="Default net control operator (optional)"
+          placeholder="KD0NCO"
+          value={form.default_net_control_callsign}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, default_net_control_callsign: e.target.value }))
+          }
+        />
+        <p className="text-xs text-text-muted -mt-1">
+          Stamped onto every session in this season. Leave blank if NCOs
+          rotate — you can set them per-session instead.
         </p>
 
         <div className="flex justify-end gap-2 mt-2">

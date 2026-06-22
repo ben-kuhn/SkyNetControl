@@ -55,7 +55,7 @@ const CONFIG_FIELDS: ConfigField[] = [
     group: "Net Operations",
     placeholder: "WAØXYZ",
     helpText:
-      "Your net's callsign — used as the default net-control assignment for new sessions and as {{ net_callsign }} in templates",
+      "Your net's club callsign — used as {{ net_callsign }} in templates. Not the per-session net control operator (set that per-season on the create-season form, or per-session on each session).",
     mono: true,
   },
   {
