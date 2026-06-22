@@ -302,5 +302,18 @@ async def delete_season(
     season = db.get(NetSeason, season_id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
+
+    # Detach completed sessions: they outlive the season as standalone
+    # rows so historical rosters / check-ins stay intact. Scheduled and
+    # cancelled sessions are dropped since they reflect the (now-deleted)
+    # plan, not anything that actually happened on the air.
+    db.query(NetSession).filter(
+        NetSession.season_id == season_id,
+        NetSession.status == SessionStatus.COMPLETED,
+    ).update({NetSession.season_id: None}, synchronize_session=False)
+    db.query(NetSession).filter(
+        NetSession.season_id == season_id,
+    ).delete(synchronize_session=False)
+
     db.delete(season)
     db.commit()

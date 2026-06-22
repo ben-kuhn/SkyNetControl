@@ -40,7 +40,10 @@ class NetSeason(Base):
     is_week_long: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     activity_cadence: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
 
-    sessions: Mapped[list["NetSession"]] = relationship(back_populates="season", cascade="all, delete-orphan")
+    # No automatic cascade — the delete-season route preserves completed
+    # sessions by detaching them (season_id = NULL) and explicitly deletes
+    # the rest. `all, delete-orphan` would force all-or-nothing.
+    sessions: Mapped[list["NetSession"]] = relationship(back_populates="season")
 
 
 class NetSession(Base):

@@ -549,3 +549,54 @@ async def test_list_sessions_pending_user_sees_only_completed(test_client, test_
     body = resp.json()
     scheduled = [s for s in body if s["status"] == "scheduled"]
     assert len(scheduled) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_season_preserves_completed_sessions(test_client, test_settings, db_setup):
+    """Operator expectation: dropping a season is a planning cleanup, not
+    a history wipe. Completed sessions survive (orphaned, season_id=None);
+    scheduled and cancelled sessions go with the season."""
+    from backend.modules.schedule.models import NetSession, SessionStatus
+
+    token = create_access_token("W0NE", "admin", test_settings)
+
+    season_resp = await test_client.post(
+        "/api/schedule/seasons",
+        json={
+            "name": "Fall 2026",
+            "start_date": "2026-09-03",
+            "end_date": "2026-10-01",
+            "day_of_week": 3,
+            "time": "19:00",
+        },
+        cookies={"access_token": token},
+    )
+    season_id = season_resp.json()["id"]
+
+    with db_setup() as session:
+        rows = session.query(NetSession).filter_by(season_id=season_id).order_by(NetSession.start_date).all()
+        # First session is the one we ran; mark it completed.
+        completed_id = rows[0].id
+        rows[0].status = SessionStatus.COMPLETED
+        # Second session got cancelled.
+        cancelled_id = rows[1].id
+        rows[1].status = SessionStatus.CANCELLED
+        # Remaining stay scheduled.
+        scheduled_ids = {r.id for r in rows[2:]}
+        session.commit()
+
+    resp = await test_client.delete(
+        f"/api/schedule/seasons/{season_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 204
+
+    with db_setup() as session:
+        # Completed survives, detached.
+        survivor = session.query(NetSession).filter_by(id=completed_id).one()
+        assert survivor.season_id is None
+        assert survivor.status == SessionStatus.COMPLETED
+        # Cancelled and scheduled are gone.
+        assert session.query(NetSession).filter_by(id=cancelled_id).first() is None
+        for sid in scheduled_ids:
+            assert session.query(NetSession).filter_by(id=sid).first() is None
