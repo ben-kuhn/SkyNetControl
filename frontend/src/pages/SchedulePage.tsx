@@ -703,11 +703,17 @@ export function SchedulePage() {
   );
 
   const handleDeleteSeason = async (season: Season) => {
-    if (
-      !window.confirm(
-        `Delete season "${season.name}" and its ${season.sessions.length} session(s)? This cannot be undone.`,
-      )
-    ) {
+    const completedCount = season.sessions.filter((s) => s.status === "completed").length;
+    const upcomingCount = season.sessions.length - completedCount;
+    const lines = [`Delete season "${season.name}"?`, ""];
+    if (upcomingCount > 0) {
+      lines.push(`• ${upcomingCount} upcoming session(s) will be deleted.`);
+    }
+    if (completedCount > 0) {
+      lines.push(`• ${completedCount} completed session(s) will be kept as standalone history.`);
+    }
+    lines.push("", "This cannot be undone.");
+    if (!window.confirm(lines.join("\n"))) {
       return;
     }
     try {
