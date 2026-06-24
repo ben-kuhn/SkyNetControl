@@ -340,7 +340,7 @@ async def test_get_modes_returns_default(test_client, test_settings):
     assert isinstance(modes, list)
     assert "Voice" in modes
     assert "Winlink" in modes
-    assert len(modes) == 12
+    assert "VARA" in modes
 
 
 @pytest.mark.asyncio

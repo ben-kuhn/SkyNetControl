@@ -28,8 +28,16 @@ def test_get_checkin_modes_default(db):
     modes = get_checkin_modes(db)
     assert "Voice" in modes
     assert "Winlink" in modes
+    assert "VARA" in modes
     assert "VARA FM" in modes
-    assert len(modes) == 12
+    assert "Packet" in modes
+    assert "PACTOR" in modes
+    # Redundant names that the normalizer collapses must not be in the
+    # default list — "VARA HF" is just "VARA"; baud-rate-qualified Packet
+    # variants all collapse to "Packet".
+    assert "VARA HF" not in modes
+    assert "1200-baud Packet" not in modes
+    assert "9k6 Packet" not in modes
 
 
 def test_get_checkin_modes_custom(db):
@@ -50,4 +58,5 @@ def test_get_checkin_modes_invalid_json(db):
     db.commit()
 
     modes = get_checkin_modes(db)
-    assert len(modes) == 12
+    assert "Voice" in modes
+    assert "VARA" in modes
