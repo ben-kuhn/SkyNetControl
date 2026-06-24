@@ -24,6 +24,7 @@ import backend.audit.models  # noqa: F401
 import backend.config_mgmt.models  # noqa: F401
 import backend.integrations.callbook.models  # noqa: F401
 import backend.integrations.delivery.models  # noqa: F401
+import backend.integrations.geocoder.models  # noqa: F401
 import backend.modules.activities.models  # noqa: F401
 import backend.modules.checkins.models  # noqa: F401
 import backend.modules.notifications.models  # noqa: F401

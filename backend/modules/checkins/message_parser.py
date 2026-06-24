@@ -14,7 +14,7 @@ _TACTICAL_SUFFIX_RE = re.compile(r"-\d{1,3}$")
 _VIA_PREFIX_RE = re.compile(r"\bvia\s+$", re.IGNORECASE)
 
 # Form fields we look for (case-insensitive)
-FORM_FIELDS = {"name", "callsign", "city", "county", "state", "mode", "comments", "latitude", "longitude"}
+FORM_FIELDS = {"name", "callsign", "city", "county", "state", "mode", "comments", "latitude", "longitude", "grid"}
 REQUIRED_FORM_FIELDS = {"name", "callsign", "mode"}
 
 
@@ -80,6 +80,7 @@ def parse_form_message(body: str) -> dict:
         "comments": fields.get("comments"),
         "latitude": latitude,
         "longitude": longitude,
+        "grid": fields.get("grid"),
         "confidence": confidence,
     }
 
@@ -142,6 +143,7 @@ def _degraded_extract(body: str) -> dict:
         "comments": None,
         "latitude": None,
         "longitude": None,
+        "grid": None,
         "confidence": "low",
     }
 
@@ -173,6 +175,9 @@ _HEURISTIC_PATTERNS: dict[str, list[str]] = {
     "comments": ["comments", "comment", "notes", "message"],
     "latitude": ["latitude", "lat"],
     "longitude": ["longitude", "long", "lon"],
+    # `grid` matches `<grid>` (PAT) and `grid_square` form fields. Listed
+    # specific-first so `grid_square` wins if both were present.
+    "grid": ["grid_square", "grid", "locator", "maidenhead"],
 }
 
 _LOCATION_VARIABLE_HINTS = ["location", "qth"]
@@ -261,6 +266,7 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
         "comments": None,
         "latitude": None,
         "longitude": None,
+        "grid": None,
     }
 
     # Override pass.
@@ -366,6 +372,7 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
         "comments": fields["comments"],
         "latitude": fields["latitude"],
         "longitude": fields["longitude"],
+        "grid": fields["grid"],
         "confidence": confidence,
     }
 
@@ -422,6 +429,7 @@ def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> 
         "comments": comments,
         "latitude": None,
         "longitude": None,
+        "grid": None,
         "confidence": confidence,
     }
 
@@ -445,5 +453,6 @@ def parse_message(body: str, known_modes: set[str] | None = None) -> tuple[Messa
         "comments": None,
         "latitude": None,
         "longitude": None,
+        "grid": None,
         "confidence": "low",
     }

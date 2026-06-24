@@ -13,6 +13,11 @@ from backend.modules.checkins.models import (
     RawMessage,
     TimingStatus,
 )
+# Registering the geocode_cache table early — `_compute_checkin_fields`
+# uses it for the city/state -> lat/lon fallback, and test fixtures
+# create tables via Base.metadata.create_all which only sees models that
+# have been imported by the time it runs.
+from backend.integrations.geocoder.models import GeocodeCache  # noqa: F401
 from backend.modules.checkins.message_parser import parse_message
 from backend.config_mgmt.service import get_checkin_modes
 from backend.modules.schedule.models import NetSession, SessionStatus
@@ -153,6 +158,28 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
             # better than dropping the message entirely; flag for review.
             parse_status = ParseStatus.MANUAL_REVIEW
 
+    # Location fallback chain when the form didn't carry precise coords:
+    #   1. Maidenhead grid square (free, ~5 km accuracy for 6-char).
+    #   2. City + state via Nominatim (cached in geocode_cache).
+    # Both are best-effort — failure leaves lat/lon null and the row
+    # simply doesn't render on the map. We never overwrite explicit
+    # coordinates, since those are more accurate than either fallback.
+    latitude = fields.get("latitude")
+    longitude = fields.get("longitude")
+    if latitude is None or longitude is None:
+        from backend.utils.location import maidenhead_to_latlon
+        coords = maidenhead_to_latlon(fields.get("grid") or "")
+        if coords is not None:
+            latitude, longitude = coords
+    if latitude is None or longitude is None:
+        city = fields.get("city")
+        state = fields.get("state")
+        if city and state:
+            from backend.integrations.geocoder.service import geocode_city
+            coords = geocode_city(db, city, state)
+            if coords is not None:
+                latitude, longitude = coords
+
     return {
         "callsign": callsign,
         "name": fields.get("name", ""),
@@ -161,8 +188,8 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
         "state": fields.get("state"),
         "mode": fields.get("mode", ""),
         "comments": comments,
-        "latitude": fields.get("latitude"),
-        "longitude": fields.get("longitude"),
+        "latitude": latitude,
+        "longitude": longitude,
         "parse_status": parse_status,
         "timing_status": classify_timing(net_session, raw.received_at),
     }

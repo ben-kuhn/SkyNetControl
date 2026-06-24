@@ -18,6 +18,7 @@ import backend.auth.pat_models  # noqa: F401
 import backend.audit.models  # noqa: F401
 import backend.integrations.delivery.models  # noqa: F401
 import backend.integrations.callbook.models  # noqa: F401
+import backend.integrations.geocoder.models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

@@ -27,6 +27,16 @@ def _reset_rate_limiter():
     _reset_rate_limit()
 
 
+@pytest.fixture(autouse=True)
+def _stub_nominatim(monkeypatch):
+    """No test should make a real HTTP call to nominatim.openstreetmap.org.
+    Default to returning None (no match) so the city/state fallback in
+    `_compute_checkin_fields` becomes a no-op. Tests that specifically
+    exercise the geocoder cache override this with their own monkeypatch."""
+    from backend.integrations.geocoder import service as geocoder_service
+    monkeypatch.setattr(geocoder_service, "_call_nominatim", lambda *a, **kw: None)
+
+
 @pytest.fixture
 def test_settings():
     return Settings(database_url="sqlite:///", debug=True, jwt_secret_key="test-secret")
