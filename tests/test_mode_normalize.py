@@ -4,14 +4,17 @@ from backend.modules.checkins.mode_normalize import normalize_mode
 
 
 @pytest.mark.parametrize("text,expected", [
-    # VARA HF and its variations.
-    ("VARA HF", "VARA HF"),
-    ("VARA-HF", "VARA HF"),
-    ("HF VARA", "VARA HF"),
-    ("vara hf", "VARA HF"),
-    ("vara-hf", "VARA HF"),
-    ("vara_hf", "VARA HF"),
-    ("VARA", "VARA HF"),  # unmarked → HF (more common use)
+    # VARA (HF) and its variations. Canon is just "VARA" — there's no
+    # separate "VARA HF" product.
+    ("VARA", "VARA"),
+    ("VARA HF", "VARA"),
+    ("VARA-HF", "VARA"),
+    ("HF VARA", "VARA"),
+    ("vara hf", "VARA"),
+    ("vara-hf", "VARA"),
+    ("vara_hf", "VARA"),
+    # Real-world: "HF VARA gateway W1ABC" should still normalize to VARA.
+    ("HF VARA gateway W1ABC", "VARA"),
     # VARA FM and its variations.
     ("VARA FM", "VARA FM"),
     ("VARA-FM", "VARA FM"),
@@ -60,8 +63,8 @@ def test_empty_input():
     "FM VARA",
 ])
 def test_vara_paired_with_vhf_uhf_or_fm_means_vara_fm(text):
-    """VARA is never used on VHF or UHF — when those bands appear, it's
-    always VARA FM (the FM-side flavor)."""
+    """VARA itself only runs on HF — when VHF/UHF/FM appear, it's
+    always VARA FM (the separate FM-side product)."""
     assert normalize_mode(text) == "VARA FM"
 
 
@@ -71,10 +74,13 @@ def test_vara_paired_with_vhf_uhf_or_fm_means_vara_fm(text):
     "VARA-HF",
     "HF VARA",
     "vara",
+    "HF VARA gateway W1ABC",  # operator note about relay path
 ])
-def test_vara_alone_or_with_hf_means_vara_hf(text):
-    """Unmarked VARA is HF in practice, since FM is always explicit."""
-    assert normalize_mode(text) == "VARA HF"
+def test_vara_alone_or_with_hf_means_vara(text):
+    """Plain "VARA" is the canonical name — "HF" is the only band it
+    runs on, so the qualifier is redundant. Extra words (band, gateway,
+    callsigns) don't change the mode."""
+    assert normalize_mode(text) == "VARA"
 
 
 @pytest.mark.parametrize("text", [
