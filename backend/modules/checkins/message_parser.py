@@ -171,7 +171,10 @@ _HEURISTIC_PATTERNS: dict[str, list[str]] = {
     "city": ["city"],
     "county": ["county", "parish", "borough"],
     "state": ["state", "province"],
-    "mode": ["modeofcheckin", "mode"],  # specific first
+    # "session"/"bsession" carries the mode in real PAT Winlink Express
+    # XMLs (e.g. <session>VARA HF</session>); fall back to it after the
+    # explicit "mode" naming.
+    "mode": ["modeofcheckin", "mode", "session"],  # specific first
     "comments": ["comments", "comment", "notes", "message"],
     "latitude": ["latitude", "lat"],
     "longitude": ["longitude", "long", "lon"],

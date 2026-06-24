@@ -113,12 +113,17 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
     touch the CheckIn table — callers compose the new/updated row.
     """
     from backend.modules.checkins.message_parser import CALLSIGN_RE
+    from backend.modules.checkins.mode_normalize import normalize_mode
 
     configured_modes = get_checkin_modes(db)
     modes_set = {m.lower() for m in configured_modes}
     msg_type, fields = parse_message(raw.body, known_modes=modes_set)
     raw.message_type = msg_type
     raw.parsed = True
+
+    # Collapse mode variations ("VARA-HF", "HF VARA", "VHF VARA", etc.)
+    # onto canonical names so the check-in table groups cleanly.
+    fields["mode"] = normalize_mode(fields.get("mode") or "")
 
     body_callsign = fields.get("callsign", "").upper()
     confidence = fields.get("confidence", "low")
