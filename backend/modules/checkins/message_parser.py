@@ -185,6 +185,48 @@ def _parse_float_or_none(value: str) -> float | None:
         return None
 
 
+_RMS_FORM_RE = re.compile(
+    r"<RMS_Express_Form\b.*?</RMS_Express_Form\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def extract_form_xml(body: str) -> str | None:
+    """Return just the `<RMS_Express_Form>...</RMS_Express_Form>` chunk.
+
+    PAT writes B2F bodies as a human-readable form rendering, then the XML,
+    then a FormData key/value block. The whole body is not valid XML, so we
+    slice out just the form element before parsing.
+    """
+    if not body:
+        return None
+    match = _RMS_FORM_RE.search(body)
+    return match.group(0) if match else None
+
+
+def extract_form_variables(root: ET.Element) -> dict[str, str]:
+    """Pull form variables from a `<RMS_Express_Form>` root, lowercased.
+
+    Two shapes occur in the wild:
+      - `<var name="MsgSender">W9GM</var>` (older / hand-authored fixtures)
+      - `<msgsender>W9GM</msgsender>` (what PAT and Winlink Express emit)
+    Both are accepted; empty-string values are preserved.
+    """
+    variables: dict[str, str] = {}
+    container = root.find(".//variables")
+    if container is None:
+        return variables
+    for child in container:
+        if child.tag.lower() == "var":
+            name = (child.get("name") or "").strip().lower()
+        else:
+            name = child.tag.strip().lower()
+        if not name:
+            continue
+        variables[name] = (child.text or "").strip()
+    return variables
+
+
 def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -> dict:
     """Parse a Winlink Express form (`<RMS_Express_Form>` XML) check-in body.
 
@@ -194,8 +236,9 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
     if known_modes is None:
         known_modes = set()
 
+    xml_chunk = extract_form_xml(body) or body
     try:
-        root = ET.fromstring(body)
+        root = ET.fromstring(xml_chunk)
     except ET.ParseError:
         # Malformed XML — degrade to the plain-text path so the body is still
         # processed (low confidence, but not silently lost).
@@ -206,14 +249,7 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
     if df is not None and df.text:
         template_filename = df.text.strip()
 
-    # Lowercase variable names; preserve empty-string values (the spec
-    # treats "" as a present-but-empty signal distinct from missing).
-    variables: dict[str, str] = {}
-    for var in root.findall(".//variables/var"):
-        name = (var.get("name") or "").strip().lower()
-        if not name:
-            continue
-        variables[name] = (var.text or "").strip()
+    variables = extract_form_variables(root)
 
     fields: dict[str, str | float | None] = {
         "name": "",

@@ -188,6 +188,32 @@ def test_sender_callsign_used_when_body_matches(db, season_and_session):
     assert checkin.parse_status == ParseStatus.AUTO
 
 
+def test_sender_callsign_used_when_from_is_bare_callsign(db, season_and_session):
+    """PAT writes inbound B2F mail with `From: W9GM` (no @domain). The bare
+    local-part is the sender's Winlink account and must win over the body's
+    parsed callsign — historically the @-required check dropped it on the
+    floor and let the body's Organization line ("W0NE Winlink Net") win."""
+    _, net_session = season_and_session
+    raw = RawMessage(
+        message_id="BAREFROM001",
+        from_address="W9GM",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Winlink Check-in",
+        body=(
+            "Winlink Check-in\n"
+            "0a: Organization:\tW0NE Winlink Net\n"
+            "1c. From:\tW9GM\n"
+            "Ken, W9GM/8, Marquette, MI, USA, VARA HF\n"
+        ),
+        message_type=MessageType.PLAIN_TEXT,
+    )
+    db.add(raw)
+    db.commit()
+
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.callsign == "W9GM"
+
+
 def test_falls_back_to_body_when_sender_unparseable(db, season_and_session):
     """If the From: envelope has no @, fall back to the body's callsign and
     flag for review — better than dropping the message entirely."""

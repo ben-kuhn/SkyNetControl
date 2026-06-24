@@ -54,23 +54,19 @@ class CheckinUpdate(BaseModel):
 def _render_winlink_form_view(body: str) -> str | None:
     """Best-effort render a winlink form body. Never raises."""
     import xml.etree.ElementTree as ET
+    from backend.modules.checkins.message_parser import extract_form_variables, extract_form_xml
     from backend.modules.forms.render import render_form_view
 
+    xml_chunk = extract_form_xml(body) or body
     try:
-        root = ET.fromstring(body)
+        root = ET.fromstring(xml_chunk)
     except ET.ParseError:
         return None
     template_filename = ""
     df = root.find(".//form_parameters/display_form")
     if df is not None and df.text:
         template_filename = df.text.strip()
-    variables: dict[str, str] = {}
-    for var in root.findall(".//variables/var"):
-        name = (var.get("name") or "").strip()
-        if not name:
-            continue
-        variables[name] = (var.text or "").strip()
-    return render_form_view(template_filename, variables)
+    return render_form_view(template_filename, extract_form_variables(root))
 
 
 def _checkin_to_response(checkin: CheckIn) -> dict:

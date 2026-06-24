@@ -121,9 +121,20 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
     # actually transmitted, and the user wins when the body disagrees
     # (backlog item 5). The body's callsign drops to a comment in that case
     # so a "Ben sent on behalf of Alice" situation is still visible.
-    sender_callsign = (
-        raw.from_address.split("@")[0].upper() if "@" in raw.from_address else ""
-    )
+    #
+    # An @-style sender ("W0ABC@winlink.org") gives us the local-part directly.
+    # PAT-delivered B2F mail uses a bare-callsign `From:` ("W9GM"), so when
+    # there's no @, accept the value only if it looks like a callsign — that
+    # keeps junk values like "malformed-no-at-sign" falling through to the
+    # body-callsign path.
+    from backend.modules.checkins.message_parser import CALLSIGN_RE
+    raw_from = raw.from_address.strip()
+    if "@" in raw_from:
+        sender_callsign = raw_from.split("@", 1)[0].upper()
+    elif CALLSIGN_RE.fullmatch(raw_from.upper()):
+        sender_callsign = raw_from.upper()
+    else:
+        sender_callsign = ""
     comments = fields.get("comments")
     if sender_callsign:
         callsign = sender_callsign

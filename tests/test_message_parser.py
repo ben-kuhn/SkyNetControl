@@ -345,3 +345,54 @@ def test_parse_winlink_form_dispatched_by_parse_message():
     msg_type, fields = parse_message(CHECKIN_FORM_BODY, known_modes={"VHF Packet"})
     assert msg_type == MessageType.WINLINK_FORM
     assert fields["callsign"] == "KU0HN"
+
+
+# PAT-delivered B2F bodies are NOT pure XML — the human-readable form
+# rendering precedes the XML and a FormData key/value block follows it.
+# Variables also use element-tag-as-name (`<msgsender>W9GM</msgsender>`)
+# rather than `<var name="msgsender">W9GM</var>`. The parser must handle
+# both shapes.
+PAT_B2F_CHECKIN_BODY = """Winlink Check-in
+0. HEADER
+  0a: Organization:\tW0NE Winlink Net
+  0b: Subject:\tWinlink Check-in EXERCISE - W9GM - Home
+  1c. From:\tW9GM
+
+-------------------------------------------------------------
+4a COMMENTS:
+
+Ken, W9GM/8, Marquette, Marquette, MI, USA, VARA HF, 40M
+
+-------------------------------------------------------------
+
+<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters>
+    <display_form>Winlink_Check_In_Viewer.html</display_form>
+    <senders_callsign>W9GM</senders_callsign>
+  </form_parameters>
+  <variables>
+    <msgto>W0NE</msgto>
+    <msgsender>W9GM</msgsender>
+    <name>Ken Weigel</name>
+    <comments>Ken, W9GM/8, Marquette, Marquette, MI, USA, VARA HF, 40M</comments>
+    <session>VARA HF</session>
+    <testcall>W9GM</testcall>
+  </variables>
+</RMS_Express_Form>
+
+Sender:T=W9GM
+1c. From:T=W9GM
+"""
+
+
+def test_parse_winlink_form_pat_b2f_body_uses_xml_not_prose():
+    """A PAT B2F message body wraps XML in human-readable prose + form-data.
+    Parser must extract the XML region and read element-tag-as-name vars,
+    not fall through to plain-text and pick up the Organization callsign.
+    """
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    result = parse_winlink_form_message(PAT_B2F_CHECKIN_BODY, known_modes={"VARA HF"})
+    # Without the fix this returns 'W0NE' from the Organization line.
+    assert result["callsign"] == "W9GM"
+    assert result["name"] == "Ken Weigel"
