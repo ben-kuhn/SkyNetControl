@@ -13,7 +13,7 @@ from backend.modules.forms.fetch import (
     fetch_and_install,
 )
 
-forms_router = APIRouter(prefix="/api/config/forms", tags=["forms"])
+forms_router = APIRouter(prefix="/forms", tags=["forms"])
 
 
 @forms_router.get("/status")

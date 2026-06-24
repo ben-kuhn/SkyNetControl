@@ -12,9 +12,9 @@ export interface FormsFetchResult {
 }
 
 export async function getFormsStatus(): Promise<FormsStatus> {
-  return apiFetch("/api/config/forms/status");
+  return apiFetch("/config/forms/status");
 }
 
 export async function fetchFormsLibrary(): Promise<FormsFetchResult> {
-  return apiFetch("/api/config/forms/fetch", { method: "POST" });
+  return apiFetch("/config/forms/fetch", { method: "POST" });
 }

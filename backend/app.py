@@ -294,7 +294,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(oauth_router, prefix="/api/admin")
     app.include_router(smtp_router, prefix="/api/admin")
     app.include_router(test_router, prefix="/api/admin")
-    app.include_router(forms_router)
+    app.include_router(forms_router, prefix="/api/config")
     app.include_router(setup_router, prefix="/api/setup")
     app.include_router(recovery_router, prefix="/api")
 
