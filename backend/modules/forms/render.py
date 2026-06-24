@@ -11,11 +11,13 @@ running any JavaScript.
 Discovery note (2026-06-20): the real ``Standard_Forms.zip`` distributed
 at downloads.winlink.org was inspected. Both the initial and viewer
 check-in templates (``General Forms/Winlink_Check_In_Initial.html`` and
-``Winlink_Check_In_Viewer.html``) confirm ``{VarName}`` curly-brace tokens
-in ``<input value="...">`` attributes. No ``<var>`` element syntax was
-found. Templates that compute display values purely via JavaScript (e.g.
-the map/GPS functions) degrade gracefully to the key-value fallback when
-the substituted fields produce empty strings.
+``Winlink_Check_In_Viewer.html``) use both placeholder shapes: bare
+``{VarName}`` tokens inside ``<input value="...">`` attributes, and
+``{var VarName}`` tokens (with the literal ``var`` prefix) in visible
+body text. We substitute both. Templates that compute display values
+purely via JavaScript (e.g. the map/GPS functions) degrade gracefully
+to the key-value fallback when the substituted fields produce empty
+strings.
 """
 from __future__ import annotations
 
@@ -50,8 +52,12 @@ _ALLOWED_ATTRS = {
     "meta": ["charset", "name", "content", "http-equiv"],
 }
 
-# {VarName} placeholders, allowing alphanumeric + underscore.
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z0-9_]+)\}")
+# Two placeholder shapes occur in real Winlink templates: bare
+# ``{VarName}`` inside ``<input value="...">`` attributes, and the
+# ``{var VarName}`` form (with the literal ``var`` prefix and whitespace)
+# in visible body text. Accept either — lookup is case-insensitive on the
+# variable name regardless.
+_PLACEHOLDER_RE = re.compile(r"\{(?:var\s+)?([A-Za-z0-9_]+)\}", re.IGNORECASE)
 
 # Regex to strip <script>...</script> blocks (including content) before bleach.
 _SCRIPT_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)

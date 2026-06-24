@@ -20,6 +20,39 @@ def test_render_substitutes_into_template(tmp_path, monkeypatch):
     assert "Ben" in html
 
 
+def test_render_substitutes_var_prefix_placeholders(tmp_path, monkeypatch):
+    """The real Winlink templates put visible-text placeholders in
+    ``{var VarName}`` form (with the ``var`` prefix and a space), while
+    `<input value="...">` attributes use the bare ``{VarName}`` form.
+    Both shapes must substitute, and missing vars must produce empty
+    strings — not the literal token."""
+    from backend.modules.forms import library, render
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "state_dir", str(tmp_path))
+    library.clear_template_cache()
+    forms_dir = tmp_path / "forms"
+    forms_dir.mkdir()
+    (forms_dir / "Mixed.html").write_text(
+        "<html><body>"
+        "From: {var MsgSender} "
+        "To: {var MsgTo} "
+        "<input value=\"{Callsign}\"> "
+        "Missing: '{var DoesNotExist}'"
+        "</body></html>"
+    )
+
+    html = render.render_form_view(
+        "Mixed.html",
+        {"msgsender": "W9GM", "msgto": "W0NE", "callsign": "W9GM"},
+    )
+    assert html is not None
+    assert "W9GM" in html
+    assert "W0NE" in html
+    assert "{var" not in html
+    assert "Missing: ''" in html
+
+
 def test_render_sanitizes_script_tags(tmp_path, monkeypatch):
     from backend.modules.forms import library, render
     from backend.config import settings
