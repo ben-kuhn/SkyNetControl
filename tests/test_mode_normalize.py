@@ -13,8 +13,6 @@ from backend.modules.checkins.mode_normalize import normalize_mode
     ("vara hf", "VARA"),
     ("vara-hf", "VARA"),
     ("vara_hf", "VARA"),
-    # Real-world: "HF VARA gateway W1ABC" should still normalize to VARA.
-    ("HF VARA gateway W1ABC", "VARA"),
     # VARA FM and its variations.
     ("VARA FM", "VARA FM"),
     ("VARA-FM", "VARA FM"),
@@ -74,12 +72,24 @@ def test_vara_paired_with_vhf_uhf_or_fm_means_vara_fm(text):
     "VARA-HF",
     "HF VARA",
     "vara",
-    "HF VARA gateway W1ABC",  # operator note about relay path
 ])
 def test_vara_alone_or_with_hf_means_vara(text):
     """Plain "VARA" is the canonical name — "HF" is the only band it
-    runs on, so the qualifier is redundant. Extra words (band, gateway,
-    callsigns) don't change the mode."""
+    runs on, so the qualifier is redundant."""
+    assert normalize_mode(text) == "VARA"
+
+
+@pytest.mark.parametrize("text", [
+    "HF VARA gateway W1ABC",
+    "VARA via N0XYZ",
+    "VARA HF — relayed through KG4QWE-10",
+    "vara hf, comments: hello net",
+])
+def test_vara_with_arbitrary_trailing_noise_still_normalizes(text):
+    """Operators routinely mash gateway callsigns or free-form comments
+    into the mode field. The normalizer just looks for the recognized
+    protocol token ("vara") and ignores everything else — it doesn't
+    pattern-match on any specific callsign or word."""
     assert normalize_mode(text) == "VARA"
 
 

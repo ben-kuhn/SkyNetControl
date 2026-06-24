@@ -47,7 +47,7 @@ def normalize_mode(text: str) -> str:
         normalize_mode("VARA HF") -> "VARA"
         normalize_mode("vara-hf") -> "VARA"
         normalize_mode("HF VARA") -> "VARA"
-        normalize_mode("HF VARA gateway W1ABC") -> "VARA"
+        normalize_mode("HF VARA, via some gateway") -> "VARA"  # extra tokens ignored
         normalize_mode("VHF VARA") -> "VARA FM"
         normalize_mode("VARA-FM") -> "VARA FM"
         normalize_mode("VHF Packet") -> "Packet"
