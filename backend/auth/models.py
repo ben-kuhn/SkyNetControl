@@ -1,13 +1,15 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Enum, DateTime, Integer, Boolean
+from sqlalchemy import String, DateTime, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
 
 
 class UserRole(str, enum.Enum):
+    """Kept for test backward-compat until Task 4 removes it."""
+
     ADMIN = "admin"
     NET_CONTROL = "net_control"
     VIEWER = "viewer"
@@ -21,7 +23,9 @@ class User(Base):
     callsign: Mapped[str] = mapped_column(String(20), primary_key=True)
     oidc_subject: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
+    # role column removed in multi-net cutover migration (Task 3).
+    # is_pending and is_deleted replace role='pending' and role='deleted'.
+    # is_admin already existed (added in Task 2).
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pending_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # JWT invalidation: incremented on logout, role change, and account
@@ -33,6 +37,18 @@ class User(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    is_pending: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    is_deleted: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
