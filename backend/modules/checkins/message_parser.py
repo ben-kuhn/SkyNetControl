@@ -417,6 +417,20 @@ def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> 
     city, county, state = _assign_location(location_segments)
     mode, comments = _match_known_mode(trailing, known_modes)
 
+    # `_match_known_mode` is strict — the mode token has to be a prefix of
+    # the trailing segment. Many real check-ins put the band ("HF") in
+    # front of the protocol and a relay/gateway note after it, which the
+    # prefix match can't see. Fall back to the canonicalizer: if it spots
+    # a recognized protocol token anywhere in the trailing segment, take
+    # that. The original trailing is discarded rather than kept as a
+    # comment, since band/gateway noise isn't useful data to surface.
+    if not mode:
+        from backend.modules.checkins.mode_normalize import CANONICAL_MODES, normalize_mode
+        normalized = normalize_mode(trailing)
+        if normalized in CANONICAL_MODES:
+            mode = normalized
+            comments = None
+
     if callsign and name and mode:
         confidence = "medium"
     else:

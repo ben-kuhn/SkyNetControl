@@ -215,6 +215,20 @@ def test_parse_plain_text_canonical_mode_casing_preserved():
     assert result["mode"] == "VHF Packet"
 
 
+def test_parse_plain_text_mode_canonicalizer_fallback():
+    """When the strict prefix match fails because of a leading band token
+    or trailing gateway/comment noise, fall back to the canonicalizer so
+    the recognized protocol still wins. Band/gateway noise is *not* kept
+    as a comment — it isn't useful data to surface in the check-in row.
+    """
+    body = "Alice, W1ABC, Somewhere, Some County, ST, USA, HF VARA gateway W2XYZ"
+    result = parse_plain_text_message(body, known_modes={"VARA", "VARA FM"})
+    assert result["mode"] == "VARA"
+    assert result["callsign"] == "W1ABC"
+    assert result["name"] == "Alice"
+    assert result["comments"] is None
+
+
 CHECKIN_FORM_BODY = """<?xml version="1.0"?>
 <RMS_Express_Form>
   <form_parameters>

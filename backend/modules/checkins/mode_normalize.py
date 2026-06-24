@@ -25,6 +25,12 @@ ARDOP = "ARDOP"
 MERCURY = "Mercury"
 WINMOR = "WINMOR"
 
+# The values normalize_mode produces as a canonical match (i.e. anything
+# other than "input passed through unchanged"). Callers that need to know
+# whether the normalizer actually recognized a protocol can test
+# `normalized in CANONICAL_MODES`.
+CANONICAL_MODES = frozenset({VARA, VARA_FM, PACKET, PACTOR, ARDOP, MERCURY, WINMOR})
+
 # Tokens that imply "FM-side VARA" when paired with VARA. VARA itself
 # is never used on VHF/UHF — those bands always mean VARA FM.
 _FM_TOKENS = {"fm", "vhf", "uhf"}
