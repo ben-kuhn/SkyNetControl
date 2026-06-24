@@ -101,8 +101,14 @@ def is_new_member(db: Session, callsign: str) -> bool:
     return db.get(Member, callsign) is None
 
 
-def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -> CheckIn:
-    """Parse a RawMessage and create a CheckIn record."""
+def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSession) -> dict:
+    """Run the parser + sender-callsign resolution against a RawMessage and
+    return the field values for the corresponding CheckIn. Mutates ``raw``
+    to record the detected message_type and the parsed flag, but does not
+    touch the CheckIn table — callers compose the new/updated row.
+    """
+    from backend.modules.checkins.message_parser import CALLSIGN_RE
+
     configured_modes = get_checkin_modes(db)
     modes_set = {m.lower() for m in configured_modes}
     msg_type, fields = parse_message(raw.body, known_modes=modes_set)
@@ -111,11 +117,9 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
 
     body_callsign = fields.get("callsign", "").upper()
     confidence = fields.get("confidence", "low")
-
-    if confidence == "high" or confidence == "medium":
-        parse_status = ParseStatus.AUTO
-    else:
-        parse_status = ParseStatus.MANUAL_REVIEW
+    parse_status = (
+        ParseStatus.AUTO if confidence in ("high", "medium") else ParseStatus.MANUAL_REVIEW
+    )
 
     # Sender (From: header) is authoritative — it's the Winlink account that
     # actually transmitted, and the user wins when the body disagrees
@@ -127,7 +131,6 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
     # there's no @, accept the value only if it looks like a callsign — that
     # keeps junk values like "malformed-no-at-sign" falling through to the
     # body-callsign path.
-    from backend.modules.checkins.message_parser import CALLSIGN_RE
     raw_from = raw.from_address.strip()
     if "@" in raw_from:
         sender_callsign = raw_from.split("@", 1)[0].upper()
@@ -135,6 +138,7 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
         sender_callsign = raw_from.upper()
     else:
         sender_callsign = ""
+
     comments = fields.get("comments")
     if sender_callsign:
         callsign = sender_callsign
@@ -149,29 +153,113 @@ def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -
             # better than dropping the message entirely; flag for review.
             parse_status = ParseStatus.MANUAL_REVIEW
 
-    timing = classify_timing(net_session, raw.received_at)
-    new_member = is_new_member(db, callsign) if callsign else False
+    return {
+        "callsign": callsign,
+        "name": fields.get("name", ""),
+        "city": fields.get("city"),
+        "county": fields.get("county"),
+        "state": fields.get("state"),
+        "mode": fields.get("mode", ""),
+        "comments": comments,
+        "latitude": fields.get("latitude"),
+        "longitude": fields.get("longitude"),
+        "parse_status": parse_status,
+        "timing_status": classify_timing(net_session, raw.received_at),
+    }
 
+
+def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -> CheckIn:
+    """Parse a RawMessage and create a CheckIn record."""
+    f = _compute_checkin_fields(db, raw, net_session)
+    new_member = is_new_member(db, f["callsign"]) if f["callsign"] else False
     checkin = CheckIn(
         session_id=net_session.id,
         raw_message_id=raw.id,
-        callsign=callsign,
-        name=fields.get("name", ""),
-        city=fields.get("city"),
-        county=fields.get("county"),
-        state=fields.get("state"),
-        mode=fields.get("mode", ""),
-        comments=comments,
-        latitude=fields.get("latitude"),
-        longitude=fields.get("longitude"),
-        parse_status=parse_status,
-        timing_status=timing,
         is_new_member=new_member,
+        **f,
     )
     db.add(checkin)
     db.commit()
     db.refresh(checkin)
     return checkin
+
+
+def reparse_checkin(db: Session, checkin_id: int) -> CheckIn | None:
+    """Re-run the parser against this CheckIn's stored RawMessage and update
+    its fields in place. Returns None if the CheckIn doesn't exist or has no
+    RawMessage attached (manually-entered rows). ``is_new_member`` is
+    preserved — it's a historical fact, not a parser output.
+    """
+    checkin = db.get(CheckIn, checkin_id)
+    if checkin is None or checkin.raw_message_id is None:
+        return None
+    raw = db.get(RawMessage, checkin.raw_message_id)
+    if raw is None:
+        return None
+    net_session = db.get(NetSession, checkin.session_id)
+    if net_session is None:
+        return None
+
+    f = _compute_checkin_fields(db, raw, net_session)
+    for k, v in f.items():
+        setattr(checkin, k, v)
+    db.commit()
+    db.refresh(checkin)
+    return checkin
+
+
+def reparse_session(db: Session, net_session: NetSession) -> dict:
+    """Re-run the parser for every check-in in the session, and reclaim any
+    orphan RawMessages whose ``received_at`` falls in the session window.
+
+    Returns ``{"updated": N, "imported": M}``. Useful after deploying a
+    parser fix or after a check-in was accidentally deleted.
+    """
+    updated = 0
+    existing = (
+        db.query(CheckIn)
+        .filter(CheckIn.session_id == net_session.id)
+        .filter(CheckIn.raw_message_id.isnot(None))
+        .all()
+    )
+    for checkin in existing:
+        raw = db.get(RawMessage, checkin.raw_message_id)
+        if raw is None:
+            continue
+        f = _compute_checkin_fields(db, raw, net_session)
+        for k, v in f.items():
+            setattr(checkin, k, v)
+        updated += 1
+
+    # Orphan reclaim: any RawMessage in the session's time window that has
+    # no CheckIn referencing it. Uses the same window as classify_timing so
+    # an orphan that would have been counted as on-time/early/late before
+    # deletion comes back into the same session.
+    session_start = datetime.combine(net_session.start_date, datetime.min.time(), tzinfo=timezone.utc)
+    grace = timedelta(hours=net_session.grace_period_hours)
+    window_start = session_start - grace
+    if net_session.end_date is None:
+        window_end = datetime.now(timezone.utc)
+    else:
+        window_end = (
+            datetime.combine(net_session.end_date, datetime.max.time(), tzinfo=timezone.utc) + grace
+        )
+
+    referenced_ids = db.query(CheckIn.raw_message_id).filter(CheckIn.raw_message_id.isnot(None))
+    orphans = (
+        db.query(RawMessage)
+        .filter(RawMessage.received_at >= window_start)
+        .filter(RawMessage.received_at <= window_end)
+        .filter(~RawMessage.id.in_(referenced_ids))
+        .all()
+    )
+    imported = 0
+    for raw in orphans:
+        process_raw_message(db, raw, net_session)
+        imported += 1
+
+    db.commit()
+    return {"updated": updated, "imported": imported}
 
 
 def scan_and_import_messages(

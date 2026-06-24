@@ -21,6 +21,8 @@ from backend.modules.checkins.models import (
 from backend.modules.checkins.service import (
     classify_timing,
     process_raw_message,
+    reparse_checkin,
+    reparse_session,
     scan_and_import_messages,
     get_checkins_for_session,
     create_manual_checkin,
@@ -819,3 +821,126 @@ def test_purge_source_files_swallows_missing_file(tmp_path):
     # Should not raise even though the first path is missing.
     purge_source_files([str(missing), str(real)])
     assert not real.exists()
+
+
+def test_reparse_checkin_updates_fields_from_raw_message(db, season_and_session):
+    """Re-parse re-runs the parser against the stored RawMessage and
+    overwrites the row's fields. Use case: parser fix landed, want to redo
+    a row without re-importing from the mailbox."""
+    _, net_session = season_and_session
+    raw = RawMessage(
+        message_id="REPARSE001",
+        from_address="W0ABC@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body="Name: John Smith\nCallsign: W0ABC\nCity: Denver\nState: CO\nMode: Winlink\n",
+        message_type=MessageType.FORM,
+    )
+    db.add(raw)
+    db.commit()
+    checkin = process_raw_message(db, raw, net_session)
+    # Operator hand-edits the wrong values into place.
+    checkin.name = "Wrong Name"
+    checkin.city = "Wrong City"
+    db.commit()
+
+    result = reparse_checkin(db, checkin.id)
+    assert result is not None
+    assert result.id == checkin.id
+    assert result.name == "John Smith"
+    assert result.city == "Denver"
+
+
+def test_reparse_checkin_returns_none_for_manual_entry(db, season_and_session):
+    """Manually-entered check-ins have no RawMessage to re-parse against."""
+    _, net_session = season_and_session
+    checkin = create_manual_checkin(
+        db, session_id=net_session.id, callsign="W0XYZ", name="Manual", mode="Winlink",
+    )
+    assert reparse_checkin(db, checkin.id) is None
+
+
+def test_reparse_checkin_preserves_is_new_member(db, season_and_session):
+    """is_new_member is a historical fact about the first time we saw the
+    callsign, not a parser output — re-parse must not flip it."""
+    _, net_session = season_and_session
+    raw = RawMessage(
+        message_id="REPARSEHIST001",
+        from_address="W0NEW@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body="Name: New Op\nCallsign: W0NEW\nCity: X\nState: CO\nMode: Winlink\n",
+        message_type=MessageType.FORM,
+    )
+    db.add(raw)
+    db.commit()
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.is_new_member is True
+    # Approve to mark them as a known member, then re-parse. is_new_member
+    # on the historical row should not change.
+    db.add(Member(
+        callsign="W0NEW", name="New Op",
+        first_check_in_date=datetime(2026, 4, 10, tzinfo=timezone.utc),
+        last_check_in_date=datetime(2026, 4, 10, tzinfo=timezone.utc),
+        total_check_ins=1,
+    ))
+    db.commit()
+    result = reparse_checkin(db, checkin.id)
+    assert result.is_new_member is True
+
+
+def test_reparse_session_updates_existing_and_reclaims_orphans(db, season_and_session):
+    """Session re-parse: every existing CheckIn's RawMessage is re-parsed in
+    place, AND orphan RawMessages whose received_at falls in the session
+    window are imported as new CheckIns. Use case: parser was buggy and a
+    check-in got deleted in the meantime."""
+    _, net_session = season_and_session
+
+    raw_existing = RawMessage(
+        message_id="EXIST001",
+        from_address="W0AAA@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body="Name: Alice\nCallsign: W0AAA\nCity: Denver\nState: CO\nMode: Winlink\n",
+        message_type=MessageType.FORM,
+    )
+    db.add(raw_existing)
+    db.commit()
+    checkin = process_raw_message(db, raw_existing, net_session)
+    checkin.name = "Stale Name"
+    db.commit()
+
+    # Orphan: RawMessage in the window but no CheckIn references it
+    # (simulates a deleted check-in).
+    raw_orphan = RawMessage(
+        message_id="ORPHAN001",
+        from_address="W0BBB@winlink.org",
+        received_at=datetime(2026, 4, 10, 19, 0, tzinfo=timezone.utc),
+        subject="Check-in",
+        body="Name: Bob\nCallsign: W0BBB\nCity: Aurora\nState: CO\nMode: Winlink\n",
+        message_type=MessageType.FORM,
+    )
+    db.add(raw_orphan)
+    db.commit()
+
+    # And one outside the window — must NOT be picked up.
+    raw_far = RawMessage(
+        message_id="FAR001",
+        from_address="W0CCC@winlink.org",
+        received_at=datetime(2026, 5, 20, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body="Name: Carol\nCallsign: W0CCC\nCity: X\nState: CO\nMode: Winlink\n",
+        message_type=MessageType.FORM,
+    )
+    db.add(raw_far)
+    db.commit()
+
+    result = reparse_session(db, net_session)
+    assert result == {"updated": 1, "imported": 1}
+
+    db.refresh(checkin)
+    assert checkin.name == "Alice"
+
+    checkins = get_checkins_for_session(db, net_session.id)
+    callsigns = sorted(c.callsign for c in checkins)
+    assert callsigns == ["W0AAA", "W0BBB"]

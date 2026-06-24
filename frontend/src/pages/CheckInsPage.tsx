@@ -14,6 +14,8 @@ import {
   createManualCheckin,
   deleteCheckin,
   updateCheckin,
+  reparseCheckin,
+  reparseSession,
   approveSession,
   lookupCallsign,
   fetchRecentSessions,
@@ -398,6 +400,7 @@ function EditCheckinModal({
   const { addToast } = useToast();
   const [form, setForm] = useState({ callsign: "", name: "", mode: "", city: "", county: "", state: "", comments: "", parse_status: "auto" as CheckIn["parse_status"] });
   const [saving, setSaving] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
 
   useEffect(() => {
     if (checkin) {
@@ -448,73 +451,119 @@ function EditCheckinModal({
     }
   };
 
-  return (
-    <Modal open={open} onClose={onClose} title="Edit Check-in">
-      <div className="flex flex-col gap-3">
-        {checkin?.raw_message && (
-          <details
-            className="bg-bg-elevated/50 rounded-md border border-border"
-            open={checkin.parse_status === "manual_review"}
-          >
-            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-text-secondary hover:text-text-primary">
-              Original message
-            </summary>
-            <div className="px-3 pb-3 flex flex-col gap-2">
-              <div className="text-xs text-text-muted">
-                <div><span className="font-medium">Subject:</span> {checkin.raw_message.subject}</div>
-                <div><span className="font-medium">From:</span> {checkin.raw_message.from_address}</div>
-                <div><span className="font-medium">Received:</span> {new Date(checkin.raw_message.received_at).toLocaleString()}</div>
-              </div>
-              <pre className="text-xs font-mono whitespace-pre-wrap bg-bg-base/60 border border-border rounded p-2 max-h-64 overflow-auto text-text-primary">
-                {checkin.raw_message.body}
-              </pre>
-            </div>
-          </details>
-        )}
-        {checkin?.form_view_html && (
-          <details
-            className="bg-bg-elevated/50 rounded-md border border-border"
-            open
-          >
-            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-text-secondary hover:text-text-primary">
-              Form view
-            </summary>
-            <div className="px-3 pb-3">
-              <iframe
-                sandbox=""
-                srcDoc={checkin.form_view_html}
-                className="w-full h-96 border border-border rounded bg-white"
-                title="Winlink form view"
-              />
-            </div>
-          </details>
-        )}
-        <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
-        <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-        <Input label="Mode" value={form.mode} onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value }))} />
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="City" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
-          <Input label="State" value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
-        </div>
-        <Input label="County" value={form.county} onChange={(e) => setForm((f) => ({ ...f, county: e.target.value }))} />
-        <Input label="Comments" value={form.comments} onChange={(e) => setForm((f) => ({ ...f, comments: e.target.value }))} />
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-text-secondary">Parse Status</label>
-          <select
-            className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent"
-            value={form.parse_status}
-            onChange={(e) => setForm((f) => ({ ...f, parse_status: e.target.value as CheckIn["parse_status"] }))}
-          >
-            <option value="auto">Auto</option>
-            <option value="manual_review">Manual Review</option>
-            <option value="manually_entered">Manually Entered</option>
-          </select>
-        </div>
-        <div className="flex justify-end gap-2 mt-2">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} loading={saving}>Save</Button>
-        </div>
+  const handleReparse = async () => {
+    if (!checkin) return;
+    setReparsing(true);
+    try {
+      const updated = await reparseCheckin(checkin.id);
+      setForm({
+        callsign: updated.callsign,
+        name: updated.name,
+        mode: updated.mode,
+        city: updated.city || "",
+        county: updated.county || "",
+        state: updated.state || "",
+        comments: updated.comments || "",
+        parse_status: updated.parse_status,
+      });
+      addToast("Re-parsed from original message", "success");
+      onSaved();
+    } catch {
+      addToast("Re-parse failed", "error");
+    } finally {
+      setReparsing(false);
+    }
+  };
+
+  // Two-column desktop layout when there's a form view to render alongside
+  // the editable fields — otherwise stay narrow. Mobile always stacks.
+  const hasFormView = !!checkin?.form_view_html;
+  const modalSize = hasFormView ? "xl" : "lg";
+
+  const fieldsColumn = (
+    <div className="flex flex-col gap-3">
+      <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
+      <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+      <Input label="Mode" value={form.mode} onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value }))} />
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="City" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
+        <Input label="State" value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
       </div>
+      <Input label="County" value={form.county} onChange={(e) => setForm((f) => ({ ...f, county: e.target.value }))} />
+      <Input label="Comments" value={form.comments} onChange={(e) => setForm((f) => ({ ...f, comments: e.target.value }))} />
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-text-secondary">Parse Status</label>
+        <select
+          className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent"
+          value={form.parse_status}
+          onChange={(e) => setForm((f) => ({ ...f, parse_status: e.target.value as CheckIn["parse_status"] }))}
+        >
+          <option value="auto">Auto</option>
+          <option value="manual_review">Manual Review</option>
+          <option value="manually_entered">Manually Entered</option>
+        </select>
+      </div>
+    </div>
+  );
+
+  const formViewColumn = checkin?.form_view_html && (
+    <div className="flex flex-col gap-2 min-h-0">
+      <div className="text-xs font-medium text-text-secondary">Form view</div>
+      <iframe
+        sandbox=""
+        srcDoc={checkin.form_view_html}
+        className="w-full flex-1 min-h-[24rem] border border-border rounded bg-white"
+        title="Winlink form view"
+      />
+    </div>
+  );
+
+  const rawMessagePanel = checkin?.raw_message && (
+    <details className="bg-bg-elevated/50 rounded-md border border-border">
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-text-secondary hover:text-text-primary">
+        Original message
+      </summary>
+      <div className="px-3 pb-3 flex flex-col gap-2">
+        <div className="text-xs text-text-muted">
+          <div><span className="font-medium">Subject:</span> {checkin.raw_message.subject}</div>
+          <div><span className="font-medium">From:</span> {checkin.raw_message.from_address}</div>
+          <div><span className="font-medium">Received:</span> {new Date(checkin.raw_message.received_at).toLocaleString()}</div>
+        </div>
+        <pre className="text-xs font-mono whitespace-pre-wrap bg-bg-base/60 border border-border rounded p-2 max-h-64 overflow-auto text-text-primary">
+          {checkin.raw_message.body}
+        </pre>
+      </div>
+    </details>
+  );
+
+  const footer = (
+    <div className="flex flex-wrap justify-end gap-2">
+      {checkin?.raw_message && (
+        <Button variant="secondary" onClick={handleReparse} loading={reparsing}>
+          Re-parse
+        </Button>
+      )}
+      <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button onClick={handleSave} loading={saving}>Save</Button>
+    </div>
+  );
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit Check-in" size={modalSize} footer={footer}>
+      {hasFormView ? (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {formViewColumn}
+            {fieldsColumn}
+          </div>
+          {rawMessagePanel}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {rawMessagePanel}
+          {fieldsColumn}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -532,6 +581,7 @@ export function CheckInsPage() {
   const [checkinsLoading, setCheckinsLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [reparsingSession, setReparsingSession] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCheckin, setEditingCheckin] = useState<CheckIn | null>(null);
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
@@ -707,6 +757,27 @@ export function CheckInsPage() {
     }
   };
 
+  const handleReparseSession = async () => {
+    if (!selectedSessionId) return;
+    const ok = window.confirm(
+      "Re-parse every check-in for this session and reclaim any deleted ones whose original message is still on file?",
+    );
+    if (!ok) return;
+    setReparsingSession(true);
+    try {
+      const result = await reparseSession(selectedSessionId);
+      const parts: string[] = [];
+      if (result.updated) parts.push(`re-parsed ${result.updated}`);
+      if (result.imported) parts.push(`reclaimed ${result.imported}`);
+      addToast(parts.length ? parts.join(", ") : "nothing to do", "success");
+      await loadCheckins();
+    } catch {
+      addToast("Re-parse failed", "error");
+    } finally {
+      setReparsingSession(false);
+    }
+  };
+
   const handleApprove = async () => {
     if (!selectedSessionId) return;
     setApproving(true);
@@ -753,6 +824,18 @@ export function CheckInsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
             Add Check-in
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleReparseSession}
+            loading={reparsingSession}
+            disabled={isCompleted || isCancelled}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Re-parse all
           </Button>
           <Button
             size="sm"

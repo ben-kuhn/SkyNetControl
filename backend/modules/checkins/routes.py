@@ -20,6 +20,8 @@ from backend.modules.checkins.service import (
     delete_checkin,
     get_checkins_by_callsign,
     get_checkins_for_session,
+    reparse_checkin,
+    reparse_session,
     scan_and_import_messages,
     update_checkin,
 )
@@ -240,6 +242,40 @@ async def delete_checkin_route(
     if not delete_checkin(db, checkin_id):
         raise HTTPException(status_code=404, detail="Check-in not found")
     return Response(status_code=204)
+
+
+@checkins_router.post("/{checkin_id}/reparse")
+async def reparse_checkin_route(
+    checkin_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    """Re-run the parser against this check-in's stored raw message.
+
+    404 if the check-in is missing or was manually entered (no raw message
+    to re-parse against).
+    """
+    checkin = reparse_checkin(db, checkin_id)
+    if checkin is None:
+        raise HTTPException(status_code=404, detail="Check-in has no raw message to re-parse")
+    return _checkin_to_response(checkin)
+
+
+@checkins_router.post("/session/{session_id}/reparse")
+async def reparse_session_route(
+    session_id: int,
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    """Re-parse every existing check-in for the session and reclaim any
+    orphan RawMessages whose ``received_at`` falls inside the session window.
+
+    Use case: parser fix deployed, or a check-in was deleted in error.
+    """
+    net_session = db.get(NetSession, session_id)
+    if net_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return reparse_session(db, net_session)
 
 
 @checkins_router.post("/approve/{session_id}")
