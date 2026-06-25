@@ -8,7 +8,6 @@ from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
 from backend.auth.models import User
-from backend.auth.service import create_access_token
 from backend.auth.pat_service import create_token
 from backend.auth.pat_routes import pat_router
 from backend.config import Settings
@@ -99,7 +98,7 @@ def _pending_cookie(test_settings):
 async def test_create_token_success(client, test_settings):
     response = await client.post(
         "/api/auth/tokens",
-        json={"name": "My token", "scopes": ["schedule:read"]},
+        json={"name": "My token", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     assert response.status_code == 201
@@ -115,7 +114,7 @@ async def test_create_token_with_expiry(client, test_settings):
     future = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
     response = await client.post(
         "/api/auth/tokens",
-        json={"name": "Expiring", "scopes": ["schedule:read"], "expires_at": future},
+        json={"name": "Expiring", "scopes": ["schedule:read"], "expires_at": future, "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     assert response.status_code == 201
@@ -136,7 +135,7 @@ async def test_create_token_invalid_scope_for_viewer(client, test_settings):
 async def test_create_token_pending_user_blocked(client, test_settings):
     response = await client.post(
         "/api/auth/tokens",
-        json={"name": "No tokens", "scopes": ["schedule:read"]},
+        json={"name": "No tokens", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_pending_cookie(test_settings),
     )
     assert response.status_code == 403
@@ -146,7 +145,7 @@ async def test_create_token_pending_user_blocked(client, test_settings):
 async def test_create_token_empty_name(client, test_settings):
     response = await client.post(
         "/api/auth/tokens",
-        json={"name": "", "scopes": ["schedule:read"]},
+        json={"name": "", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     assert response.status_code == 400
@@ -167,7 +166,7 @@ async def test_create_token_past_expiry(client, test_settings):
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     response = await client.post(
         "/api/auth/tokens",
-        json={"name": "Past", "scopes": ["schedule:read"], "expires_at": past},
+        json={"name": "Past", "scopes": ["schedule:read"], "expires_at": past, "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     assert response.status_code == 400
@@ -176,7 +175,7 @@ async def test_create_token_past_expiry(client, test_settings):
 @pytest.mark.asyncio
 async def test_create_token_cannot_use_pat(client, test_settings, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Boot", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Boot", ["schedule:read"], None, net_id=1)
         raw = result["token"]
     response = await client.post(
         "/api/auth/tokens",
@@ -190,7 +189,7 @@ async def test_create_token_cannot_use_pat(client, test_settings, seeded_db):
 async def test_list_tokens(client, test_settings):
     await client.post(
         "/api/auth/tokens",
-        json={"name": "Listed", "scopes": ["schedule:read"]},
+        json={"name": "Listed", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     response = await client.get(
@@ -208,7 +207,7 @@ async def test_list_tokens(client, test_settings):
 async def test_revoke_token(client, test_settings):
     create_resp = await client.post(
         "/api/auth/tokens",
-        json={"name": "To revoke", "scopes": ["schedule:read"]},
+        json={"name": "To revoke", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     token_id = create_resp.json()["id"]
@@ -237,7 +236,7 @@ async def test_revoke_token_not_found(client, test_settings):
 async def test_admin_can_revoke_others_token(client, test_settings):
     create_resp = await client.post(
         "/api/auth/tokens",
-        json={"name": "Viewer token", "scopes": ["schedule:read"]},
+        json={"name": "Viewer token", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_viewer_cookie(test_settings),
     )
     token_id = create_resp.json()["id"]
@@ -252,7 +251,7 @@ async def test_admin_can_revoke_others_token(client, test_settings):
 async def test_non_owner_non_admin_cannot_revoke(client, test_settings):
     create_resp = await client.post(
         "/api/auth/tokens",
-        json={"name": "Admin token", "scopes": ["schedule:read"]},
+        json={"name": "Admin token", "scopes": ["schedule:read"], "net_id": 1},
         cookies=_admin_cookie(test_settings),
     )
     token_id = create_resp.json()["id"]

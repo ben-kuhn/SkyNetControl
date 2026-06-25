@@ -469,6 +469,8 @@ async def try_complete_setup(
             name=extracted_name,
             email=extracted_email,
             is_admin=True,
+            is_pending=False,
+            is_deleted=False,
         )
     )
     db.commit()

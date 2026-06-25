@@ -9,6 +9,7 @@ from backend.auth.pat_service import authenticate_token
 from backend.auth.recovery import RecoveryPrincipal, decode_recovery_token
 from backend.auth.service import decode_access_token
 from backend.config import Settings
+from backend.modules.nets.models import Net, NetMembership, NetRole
 
 
 def get_settings(request: Request) -> Settings:
@@ -234,8 +235,6 @@ def require_scope(*scopes: str) -> Callable:
 # ---------------------------------------------------------------------------
 # Net-scoped access
 # ---------------------------------------------------------------------------
-
-from backend.modules.nets.models import Net, NetMembership, NetRole  # noqa: E402
 
 _NET_ROLE_RANK = {NetRole.VIEWER: 1, NetRole.NET_CONTROL: 2}
 

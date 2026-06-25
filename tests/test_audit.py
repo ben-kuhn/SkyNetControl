@@ -9,11 +9,11 @@ from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
 from backend.auth.models import User
-from backend.auth.service import create_access_token
 from backend.audit.models import AuditLog
 from backend.audit.service import log_action
 from backend.audit.routes import audit_router
 from backend.config import Settings
+from tests.conftest import make_test_token
 
 
 
@@ -176,7 +176,6 @@ async def test_audit_log_limit_capped_at_200(test_client, test_settings):
 
 from backend.auth.routes import auth_router
 from backend.config_mgmt.routes import config_router
-from tests.conftest import make_test_token
 
 
 @pytest.fixture

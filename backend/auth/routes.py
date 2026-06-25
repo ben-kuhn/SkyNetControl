@@ -430,6 +430,7 @@ async def update_me(
 class UserStatusUpdate(BaseModel):
     is_admin: bool | None = None
     is_pending: bool | None = None
+    is_deleted: bool | None = None
 
 
 @auth_router.get("/users")
@@ -461,11 +462,19 @@ async def update_user_role(
     target_user = db.get(User, callsign)
     if target_user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    # Compute the resulting state by overlaying patch fields on current values.
+    resulting_is_admin = body.is_admin if body.is_admin is not None else target_user.is_admin
+    resulting_is_pending = body.is_pending if body.is_pending is not None else target_user.is_pending
+    resulting_is_deleted = body.is_deleted if body.is_deleted is not None else target_user.is_deleted
+    if resulting_is_admin and (resulting_is_pending or resulting_is_deleted):
+        raise HTTPException(status_code=400, detail="A user cannot be admin while pending or deleted")
     was_pending = target_user.is_pending
     if body.is_admin is not None:
         target_user.is_admin = body.is_admin
     if body.is_pending is not None:
         target_user.is_pending = body.is_pending
+    if body.is_deleted is not None:
+        target_user.is_deleted = body.is_deleted
     # Bump token_version so any outstanding JWT for this user is rejected on
     # next request. Without this, a demoted admin keeps admin privileges until
     # their JWT expires (jwt_expire_minutes, default 1440 / 24 h).

@@ -100,7 +100,7 @@ async def test_client(test_app):
 @pytest.mark.asyncio
 async def test_bearer_pat_authenticates(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Test", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Test", ["schedule:read"], None, net_id=1)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/me",
@@ -124,7 +124,7 @@ async def test_bearer_revoked_token_returns_401(test_client, seeded_db):
     from backend.auth.pat_service import revoke_token
 
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Revoke me", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Revoke me", ["schedule:read"], None, net_id=1)
         raw = result["token"]
         revoke_token(session, result["id"], "W0NE", is_admin=False)
     response = await test_client.get(
@@ -168,7 +168,7 @@ async def test_cookie_auth_still_works(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_require_scope_passes_with_correct_scope(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Scoped", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Scoped", ["schedule:read"], None, net_id=1)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/scoped",
@@ -180,7 +180,7 @@ async def test_require_scope_passes_with_correct_scope(test_client, seeded_db):
 @pytest.mark.asyncio
 async def test_require_scope_fails_with_missing_scope(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None)
+        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None, net_id=1)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/scoped",
@@ -203,7 +203,7 @@ async def test_require_scope_cookie_auth_bypasses(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_require_scope_multi_scope_all_needed(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Multi", ["schedule:read", "checkins:read"], None)
+        result = create_token(session, "W0NE", True, "Multi", ["schedule:read", "checkins:read"], None, net_id=1)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/multi-scope",
@@ -215,7 +215,7 @@ async def test_require_scope_multi_scope_all_needed(test_client, seeded_db):
 @pytest.mark.asyncio
 async def test_require_scope_multi_scope_partial_fails(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", True, "Partial", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Partial", ["schedule:read"], None, net_id=1)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/multi-scope",
@@ -251,9 +251,9 @@ async def test_schedule_endpoint_requires_scope():
         )
         session.add(admin)
         session.commit()
-        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None)
+        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None, net_id=1)
         raw_wrong = result["token"]
-        result2 = create_token(session, "W0NE", True, "Right scope", ["schedule:read"], None)
+        result2 = create_token(session, "W0NE", True, "Right scope", ["schedule:read"], None, net_id=1)
         raw_right = result2["token"]
 
     transport = ASGITransport(app=app)
@@ -306,7 +306,7 @@ async def test_me_returns_is_admin_flag(test_client, seeded_db):
 async def test_viewer_me_returns_is_admin_false(test_client, seeded_db):
     """Non-admin user has is_admin=False."""
     with seeded_db() as session:
-        result = create_token(session, "KD0TST", False, "Viewer token", ["schedule:read"], None)
+        result = create_token(session, "KD0TST", False, "Viewer token", ["schedule:read"], None, net_id=1)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/me",

@@ -553,3 +553,84 @@ async def test_get_optional_user_returns_none_with_invalid_cookie(test_app, test
             app_settings=test_settings,
         )
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# UserStatusUpdate coherence tests (Fix #5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_set_user_admin_and_pending(test_client, test_settings, db_setup):
+    """Setting is_admin=True on a currently-pending user must be rejected."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|pending", name="Pending", is_pending=True))
+        session.commit()
+
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    response = await test_client.patch(
+        "/api/auth/users/KD0TST",
+        json={"is_admin": True},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 400
+    assert "admin" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_set_user_admin_and_deleted(test_client, test_settings, db_setup):
+    """Setting is_admin=True on a deleted user must be rejected."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|deleted", name="Deleted", is_deleted=True))
+        session.commit()
+
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    response = await test_client.patch(
+        "/api/auth/users/KD0TST",
+        json={"is_admin": True},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 400
+    assert "admin" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_mark_existing_admin_as_pending(test_client, test_settings, db_setup):
+    """Setting is_pending=True on an existing admin must be rejected."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0ADM", oidc_subject="auth0|admin2", name="Admin2", is_admin=True))
+        session.commit()
+
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    response = await test_client.patch(
+        "/api/auth/users/KD0ADM",
+        json={"is_pending": True},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 400
+    assert "admin" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_can_promote_non_pending_user(test_client, test_settings, db_setup):
+    """Promoting a normal user to admin (no pending/deleted flags) succeeds."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|viewer", name="Viewer"))
+        session.commit()
+
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    response = await test_client.patch(
+        "/api/auth/users/KD0TST",
+        json={"is_admin": True},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["is_admin"] is True

@@ -39,10 +39,10 @@ SCOPES: dict[str, dict] = {
 def validate_pat_scopes(scopes: list[str], is_admin: bool, net_id: int | None) -> None:
     """Validate scopes for a PAT.
 
-    ``net_id`` is optional: if provided, the token is scoped to a specific net
-    and ``require_net_role`` will enforce cross-net isolation.  When ``None``
-    the token is valid for any net the user is a member of (or all nets if the
-    user is an admin).
+    ``net_id`` is required for per-net scopes (``PER_NET_SCOPES``): these
+    tokens must be bound to a specific net so that ``require_net_role`` can
+    enforce cross-net isolation.  Admin-only scopes (``ADMIN_SCOPES``) do not
+    require a ``net_id``.
     """
     if not scopes:
         raise ValueError("Token must have at least one scope")
@@ -51,3 +51,5 @@ def validate_pat_scopes(scopes: list[str], is_admin: bool, net_id: int | None) -
             raise ValueError(f"Unknown scope: {s}")
         if s in ADMIN_SCOPES and not is_admin:
             raise ValueError(f"Only admins can issue scope: {s}")
+    if any(s in PER_NET_SCOPES for s in scopes) and net_id is None:
+        raise ValueError("Per-net scopes require net_id")

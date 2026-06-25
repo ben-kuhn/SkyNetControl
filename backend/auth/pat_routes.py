@@ -25,6 +25,7 @@ class TokenCreateRequest(BaseModel):
     name: str
     scopes: list[str]
     expires_at: datetime | None = None
+    net_id: int | None = None
 
 
 @pat_router.post("", status_code=201)
@@ -41,6 +42,7 @@ async def create_token_route(
             name=body.name,
             scopes=body.scopes,
             expires_at=body.expires_at,
+            net_id=body.net_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

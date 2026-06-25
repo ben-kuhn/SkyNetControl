@@ -34,12 +34,20 @@ def test_validate_pat_scopes_non_admin_cannot_use_admin_scope():
         validate_pat_scopes(["users:read"], is_admin=False, net_id=None)
 
 
-def test_validate_pat_scopes_non_admin_can_use_per_net_scope():
-    validate_pat_scopes(["schedule:read"], is_admin=False, net_id=None)
+def test_validate_pat_scopes_per_net_scope_requires_net_id():
+    """Per-net scopes must be bound to a specific net."""
+    with pytest.raises(ValueError, match="Per-net scopes require net_id"):
+        validate_pat_scopes(["schedule:read"], is_admin=False, net_id=None)
 
 
 def test_validate_pat_scopes_per_net_scope_with_net_id():
+    """Per-net scope + valid net_id is accepted."""
     validate_pat_scopes(["schedule:read"], is_admin=False, net_id=1)
+
+
+def test_validate_pat_scopes_admin_scope_only_no_net_id():
+    """Admin-only scopes do not require a net_id."""
+    validate_pat_scopes(["users:read"], is_admin=True, net_id=None)
 
 
 def test_validate_pat_scopes_rejects_unknown_scope():
@@ -53,4 +61,4 @@ def test_validate_pat_scopes_rejects_empty():
 
 
 def test_validate_pat_scopes_admin_can_mix_scopes():
-    validate_pat_scopes(["users:read", "schedule:read"], is_admin=True, net_id=None)
+    validate_pat_scopes(["users:read", "schedule:read"], is_admin=True, net_id=1)

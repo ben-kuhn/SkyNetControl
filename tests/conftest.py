@@ -1,9 +1,13 @@
+from types import SimpleNamespace
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from backend.app import create_app
+from backend.auth.models import User
 from backend.auth.rate_limit import reset_for_tests as _reset_rate_limit
 from backend.auth.secret_box import install_key_material
+from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.db.base import Base
 
@@ -22,13 +26,9 @@ def make_test_token(
     ``(callsign, role_str, settings)`` signature — the real function now
     requires a ``User`` object.
     """
-    from backend.auth.models import User
-    from backend.auth.service import create_access_token
-
     # create_access_token only reads .callsign, .is_admin, .is_pending, .token_version
     # from the user object; we can satisfy this with a SimpleNamespace rather
     # than a full ORM-instrumented User instance.
-    from types import SimpleNamespace
     stub = SimpleNamespace(
         callsign=callsign,
         is_admin=is_admin,
