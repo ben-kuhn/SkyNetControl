@@ -15,6 +15,11 @@ from backend.audit.service import log_action
 from backend.audit.routes import audit_router
 from backend.config import Settings
 
+pytestmark = pytest.mark.xfail(
+    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
+    strict=False,
+)
+
 
 @pytest.fixture
 def test_settings():
@@ -175,11 +180,6 @@ async def test_audit_log_limit_capped_at_200(test_client, test_settings):
 
 from backend.auth.routes import auth_router
 from backend.config_mgmt.routes import config_router
-
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture

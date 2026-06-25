@@ -30,7 +30,7 @@ def _slugify(s: str) -> str:
         elif not last_hyphen:
             out.append("-")
             last_hyphen = True
-    return "".join(out).strip("-")[:64]
+    return "".join(out)[:64].strip("-")
 
 
 def upgrade() -> None:

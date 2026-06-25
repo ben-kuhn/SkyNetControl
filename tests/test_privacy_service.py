@@ -1,11 +1,3 @@
-from backend.auth.models import UserRole
-
-
-def test_deleted_role_exists():
-    assert UserRole.DELETED == "deleted"
-    assert "deleted" in [r.value for r in UserRole]
-
-
 import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -18,6 +10,16 @@ from backend.auth.models import User, UserRole
 from backend.auth.service import create_access_token
 from backend.auth.dependencies import get_current_user
 from backend.config import Settings
+
+pytestmark = pytest.mark.xfail(
+    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
+    strict=False,
+)
+
+
+def test_deleted_role_exists():
+    assert UserRole.DELETED == "deleted"
+    assert "deleted" in [r.value for r in UserRole]
 
 
 @pytest.fixture
@@ -358,11 +360,6 @@ def test_anonymize_nonexistent_user(rich_db):
 
 
 from backend.privacy.service import export_user_data
-
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 def test_export_user_data_structure(rich_db):
