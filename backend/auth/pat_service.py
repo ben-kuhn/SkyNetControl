@@ -5,9 +5,8 @@ from datetime import datetime, timezone
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from backend.auth.models import UserRole
 from backend.auth.pat_models import PersonalAccessToken
-from backend.auth.scopes import validate_scopes_for_role
+from backend.auth.scopes import validate_pat_scopes
 
 MAX_ACTIVE_TOKENS = 10
 LAST_USED_DEBOUNCE_SECONDS = 60
@@ -24,16 +23,17 @@ def _hash_token(raw: str) -> str:
 def create_token(
     db: Session,
     user_callsign: str,
-    user_role: UserRole,
+    is_admin: bool,
     name: str,
     scopes: list[str],
     expires_at: datetime | None,
+    net_id: int | None = None,
 ) -> dict:
     name = name.strip()
     if not name or len(name) > 100:
         raise ValueError("Token name must be 1-100 characters")
 
-    validate_scopes_for_role(scopes, user_role)
+    validate_pat_scopes(scopes, is_admin=is_admin, net_id=net_id)
 
     now = datetime.now(timezone.utc)
     if expires_at is not None and expires_at <= now:

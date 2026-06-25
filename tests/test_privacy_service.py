@@ -6,20 +6,19 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.auth.dependencies import get_current_user
 from backend.config import Settings
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
-def test_deleted_role_exists():
-    assert UserRole.DELETED == "deleted"
-    assert "deleted" in [r.value for r in UserRole]
+def test_deleted_flag_exists():
+    """User model has is_deleted boolean flag via ORM column."""
+    from sqlalchemy import inspect
+    from backend.auth.models import User
+    cols = {c.key for c in inspect(User).mapper.column_attrs}
+    assert "is_deleted" in cols
 
 
 @pytest.fixture
@@ -45,20 +44,20 @@ def privacy_db():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
             email="viewer@example.com",
         )
         deleted = User(
             callsign="ANON-AAAA",
             oidc_subject="deleted",
             name="Deleted User",
-            role=UserRole.DELETED,
+            is_deleted=True,
         )
         session.add_all([admin, viewer, deleted])
         session.commit()
@@ -87,7 +86,8 @@ async def auth_client(auth_app):
 
 @pytest.mark.asyncio
 async def test_deleted_user_cannot_authenticate(auth_client, privacy_settings):
-    token = create_access_token("ANON-AAAA", "deleted", privacy_settings)
+    from tests.conftest import make_test_token
+    token = make_test_token("ANON-AAAA", privacy_settings, token_version=0)
     response = await auth_client.get("/me", cookies={"access_token": token})
     assert response.status_code == 401
 
@@ -139,13 +139,13 @@ def rich_db():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         target = User(
             callsign="KD0TST",
             oidc_subject="auth0|target",
             name="Test User",
-            role=UserRole.VIEWER,
+            
             email="test@example.com",
             pending_callsign="KD0NEW",
         )
@@ -239,7 +239,7 @@ def test_anonymize_user_replaces_user_fields(rich_db):
         assert anon_user.email is None
         assert anon_user.oidc_subject == f"deleted:{anon_id}"
         assert anon_user.pending_callsign is None
-        assert anon_user.role == UserRole.DELETED
+        assert anon_user.is_deleted is True
 
 
 def test_anonymize_user_replaces_checkin_fields(rich_db):
@@ -324,7 +324,7 @@ def test_anonymize_two_users_does_not_collide(rich_db):
                 callsign="W0SECOND",
                 oidc_subject="auth0|second",
                 name="Second User",
-                role=UserRole.NET_CONTROL,
+                
             )
         )
         db.commit()
@@ -370,7 +370,8 @@ def test_export_user_data_structure(rich_db):
     assert data["user"]["callsign"] == "KD0TST"
     assert data["user"]["name"] == "Test User"
     assert data["user"]["email"] == "test@example.com"
-    assert data["user"]["role"] == "viewer"
+    assert data["user"]["is_admin"] is False
+    assert data["user"]["is_pending"] is False
     assert "created_at" in data["user"]
 
 

@@ -9,16 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
-from backend.auth.service import create_access_token
+from backend.auth.models import User
+from tests.conftest import make_test_token
 from backend.integrations.scanner.service import scanner_state
 from backend.integrations.scanner.routes import scanner_router
 from backend.config import Settings
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -65,15 +61,15 @@ def _create_admin(db_setup):
             oidc_subject="local|admin",
             name="Admin User",
             email="admin@test.com",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         session.add(user)
         session.commit()
     return user
 
 
-def _auth_headers(test_settings, callsign="ADMIN", role="admin"):
-    token = create_access_token(callsign, role, test_settings)
+def _auth_headers(test_settings, callsign="ADMIN", is_admin=True):
+    token = make_test_token(callsign, test_settings, is_admin=is_admin, token_version=0)
     return {"Cookie": f"access_token={token}"}
 
 

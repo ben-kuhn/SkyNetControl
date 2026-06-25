@@ -7,16 +7,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.auth.pat_service import create_token
 from backend.auth.pat_routes import pat_router
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -51,19 +48,19 @@ def seeded_db(db_session_factory):
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin User",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer User",
-            role=UserRole.VIEWER,
+            
         )
         pending = User(
             callsign="PENDING-abc",
             oidc_subject="auth0|pending",
             name="Pending User",
-            role=UserRole.PENDING,
+            is_pending=True,
         )
         session.add_all([admin, viewer, pending])
         session.commit()
@@ -87,15 +84,15 @@ async def client(test_app):
 
 
 def _admin_cookie(test_settings):
-    return {"access_token": create_access_token("W0NE", "admin", test_settings)}
+    return {"access_token": make_test_token("W0NE", test_settings, is_admin=True, token_version=0)}
 
 
 def _viewer_cookie(test_settings):
-    return {"access_token": create_access_token("KD0TST", "viewer", test_settings)}
+    return {"access_token": make_test_token("KD0TST", test_settings, token_version=0)}
 
 
 def _pending_cookie(test_settings):
-    return {"access_token": create_access_token("PENDING-abc", "pending", test_settings)}
+    return {"access_token": make_test_token("PENDING-abc", test_settings, is_pending=True, token_version=0)}
 
 
 @pytest.mark.asyncio
@@ -179,7 +176,7 @@ async def test_create_token_past_expiry(client, test_settings):
 @pytest.mark.asyncio
 async def test_create_token_cannot_use_pat(client, test_settings, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Boot", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Boot", ["schedule:read"], None)
         raw = result["token"]
     response = await client.post(
         "/api/auth/tokens",
@@ -291,14 +288,14 @@ async def test_routes_registered_in_real_app():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin User",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         session.add(admin)
         session.commit()
 
     transport = ASGITransport(app=real_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
-        token = create_access_token("W0NE", "admin", settings)
+        token = make_test_token("W0NE", settings, is_admin=True, token_version=0)
         resp = await c.get("/api/auth/tokens", cookies={"access_token": token})
         assert resp.status_code == 200
         assert resp.json() == []

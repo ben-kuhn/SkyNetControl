@@ -7,11 +7,12 @@ from sqlalchemy.pool import StaticPool
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.routes import auth_router
 from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
+from tests.conftest import make_test_token
 
 
 @pytest.fixture
@@ -124,13 +125,12 @@ async def test_login_redirects_to_provider(test_client):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_callback_creates_pending_user(test_client, test_app, db_setup):
     _, factory = db_setup
 
     # Pre-seed an admin so the callback user is NOT the first user
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", is_admin=True))
         session.commit()
 
     mock_token_response = MagicMock()
@@ -182,21 +182,20 @@ async def test_callback_creates_pending_user(test_client, test_app, db_setup):
     with factory() as session:
         user = session.query(User).filter(User.oidc_subject == "google:google-123").first()
         assert user is not None
-        assert user.role == UserRole.PENDING
+        assert user.is_pending is True
         assert user.name == "Test User"
         assert user.email == "test@example.com"
         assert user.callsign.startswith("PENDING-")
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_callback_refuses_ssrf_token_url(test_client, test_app, db_setup):
     """A discovery doc that points token_endpoint at an internal address
     must not get free SSRF. The SSRF guard runs on token_url and
     userinfo_url before any httpx fetch."""
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", is_admin=True))
         session.commit()
 
     # Hostile config: token_url points at loopback.
@@ -221,7 +220,6 @@ async def test_callback_refuses_ssrf_token_url(test_client, test_app, db_setup):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_callback_registration_closed_blocks_new_user(test_client, test_app, db_setup):
     """When registration_open=false, OAuth callback for an unknown subject 403s.
 
@@ -233,7 +231,7 @@ async def test_callback_registration_closed_blocks_new_user(test_client, test_ap
 
     # Pre-seed an admin AND close registration via AppConfig.
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin-seed", name="Admin", is_admin=True))
         from backend.config_mgmt.service import set_config_value
         set_config_value(session, "registration_open", "false")
         session.commit()
@@ -275,12 +273,11 @@ async def test_callback_registration_closed_blocks_new_user(test_client, test_ap
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_callback_existing_user_not_changed(test_client, test_app, db_setup):
     _, factory = db_setup
 
     with factory() as session:
-        user = User(callsign="W0NE", oidc_subject="google:existing-123", name="Existing", role=UserRole.ADMIN)
+        user = User(callsign="W0NE", oidc_subject="google:existing-123", name="Existing", is_admin=True)
         session.add(user)
         session.commit()
 
@@ -325,12 +322,11 @@ async def test_callback_existing_user_not_changed(test_client, test_app, db_setu
 
     with factory() as session:
         user = session.query(User).filter(User.oidc_subject == "google:existing-123").first()
-        assert user.role == UserRole.ADMIN
+        assert user.is_admin is True
         assert user.callsign == "W0NE"
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_me_returns_user(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
@@ -339,19 +335,19 @@ async def test_me_returns_user(test_client, test_settings, db_setup):
                 callsign="W0NE",
                 oidc_subject="auth0|admin",
                 name="Admin",
-                role=UserRole.ADMIN,
+                is_admin=True,
                 email="admin@example.com",
             )
         )
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/auth/me", cookies={"access_token": token})
     assert response.status_code == 200
     data = response.json()
     assert data["callsign"] == "W0NE"
     assert data["name"] == "Admin"
-    assert data["role"] == "admin"
+    assert data["is_admin"] is True
     assert data["email"] == "admin@example.com"
 
 
@@ -363,7 +359,7 @@ async def test_me_unauthenticated(test_client):
 
 @pytest.mark.asyncio
 async def test_logout_clears_cookie(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post("/api/auth/logout", cookies={"access_token": token}, follow_redirects=False)
     assert response.status_code == 200
     set_cookie = response.headers.get("set-cookie", "")
@@ -371,7 +367,6 @@ async def test_logout_clears_cookie(test_client, test_settings):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_logout_invalidates_outstanding_jwt(test_client, test_settings, db_setup):
     """Stolen-cookie defense: after logout, the same JWT must stop working.
 
@@ -382,11 +377,11 @@ async def test_logout_invalidates_outstanding_jwt(test_client, test_settings, db
     """
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
         session.commit()
 
     # Issue a JWT with token_version=0 (the default).
-    token = create_access_token("W0NE", "admin", test_settings, token_version=0)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # /me works before logout.
     me = await test_client.get("/api/auth/me", cookies={"access_token": token})
@@ -401,27 +396,26 @@ async def test_logout_invalidates_outstanding_jwt(test_client, test_settings, db
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_role_change_invalidates_outstanding_jwt(test_client, test_settings, db_setup):
     """Demote an admin: their existing JWT (which encoded role=admin) must
     not survive the demotion. token_version bump on PATCH /users handles this."""
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="KD0TST", oidc_subject="auth0|target", name="Target", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|target", name="Target", is_admin=True))
         session.commit()
 
-    admin_token = create_access_token("W0NE", "admin", test_settings, token_version=0)
-    target_token = create_access_token("KD0TST", "admin", test_settings, token_version=0)
+    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    target_token = make_test_token("KD0TST", test_settings, is_admin=True, token_version=0)
 
     # Target's JWT works initially.
     pre = await test_client.get("/api/auth/me", cookies={"access_token": target_token})
     assert pre.status_code == 200
 
-    # Admin demotes target to viewer.
+    # Admin demotes target (removes admin status).
     demote = await test_client.patch(
         "/api/auth/users/KD0TST",
-        json={"role": "viewer"},
+        json={"is_admin": False},
         cookies={"access_token": admin_token},
     )
     assert demote.status_code == 200
@@ -432,47 +426,44 @@ async def test_role_change_invalidates_outstanding_jwt(test_client, test_setting
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_admin_can_list_users(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/auth/users", cookies={"access_token": token})
     assert response.status_code == 200
     assert len(response.json()) == 1
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_admin_can_update_user_role(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="KD0TST", oidc_subject="auth0|viewer", name="Viewer", role=UserRole.VIEWER))
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|viewer", name="Viewer", ))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.patch(
-        "/api/auth/users/KD0TST", json={"role": "net_control"}, cookies={"access_token": token}
+        "/api/auth/users/KD0TST", json={"is_admin": True}, cookies={"access_token": token}
     )
     assert response.status_code == 200
-    assert response.json()["role"] == "net_control"
+    assert response.json()["is_admin"] is True
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_viewer_cannot_update_roles(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="KD0TST", oidc_subject="auth0|viewer", name="Viewer", role=UserRole.VIEWER))
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0TST", oidc_subject="auth0|viewer", name="Viewer", ))
         session.commit()
 
-    token = create_access_token("KD0TST", "viewer", test_settings)
-    response = await test_client.patch("/api/auth/users/W0NE", json={"role": "viewer"}, cookies={"access_token": token})
+    token = make_test_token("KD0TST", test_settings, token_version=0)
+    response = await test_client.patch("/api/auth/users/W0NE", json={"is_admin": False}, cookies={"access_token": token})
     assert response.status_code == 403
 
 
@@ -506,7 +497,6 @@ async def test_get_optional_user_returns_none_without_cookie(test_app):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_get_optional_user_returns_user_with_valid_cookie(test_app, test_settings):
     """get_optional_user returns the user when a valid cookie is present."""
     from backend.auth.dependencies import get_optional_user
@@ -518,12 +508,12 @@ async def test_get_optional_user_returns_user_with_valid_cookie(test_app, test_s
             callsign="W0OPT",
             oidc_subject="opt|sub",
             name="Opt",
-            role=UserRole.VIEWER,
+            
         )
         session.add(user)
         session.commit()
 
-    token = create_access_token("W0OPT", "viewer", test_settings)
+    token = make_test_token("W0OPT", test_settings, token_version=0)
     scope = {"type": "http", "headers": [], "app": test_app, "state": {}}
 
     async def receive():

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.modules.notifications.models import Notification, NotificationKind
 from backend.modules.schedule.models import NetSession
 
@@ -93,7 +93,7 @@ def resolve_session_recipient(db: Session, net_session: NetSession) -> str | Non
     if net_session.net_control_callsign:
         return net_session.net_control_callsign
 
-    admin = db.query(User).filter(User.role == UserRole.ADMIN).order_by(User.callsign).first()
+    admin = db.query(User).filter(User.is_admin.is_(True)).order_by(User.callsign).first()
     return admin.callsign if admin else None
 
 

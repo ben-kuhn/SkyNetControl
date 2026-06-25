@@ -210,7 +210,6 @@ async def test_claim_start_rejects_blank_secret(test_app):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_unified_callback_creates_admin_and_marks_complete(test_app):
     """Full happy path: start → /api/auth/callback/{slug} (mocked) → User + AppConfig rows + JWT cookie."""
     transport = ASGITransport(app=test_app)
@@ -249,7 +248,7 @@ async def test_unified_callback_creates_admin_and_marks_complete(test_app):
 
         user = db.get(User, "W0NE")
         assert user is not None
-        assert user.role.value == "admin"
+        assert user.is_admin is True
         assert user.oidc_subject == "github:42"
 
         assert db.get(AppConfig, "default_net_control") is not None
@@ -309,7 +308,6 @@ async def test_callback_token_exchange_failure_does_not_commit(test_app):
     # Nothing committed
     from backend.config_mgmt.setup_state import is_setup_completed
     from backend.auth.models import User
-
     with test_app.state.session_factory() as db:
         assert not is_setup_completed(db)
         assert db.query(User).count() == 0

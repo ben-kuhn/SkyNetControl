@@ -6,17 +6,13 @@ import pytest
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import sessionmaker
 
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.cli.db_copy import copy_database
 from backend.config_mgmt.models import AppConfig
 from backend.db.base import Base
 from backend.modules.schedule.models import NetSeason
 from datetime import date
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 def _make_db(path: str) -> str:
@@ -35,7 +31,7 @@ def test_copy_database_round_trips_rows(tmp_path):
     src_engine = create_engine(src_url)
     SrcSession = sessionmaker(bind=src_engine)
     with SrcSession() as s:
-        s.add(User(callsign="K0XYZ", oidc_subject="g:x", name="Alice", role=UserRole.ADMIN))
+        s.add(User(callsign="K0XYZ", oidc_subject="g:x", name="Alice", is_admin=True))
         s.add(AppConfig(key="default_net_control", value="K0XYZ"))
         s.add(NetSeason(name="Spring", start_date=date(2026, 4, 1), end_date=date(2026, 6, 30), day_of_week=3))
         s.commit()
@@ -49,7 +45,7 @@ def test_copy_database_round_trips_rows(tmp_path):
         users = s.execute(select(User)).scalars().all()
         assert len(users) == 1
         assert users[0].callsign == "K0XYZ"
-        assert users[0].role == UserRole.ADMIN
+        assert users[0].is_admin is True
 
         configs = s.execute(select(AppConfig)).scalars().all()
         assert {c.key: c.value for c in configs} == {"default_net_control": "K0XYZ"}
@@ -78,7 +74,7 @@ def test_copy_database_refuses_when_target_has_data(tmp_path):
     dst_engine = create_engine(dst_url)
     DstSession = sessionmaker(bind=dst_engine)
     with DstSession() as s:
-        s.add(User(callsign="W0EXISTING", oidc_subject="g:e", name="Existing", role=UserRole.ADMIN))
+        s.add(User(callsign="W0EXISTING", oidc_subject="g:e", name="Existing", is_admin=True))
         s.commit()
     dst_engine.dispose()
 
@@ -95,7 +91,7 @@ def test_copy_database_replace_truncates_target_first(tmp_path):
     src_engine = create_engine(src_url)
     SrcSession = sessionmaker(bind=src_engine)
     with SrcSession() as s:
-        s.add(User(callsign="K0XYZ", oidc_subject="g:x", name="Alice", role=UserRole.ADMIN))
+        s.add(User(callsign="K0XYZ", oidc_subject="g:x", name="Alice", is_admin=True))
         s.commit()
     src_engine.dispose()
 
@@ -103,7 +99,7 @@ def test_copy_database_replace_truncates_target_first(tmp_path):
     dst_engine = create_engine(dst_url)
     DstSession = sessionmaker(bind=dst_engine)
     with DstSession() as s:
-        s.add(User(callsign="W0PRESEED", oidc_subject="g:p", name="Preseed", role=UserRole.VIEWER))
+        s.add(User(callsign="W0PRESEED", oidc_subject="g:p", name="Preseed", ))
         s.commit()
     dst_engine.dispose()
 

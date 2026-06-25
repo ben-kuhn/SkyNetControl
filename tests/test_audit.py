@@ -8,17 +8,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.audit.models import AuditLog
 from backend.audit.service import log_action
 from backend.audit.routes import audit_router
 from backend.config import Settings
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -44,13 +40,13 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
         session.add_all([admin, viewer])
         session.commit()
@@ -119,7 +115,7 @@ async def test_admin_can_list_audit_log(test_client, test_settings, db_setup):
             db, actor="W0NE", action="user.role_changed", target="KD0TST", details={"from": "pending", "to": "viewer"}
         )
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/audit/", cookies={"access_token": token})
     assert response.status_code == 200
     data = response.json()
@@ -137,7 +133,7 @@ async def test_audit_log_respects_limit(test_client, test_settings, db_setup):
         for i in range(5):
             log_action(db, actor="W0NE", action=f"action_{i}")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/audit/?limit=3", cookies={"access_token": token})
     assert response.status_code == 200
     assert len(response.json()) == 3
@@ -149,7 +145,7 @@ async def test_audit_log_newest_first(test_client, test_settings, db_setup):
         log_action(db, actor="W0NE", action="first")
         log_action(db, actor="W0NE", action="second")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/audit/", cookies={"access_token": token})
     actions = [e["action"] for e in response.json()]
     assert actions == ["second", "first"]
@@ -157,7 +153,7 @@ async def test_audit_log_newest_first(test_client, test_settings, db_setup):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_list_audit_log(test_client, test_settings):
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
     response = await test_client.get("/api/audit/", cookies={"access_token": token})
     assert response.status_code == 403
 
@@ -170,7 +166,7 @@ async def test_unauthenticated_cannot_list_audit_log(test_client):
 
 @pytest.mark.asyncio
 async def test_audit_log_limit_capped_at_200(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/audit/?limit=500", cookies={"access_token": token})
     # Query validation rejects limit > 200
     assert response.status_code == 422
@@ -180,6 +176,7 @@ async def test_audit_log_limit_capped_at_200(test_client, test_settings):
 
 from backend.auth.routes import auth_router
 from backend.config_mgmt.routes import config_router
+from tests.conftest import make_test_token
 
 
 @pytest.fixture
@@ -202,10 +199,10 @@ async def wired_client(wired_app):
 
 @pytest.mark.asyncio
 async def test_role_change_creates_audit_entry(wired_client, test_settings, db_setup):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     await wired_client.patch(
         "/api/auth/users/KD0TST",
-        json={"role": "net_control"},
+        json={"is_admin": True},
         cookies={"access_token": token},
     )
 
@@ -215,8 +212,7 @@ async def test_role_change_creates_audit_entry(wired_client, test_settings, db_s
     assert entries[0]["action"] == "user.role_changed"
     assert entries[0]["actor_callsign"] == "W0NE"
     assert entries[0]["target_callsign"] == "KD0TST"
-    assert entries[0]["details"]["from"] == "viewer"
-    assert entries[0]["details"]["to"] == "net_control"
+    assert entries[0]["details"]["is_admin"] is True
 
 
 @pytest.mark.asyncio
@@ -226,7 +222,7 @@ async def test_callsign_approve_creates_audit_entry(wired_client, test_settings,
         user.pending_callsign = "KD0NEW"
         db.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     await wired_client.post(
         "/api/auth/users/KD0TST/approve-callsign",
         cookies={"access_token": token},
@@ -248,7 +244,7 @@ async def test_callsign_reject_creates_audit_entry(wired_client, test_settings, 
         user.pending_callsign = "KD0NEW"
         db.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     await wired_client.delete(
         "/api/auth/users/KD0TST/pending-callsign",
         cookies={"access_token": token},
@@ -264,7 +260,7 @@ async def test_callsign_reject_creates_audit_entry(wired_client, test_settings, 
 
 @pytest.mark.asyncio
 async def test_config_update_creates_audit_entry(wired_client, test_settings, db_setup):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     await wired_client.put(
         "/api/config/net_address",
         json={"value": "w0ne@winlink.org"},

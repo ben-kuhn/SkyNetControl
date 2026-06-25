@@ -6,15 +6,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
-from backend.auth.service import create_access_token
+from backend.auth.models import User
 from backend.modules.activities.routes import activities_router
 from backend.config import Settings
-
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
+from tests.conftest import make_test_token
 
 
 @pytest.fixture
@@ -40,13 +35,12 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
         )
         session.add_all([admin, viewer])
         session.commit()
@@ -71,7 +65,7 @@ async def test_client(test_app):
 
 @pytest.mark.asyncio
 async def test_create_activity(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     response = await test_client.post(
         "/api/activities/",
         json={
@@ -91,7 +85,7 @@ async def test_create_activity(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_list_activities(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     await test_client.post(
         "/api/activities/",
         json={
@@ -109,7 +103,7 @@ async def test_list_activities(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_get_activity(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     create_resp = await test_client.post(
         "/api/activities/",
         json={"title": "Find Me", "description": "d", "instructions": "i"},
@@ -124,7 +118,7 @@ async def test_get_activity(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_update_activity(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     create_resp = await test_client.post(
         "/api/activities/",
         json={"title": "Old", "description": "old", "instructions": "old"},
@@ -144,7 +138,7 @@ async def test_update_activity(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_delete_activity(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     create_resp = await test_client.post(
         "/api/activities/",
         json={"title": "Delete Me", "description": "d", "instructions": "i"},
@@ -172,15 +166,15 @@ async def test_cannot_delete_default_activity(test_client, test_settings, db_set
         session.commit()
         activity_id = activity.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     response = await test_client.delete(f"/api/activities/{activity_id}", cookies={"access_token": token})
     assert response.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_viewer_can_read_but_not_create(test_client, test_settings):
-    admin_token = create_access_token("W0NE", "admin", test_settings)
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    admin_token = make_test_token("W0NE", test_settings, is_admin=True)
+    viewer_token = make_test_token("KD0TST", test_settings)
 
     # Create as admin
     await test_client.post(
@@ -189,11 +183,11 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
         cookies={"access_token": admin_token},
     )
 
-    # Viewer can list
+    # Viewer can list (get_current_user only)
     response = await test_client.get("/api/activities/", cookies={"access_token": viewer_token})
     assert response.status_code == 200
 
-    # Viewer cannot create
+    # Viewer without net membership cannot create (require_net_member)
     response = await test_client.post(
         "/api/activities/",
         json={"title": "Hack", "description": "d", "instructions": "i"},
@@ -204,7 +198,7 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_list_tags(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     await test_client.post(
         "/api/activities/",
         json={

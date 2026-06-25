@@ -700,16 +700,15 @@ def test_regenerate_draft_returns_none_when_missing(db: Session):
     assert regenerate_draft(db, 999) is None
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_generate_due_drafts_creates_notification(db, season_and_sessions):
     """When the daily task generates a draft, the session's NCS gets a notification."""
     from datetime import date
     from unittest.mock import patch
-    from backend.auth.models import User, UserRole
+    from backend.auth.models import User
     from backend.modules.notifications.models import Notification, NotificationKind
 
     _, session1, _, _ = season_and_sessions
-    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", role=UserRole.NET_CONTROL))
+    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", ))
     db.commit()
 
     create_template(

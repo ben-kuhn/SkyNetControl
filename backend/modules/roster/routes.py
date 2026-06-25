@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import get_current_user, get_db_session, require_net_member
+from backend.auth.models import User
 from backend.modules.roster.models import RosterLog, RosterStatus
 from backend.modules.roster.service import (
     approve_roster as approve_roster_service,
@@ -99,7 +99,7 @@ def _roster_to_response(log: RosterLog) -> dict:
 @roster_router.post("/templates", status_code=201)
 async def create_template_route(
     body: TemplateCreate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     template = create_template_service(
@@ -127,7 +127,7 @@ async def list_templates_route(
 
 @roster_router.get("/template-defaults")
 async def template_defaults_route(
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
 ):
     """Return the shipped seed templates so the "+ New template" UI can
     pre-fill from pristine originals, even after operators have edited
@@ -141,7 +141,7 @@ async def template_defaults_route(
 async def update_template_route(
     template_id: int,
     body: TemplateUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     template = update_template_service(
@@ -164,7 +164,7 @@ async def update_template_route(
 @roster_router.delete("/templates/{template_id}", status_code=204)
 async def delete_template_route(
     template_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     template = get_template_service(db, template_id)
@@ -181,7 +181,7 @@ async def delete_template_route(
 @roster_router.post("/generate/{session_id}")
 async def generate_draft_route(
     session_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = generate_draft_service(db, session_id)
@@ -214,7 +214,7 @@ async def generate_draft_route(
 
 @roster_router.post("/generate")
 async def generate_due_drafts_route(
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     rosters = generate_due_drafts_service(db)
@@ -272,7 +272,7 @@ async def preview_roster_route(
 async def update_draft_route(
     roster_id: int,
     body: DraftUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = update_draft_service(
@@ -292,7 +292,7 @@ async def update_draft_route(
 @roster_router.post("/{roster_id}/approve")
 async def approve_roster_route(
     roster_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = approve_roster_service(db, roster_id, approver_callsign=user.callsign)
@@ -304,7 +304,7 @@ async def approve_roster_route(
 @roster_router.post("/{roster_id}/send")
 async def mark_sent_route(
     roster_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = mark_sent_service(db, roster_id)
@@ -316,7 +316,7 @@ async def mark_sent_route(
 @roster_router.post("/{roster_id}/skip")
 async def skip_roster_route(
     roster_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = skip_roster_service(db, roster_id)
@@ -328,7 +328,7 @@ async def skip_roster_route(
 @roster_router.post("/{roster_id}/regenerate")
 async def regenerate_roster_route(
     roster_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = regenerate_draft_service(db, roster_id)

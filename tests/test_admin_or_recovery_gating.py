@@ -7,20 +7,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.audit.models import AuditLog
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.recovery import mint_token
 from backend.auth.recovery_routes import recovery_router
 from backend.auth.routes import auth_router
-from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.config_mgmt.oauth_routes import oauth_router
 from backend.config_mgmt.setup_routes import setup_router
 from backend.db.base import Base
-
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
+from tests.conftest import make_test_token
 
 
 @pytest.fixture
@@ -64,10 +59,10 @@ def admin_token(test_app, db_setup):
     """Create an admin user and return a JWT for them."""
     _, factory = db_setup
     with factory() as db:
-        admin = User(callsign="W0NE", oidc_subject="test:admin", name="Admin", role=UserRole.ADMIN)
+        admin = User(callsign="W0NE", oidc_subject="test:admin", name="Admin", is_admin=True)
         db.add(admin)
         db.commit()
-    return create_access_token("W0NE", "admin", test_app.state.settings)
+    return make_test_token("W0NE", test_app.state.settings, is_admin=True)
 
 
 @pytest.fixture

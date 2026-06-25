@@ -3,12 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
-
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
+from backend.auth.models import User
 
 
 @pytest.fixture
@@ -26,7 +21,7 @@ def test_create_user(db: Session):
         callsign="W0NE",
         oidc_subject="auth0|12345",
         name="John Doe",
-        role=UserRole.ADMIN,
+        is_admin=True,
     )
     db.add(user)
     db.commit()
@@ -36,7 +31,7 @@ def test_create_user(db: Session):
     assert fetched.callsign == "W0NE"
     assert fetched.oidc_subject == "auth0|12345"
     assert fetched.name == "John Doe"
-    assert fetched.role == UserRole.ADMIN
+    assert fetched.is_admin is True
 
 
 def test_callsign_is_primary_key(db: Session):
@@ -44,7 +39,6 @@ def test_callsign_is_primary_key(db: Session):
         callsign="KD0TEST",
         oidc_subject="auth0|99999",
         name="Test User",
-        role=UserRole.VIEWER,
     )
     db.add(user)
     db.commit()
@@ -53,7 +47,7 @@ def test_callsign_is_primary_key(db: Session):
     assert fetched is not None
 
 
-def test_user_role_defaults_to_viewer(db: Session):
+def test_user_defaults_to_non_admin(db: Session):
     user = User(
         callsign="N0CALL",
         oidc_subject="auth0|11111",
@@ -64,7 +58,9 @@ def test_user_role_defaults_to_viewer(db: Session):
 
     fetched = db.get(User, "N0CALL")
     assert fetched is not None
-    assert fetched.role == UserRole.VIEWER
+    assert fetched.is_admin is False
+    assert fetched.is_pending is False
+    assert fetched.is_deleted is False
 
 
 def test_oidc_subject_is_unique(db: Session):
@@ -77,8 +73,12 @@ def test_oidc_subject_is_unique(db: Session):
         db.commit()
 
 
-def test_pending_role_exists():
-    assert UserRole.PENDING.value == "pending"
+def test_is_pending_flag(db: Session):
+    user = User(callsign="W0PND", oidc_subject="auth0|pending", name="Pending", is_pending=True)
+    db.add(user)
+    db.commit()
+    fetched = db.get(User, "W0PND")
+    assert fetched.is_pending is True
 
 
 def test_user_email_nullable(app):
@@ -87,7 +87,6 @@ def test_user_email_nullable(app):
             callsign="W0TST",
             oidc_subject="test|email",
             name="Test",
-            role=UserRole.VIEWER,
             email="test@example.com",
         )
         session.add(user)
@@ -102,7 +101,6 @@ def test_user_email_defaults_none(app):
             callsign="W0NOE",
             oidc_subject="test|noemail",
             name="No Email",
-            role=UserRole.VIEWER,
         )
         session.add(user)
         session.commit()
@@ -116,7 +114,6 @@ def test_user_pending_callsign(app):
             callsign="W0OLD",
             oidc_subject="test|pending_cs",
             name="Pending CS",
-            role=UserRole.VIEWER,
             pending_callsign="W0NEW",
         )
         session.add(user)

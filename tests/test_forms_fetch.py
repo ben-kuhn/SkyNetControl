@@ -15,15 +15,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app import create_app
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.db.base import Base
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 def _make_zip(entries: dict[str, bytes]) -> bytes:
@@ -58,13 +55,13 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
         session.add_all([admin, viewer])
         session.commit()
@@ -98,7 +95,7 @@ def forms_state_dir(tmp_path, monkeypatch):
 
 async def test_fetch_requires_admin(test_client, test_settings, forms_state_dir):
     """Non-admin (viewer) tokens get 403."""
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.post(
         "/api/config/forms/fetch",
         cookies={"access_token": token},
@@ -128,7 +125,7 @@ async def test_fetch_success_writes_library_and_updates_config(
 
     monkeypatch.setattr(forms_fetch, "_download_zip", fake_download)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/config/forms/fetch",
         cookies={"access_token": token},
@@ -163,7 +160,7 @@ async def test_fetch_rejects_oversize_zip(
 
     monkeypatch.setattr(forms_fetch, "_download_zip", fake_download)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/config/forms/fetch",
         cookies={"access_token": token},
@@ -187,7 +184,7 @@ async def test_fetch_rejects_zip_slip(
 
     monkeypatch.setattr(forms_fetch, "_download_zip", fake_download)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/config/forms/fetch",
         cookies={"access_token": token},
@@ -211,7 +208,7 @@ async def test_fetch_drops_script_entries(
 
     monkeypatch.setattr(forms_fetch, "_download_zip", fake_download)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/config/forms/fetch",
         cookies={"access_token": token},
@@ -240,7 +237,7 @@ async def test_fetch_failure_leaves_prior_library_intact(
 
     monkeypatch.setattr(forms_fetch, "_download_zip", fake_download)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/config/forms/fetch",
         cookies={"access_token": token},
@@ -260,7 +257,7 @@ async def test_status_endpoint_returns_current_config(
         set_config_value(db, "forms.library_version", "1.2.3")
         set_config_value(db, "forms.last_fetched_at", "2026-06-20T12:00:00+00:00")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/config/forms/status",
         cookies={"access_token": token},
@@ -274,7 +271,7 @@ async def test_status_endpoint_returns_current_config(
 
 async def test_status_requires_admin(test_client, test_settings, forms_state_dir):
     """Non-admin tokens get 403 from status endpoint."""
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
         "/api/config/forms/status",
         cookies={"access_token": token},

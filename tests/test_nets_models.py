@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.db.base import Base
 from backend.modules.nets.models import Net, NetMembership, NetConfig, NetRole
-from backend.auth.models import User, UserRole  # ensure user table exists
+from backend.auth.models import User  # ensure user table exists
 
 
 def _session():
@@ -22,12 +22,11 @@ def test_net_round_trip():
     assert net.is_public is True
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_net_membership_pk_is_composite():
     db = _session()
     net = Net(slug="x", name="X")
     db.add(net)
-    user = User(callsign="W0XYZ", oidc_subject="s1", name="Test", role=UserRole.VIEWER)
+    user = User(callsign="W0XYZ", oidc_subject="s1", name="Test")
     db.add(user)
     db.commit()
 

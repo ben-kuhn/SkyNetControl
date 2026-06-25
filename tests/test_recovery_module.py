@@ -24,6 +24,7 @@ from backend.auth.recovery import (
 from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.db.base import Base
+from tests.conftest import make_test_token
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +224,7 @@ def test_recovery_jwt_expired_rejected(test_settings):
 
 def test_recovery_jwt_wrong_type_rejected(test_settings):
     """A user-session JWT (no 'type: recovery' claim) must be rejected."""
-    user_token = create_access_token("W0NE", "admin", test_settings)
+    user_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     result = decode_recovery_token(user_token, test_settings)
     assert result is None
 

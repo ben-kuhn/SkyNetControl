@@ -6,15 +6,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.routes import auth_router
-from backend.auth.service import create_access_token
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -68,12 +64,12 @@ async def test_register_valid_callsign(test_client, test_settings, db_setup):
                 callsign="PENDING-google12",
                 oidc_subject="google:123",
                 name="New User",
-                role=UserRole.PENDING,
+                is_pending=True,
             )
         )
         session.commit()
 
-    token = create_access_token("PENDING-google12", "pending", test_settings)
+    token = make_test_token("PENDING-google12", test_settings, is_pending=True, token_version=0)
     response = await test_client.post(
         "/api/auth/register",
         json={"callsign": "W0ABC"},
@@ -82,7 +78,7 @@ async def test_register_valid_callsign(test_client, test_settings, db_setup):
     assert response.status_code == 200
     data = response.json()
     assert data["callsign"] == "W0ABC"
-    assert data["role"] == "pending"
+    assert data["is_pending"] is True
 
 
 @pytest.mark.asyncio
@@ -94,12 +90,12 @@ async def test_register_invalid_callsign_format(test_client, test_settings, db_s
                 callsign="PENDING-google12",
                 oidc_subject="google:123",
                 name="New User",
-                role=UserRole.PENDING,
+                is_pending=True,
             )
         )
         session.commit()
 
-    token = create_access_token("PENDING-google12", "pending", test_settings)
+    token = make_test_token("PENDING-google12", test_settings, is_pending=True, token_version=0)
     response = await test_client.post(
         "/api/auth/register",
         json={"callsign": "not-a-callsign"},
@@ -112,13 +108,13 @@ async def test_register_invalid_callsign_format(test_client, test_settings, db_s
 async def test_register_duplicate_callsign(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:existing", name="Existing", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:existing", name="Existing", is_admin=True))
         session.add(
-            User(callsign="PENDING-google12", oidc_subject="google:new", name="New User", role=UserRole.PENDING)
+            User(callsign="PENDING-google12", oidc_subject="google:new", name="New User", is_pending=True)
         )
         session.commit()
 
-    token = create_access_token("PENDING-google12", "pending", test_settings)
+    token = make_test_token("PENDING-google12", test_settings, is_pending=True, token_version=0)
     response = await test_client.post(
         "/api/auth/register",
         json={"callsign": "W0NE"},
@@ -131,10 +127,10 @@ async def test_register_duplicate_callsign(test_client, test_settings, db_setup)
 async def test_register_already_registered(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:existing", name="Existing", role=UserRole.VIEWER))
+        session.add(User(callsign="W0NE", oidc_subject="google:existing", name="Existing", ))
         session.commit()
 
-    token = create_access_token("W0NE", "viewer", test_settings)
+    token = make_test_token("W0NE", test_settings, token_version=0)
     response = await test_client.post(
         "/api/auth/register",
         json={"callsign": "W0NEW"},
@@ -155,12 +151,12 @@ async def test_register_admin_with_placeholder_callsign(test_client, test_settin
                 callsign="PENDING-pocketid:80f",
                 oidc_subject="pocketid:80f1abc",
                 name="First Admin",
-                role=UserRole.ADMIN,
+                is_admin=True,
             )
         )
         session.commit()
 
-    token = create_access_token("PENDING-pocketid:80f", "admin", test_settings)
+    token = make_test_token("PENDING-pocketid:80f", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/auth/register",
         json={"callsign": "W0ABC"},
@@ -169,7 +165,7 @@ async def test_register_admin_with_placeholder_callsign(test_client, test_settin
     assert response.status_code == 200
     body = response.json()
     assert body["callsign"] == "W0ABC"
-    assert body["role"] == "admin"
+    assert body["is_admin"] is True
 
     # /register must reissue the access_token cookie under the new callsign;
     # otherwise the next request 401s because the JWT's `sub` still points
@@ -195,10 +191,10 @@ async def test_register_unauthenticated(test_client):
 async def test_request_callsign_change(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0OLD", oidc_subject="google:user1", name="User One", role=UserRole.VIEWER))
+        session.add(User(callsign="W0OLD", oidc_subject="google:user1", name="User One", ))
         session.commit()
 
-    token = create_access_token("W0OLD", "viewer", test_settings)
+    token = make_test_token("W0OLD", test_settings, token_version=0)
     response = await test_client.patch(
         "/api/auth/me",
         json={"callsign": "W0NEW"},
@@ -218,10 +214,10 @@ async def test_request_callsign_change(test_client, test_settings, db_setup):
 async def test_request_callsign_change_invalid_format(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0OLD", oidc_subject="google:user1", name="User One", role=UserRole.VIEWER))
+        session.add(User(callsign="W0OLD", oidc_subject="google:user1", name="User One", ))
         session.commit()
 
-    token = create_access_token("W0OLD", "viewer", test_settings)
+    token = make_test_token("W0OLD", test_settings, token_version=0)
     response = await test_client.patch("/api/auth/me", json={"callsign": "invalid"}, cookies={"access_token": token})
     assert response.status_code == 400
 
@@ -230,11 +226,11 @@ async def test_request_callsign_change_invalid_format(test_client, test_settings
 async def test_request_callsign_change_taken(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0OLD", oidc_subject="google:u1", name="User", role=UserRole.VIEWER))
-        session.add(User(callsign="W0NEW", oidc_subject="google:u2", name="Other", role=UserRole.VIEWER))
+        session.add(User(callsign="W0OLD", oidc_subject="google:u1", name="User", ))
+        session.add(User(callsign="W0NEW", oidc_subject="google:u2", name="Other", ))
         session.commit()
 
-    token = create_access_token("W0OLD", "viewer", test_settings)
+    token = make_test_token("W0OLD", test_settings, token_version=0)
     response = await test_client.patch("/api/auth/me", json={"callsign": "W0NEW"}, cookies={"access_token": token})
     assert response.status_code == 409
 
@@ -246,19 +242,19 @@ async def test_request_callsign_change_taken(test_client, test_settings, db_setu
 async def test_approve_callsign_change(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", is_admin=True))
         session.add(
             User(
                 callsign="W0OLD",
                 oidc_subject="google:user1",
                 name="User",
-                role=UserRole.VIEWER,
+                
                 pending_callsign="W0NEW",
             )
         )
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post("/api/auth/users/W0OLD/approve-callsign", cookies={"access_token": token})
     assert response.status_code == 200
     data = response.json()
@@ -270,11 +266,11 @@ async def test_approve_callsign_change(test_client, test_settings, db_setup):
 async def test_approve_callsign_no_pending(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
-        session.add(User(callsign="W0OLD", oidc_subject="google:u1", name="User", role=UserRole.VIEWER))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", is_admin=True))
+        session.add(User(callsign="W0OLD", oidc_subject="google:u1", name="User", ))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post("/api/auth/users/W0OLD/approve-callsign", cookies={"access_token": token})
     assert response.status_code == 400
 
@@ -283,19 +279,19 @@ async def test_approve_callsign_no_pending(test_client, test_settings, db_setup)
 async def test_reject_callsign_change(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", is_admin=True))
         session.add(
             User(
                 callsign="W0OLD",
                 oidc_subject="google:u1",
                 name="User",
-                role=UserRole.VIEWER,
+                
                 pending_callsign="W0NEW",
             )
         )
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.delete("/api/auth/users/W0OLD/pending-callsign", cookies={"access_token": token})
     assert response.status_code == 200
 
@@ -308,18 +304,18 @@ async def test_reject_callsign_change(test_client, test_settings, db_setup):
 async def test_viewer_cannot_approve_callsign(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:
-        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", role=UserRole.ADMIN))
+        session.add(User(callsign="W0NE", oidc_subject="google:admin", name="Admin", is_admin=True))
         session.add(
             User(
                 callsign="KD0TST",
                 oidc_subject="google:viewer",
                 name="Viewer",
-                role=UserRole.VIEWER,
+                
                 pending_callsign="W0NEW",
             )
         )
         session.commit()
 
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
     response = await test_client.post("/api/auth/users/KD0TST/approve-callsign", cookies={"access_token": token})
     assert response.status_code == 403

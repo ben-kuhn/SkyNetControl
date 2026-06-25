@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import get_db_session, get_settings
 from backend.auth.rate_limit import rate_limit
 from backend.auth.recovery import decode_recovery_token
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.providers import (
     FIXED_PROVIDERS,
     _normalise_issuer,
@@ -468,16 +468,16 @@ async def try_complete_setup(
             oidc_subject=f"{session.oauth_slug}:{extracted_sub}",
             name=extracted_name,
             email=extracted_email,
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
     )
     db.commit()
     mark_setup_completed(db)
 
-    # Issue JWT cookie and redirect. token_version=0 because the row was
-    # freshly merged just above with the default; everything works as long
-    # as the JWT's tv matches users.token_version, which is 0 on insert.
-    jwt_token = create_access_token(session.default_net_control, "admin", app_settings, 0)
+    # Fetch the user object so create_access_token can read its fields.
+    setup_user = db.get(User, session.default_net_control)
+    # Issue JWT cookie and redirect.
+    jwt_token = create_access_token(setup_user, app_settings)
     is_secure = session.app_base_url.startswith("https://")
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(

@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.modules.checkins.models import (
     CheckIn,
@@ -17,11 +17,8 @@ from backend.modules.schedule.models import NetSession
 from backend.privacy.routes import privacy_router
 from backend.config import Settings
 from datetime import datetime, timezone
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -47,14 +44,14 @@ def route_db():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin User",
-            role=UserRole.ADMIN,
+            is_admin=True,
             email="admin@example.com",
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Test User",
-            role=UserRole.VIEWER,
+            
             email="viewer@example.com",
         )
         session.add_all([admin, viewer])
@@ -102,7 +99,7 @@ async def route_client(route_app):
 
 @pytest.mark.asyncio
 async def test_self_export(route_client, route_settings):
-    token = create_access_token("KD0TST", "viewer", route_settings)
+    token = make_test_token("KD0TST", route_settings, token_version=0)
     response = await route_client.get("/api/privacy/export", cookies={"access_token": token})
     assert response.status_code == 200
     assert "attachment" in response.headers.get("content-disposition", "")
@@ -112,7 +109,7 @@ async def test_self_export(route_client, route_settings):
 
 @pytest.mark.asyncio
 async def test_admin_export_other_user(route_client, route_settings):
-    token = create_access_token("W0NE", "admin", route_settings)
+    token = make_test_token("W0NE", route_settings, is_admin=True, token_version=0)
     response = await route_client.get("/api/privacy/export/KD0TST", cookies={"access_token": token})
     assert response.status_code == 200
     data = response.json()
@@ -121,7 +118,7 @@ async def test_admin_export_other_user(route_client, route_settings):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_export_other_user(route_client, route_settings):
-    token = create_access_token("KD0TST", "viewer", route_settings)
+    token = make_test_token("KD0TST", route_settings, token_version=0)
     response = await route_client.get("/api/privacy/export/W0NE", cookies={"access_token": token})
     assert response.status_code == 403
 
@@ -134,7 +131,7 @@ async def test_unauthenticated_cannot_export(route_client):
 
 @pytest.mark.asyncio
 async def test_self_anonymize(route_client, route_settings):
-    token = create_access_token("KD0TST", "viewer", route_settings)
+    token = make_test_token("KD0TST", route_settings, token_version=0)
     response = await route_client.post(
         "/api/privacy/anonymize",
         json={"confirm": True},
@@ -151,7 +148,7 @@ async def test_self_anonymize(route_client, route_settings):
 
 @pytest.mark.asyncio
 async def test_self_anonymize_requires_confirm(route_client, route_settings):
-    token = create_access_token("KD0TST", "viewer", route_settings)
+    token = make_test_token("KD0TST", route_settings, token_version=0)
     response = await route_client.post(
         "/api/privacy/anonymize",
         json={"confirm": False},
@@ -162,7 +159,7 @@ async def test_self_anonymize_requires_confirm(route_client, route_settings):
 
 @pytest.mark.asyncio
 async def test_self_anonymize_without_body(route_client, route_settings):
-    token = create_access_token("KD0TST", "viewer", route_settings)
+    token = make_test_token("KD0TST", route_settings, token_version=0)
     response = await route_client.post(
         "/api/privacy/anonymize",
         json={},
@@ -173,7 +170,7 @@ async def test_self_anonymize_without_body(route_client, route_settings):
 
 @pytest.mark.asyncio
 async def test_admin_anonymize_other_user(route_client, route_settings):
-    token = create_access_token("W0NE", "admin", route_settings)
+    token = make_test_token("W0NE", route_settings, is_admin=True, token_version=0)
     response = await route_client.post(
         "/api/privacy/anonymize/KD0TST",
         json={"confirm": True},
@@ -186,7 +183,7 @@ async def test_admin_anonymize_other_user(route_client, route_settings):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_anonymize_other(route_client, route_settings):
-    token = create_access_token("KD0TST", "viewer", route_settings)
+    token = make_test_token("KD0TST", route_settings, token_version=0)
     response = await route_client.post(
         "/api/privacy/anonymize/W0NE",
         json={"confirm": True},

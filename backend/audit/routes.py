@@ -3,8 +3,7 @@ import json
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_db_session, require_role
-from backend.auth.models import UserRole
+from backend.auth.dependencies import get_db_session, require_admin
 from backend.audit.models import AuditLog
 
 audit_router = APIRouter(tags=["audit"])
@@ -13,7 +12,7 @@ audit_router = APIRouter(tags=["audit"])
 @audit_router.get("/")
 async def list_audit_log(
     limit: int = Query(default=50, ge=1, le=200),
-    user=Depends(require_role(UserRole.ADMIN)),
+    user=Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     entries = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(limit).all()

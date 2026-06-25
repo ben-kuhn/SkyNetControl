@@ -6,15 +6,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.config_mgmt.routes import config_router
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -41,13 +38,13 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
         session.add_all([admin, viewer])
         session.commit()
@@ -72,7 +69,7 @@ async def test_client(test_app):
 
 @pytest.mark.asyncio
 async def test_admin_can_get_config(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/config/", cookies={"access_token": token})
     assert response.status_code == 200
     assert isinstance(response.json(), dict)
@@ -80,7 +77,7 @@ async def test_admin_can_get_config(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_admin_can_set_config(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.put(
         "/api/config/net_address",
         json={"value": "w0ne@winlink.org"},
@@ -94,7 +91,7 @@ async def test_admin_can_set_config(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_viewer_cannot_set_config(test_client, test_settings):
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
     response = await test_client.put(
         "/api/config/net_address",
         json={"value": "hacker@winlink.org"},
@@ -112,7 +109,7 @@ async def test_unauthenticated_cannot_get_config(test_client):
 @pytest.mark.asyncio
 async def test_viewer_cannot_get_config(test_client, test_settings):
     """Audit H1: secrets in config should not be exposed to non-admins."""
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
     response = await test_client.get("/api/config/", cookies={"access_token": token})
     assert response.status_code == 403
 
@@ -123,7 +120,7 @@ async def test_sensitive_config_value_redacted_in_audit_log(test_client, test_se
     import json
     from backend.audit.models import AuditLog
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     response = await test_client.put(
         "/api/config/claude_api_key",
@@ -150,7 +147,7 @@ async def test_get_config_masks_secret_values(test_client, test_settings):
     The typed routes (oauth_routes, smtp_routes) masked these as "***";
     bulk now matches.
     """
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # Seed a sensitive and a non-sensitive value via the PUT endpoint.
     await test_client.put(
@@ -187,7 +184,7 @@ async def test_non_sensitive_config_value_logged_verbatim(test_client, test_sett
     import json
     from backend.audit.models import AuditLog
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     response = await test_client.put(
         "/api/config/net_address",

@@ -1,9 +1,10 @@
+from dataclasses import dataclass
 from typing import Callable, Union
 
-from fastapi import Cookie, Depends, Header, HTTPException, Request
+from fastapi import Cookie, Depends, Header, HTTPException, Path, Request
 from sqlalchemy.orm import Session
 
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.pat_service import authenticate_token
 from backend.auth.recovery import RecoveryPrincipal, decode_recovery_token
 from backend.auth.service import decode_access_token
@@ -36,7 +37,7 @@ def get_current_user(
             raise HTTPException(status_code=401, detail="Invalid or expired token")
 
         user = db.get(User, auth_result["user_callsign"])
-        if user is None or user.role in (UserRole.PENDING, UserRole.DELETED):
+        if user is None or user.is_pending or user.is_deleted:
             raise HTTPException(status_code=401, detail="User not found or pending")
 
         request.state.token_scopes = auth_result["scopes"]
@@ -58,7 +59,7 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
-    if user.role == UserRole.DELETED:
+    if user.is_deleted:
         raise HTTPException(status_code=401, detail="Account has been deleted")
 
     # Invalidate tokens issued before logout / role-change / delete bumped
@@ -97,17 +98,32 @@ def get_optional_user(
         return None
 
 
-def require_role(*roles: UserRole) -> Callable:
-    def dependency(user: User = Depends(get_current_user)) -> User:
-        if user.role not in roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        return user
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Gate: caller must be a global admin."""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin required")
+    return user
 
-    return dependency
+
+def require_net_member(user: User = Depends(get_current_user), db: Session = Depends(get_db_session)) -> User:
+    """Gate: caller must be a global admin or have any net membership.
+
+    Temporary bridge for routes that previously accepted ADMIN or NET_CONTROL
+    roles; once the routes are moved under /api/nets/{slug}/ in Task 5 they
+    will use require_net_role instead.
+    """
+    if user.is_admin:
+        return user
+    from backend.modules.nets.models import NetMembership
+
+    has_membership = db.query(NetMembership).filter(NetMembership.user_callsign == user.callsign).first() is not None
+    if not has_membership:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
 
 
 def require_not_pending(user: User = Depends(get_current_user)) -> User:
-    if user.role == UserRole.PENDING:
+    if user.is_pending:
         raise HTTPException(status_code=403, detail="Account pending approval")
     return user
 
@@ -187,32 +203,24 @@ def require_admin_or_recovery(
         db=db,
         app_settings=app_settings,
     )
-    if user.role != UserRole.ADMIN:
+    if not user.is_admin:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     return user
 
 
 def require_scope(*scopes: str) -> Callable:
     def dependency(request: Request, user: User = Depends(get_current_user)) -> User:
-        from backend.auth.scopes import SCOPES, _ROLE_RANK
+        from backend.auth.scopes import ADMIN_SCOPES
 
-        user_rank = _ROLE_RANK[user.role]
         token_scopes = getattr(request.state, "token_scopes", None)
         for scope in scopes:
-            # Cookie auth: no token-scopes set, but the user must still meet
-            # the scope's min_role. Previously this branch returned the user
-            # unconditionally — a future endpoint guarded by
-            # require_scope("users:write") would have admitted any logged-in
-            # viewer via the cookie path. The intent of require_scope is
-            # "this endpoint needs scope X, and X's min_role"; cookies
-            # bypass the per-scope grant check (since cookies aren't issued
-            # with scopes) but never the role floor.
-            scope_min_rank = _ROLE_RANK[SCOPES[scope]["min_role"]]
-            if user_rank < scope_min_rank:
+            # Admin-only scopes require is_admin regardless of auth path.
+            if scope in ADMIN_SCOPES and not user.is_admin:
                 raise HTTPException(
                     status_code=403,
                     detail=f"Your role does not permit scope: {scope}",
                 )
+            # PAT auth: verify the token actually carries this scope.
             if token_scopes is not None and scope not in token_scopes:
                 raise HTTPException(
                     status_code=403,
@@ -221,3 +229,47 @@ def require_scope(*scopes: str) -> Callable:
         return user
 
     return dependency
+
+
+# ---------------------------------------------------------------------------
+# Net-scoped access
+# ---------------------------------------------------------------------------
+
+from backend.modules.nets.models import Net, NetMembership, NetRole  # noqa: E402
+
+_NET_ROLE_RANK = {NetRole.VIEWER: 1, NetRole.NET_CONTROL: 2}
+
+
+@dataclass
+class NetContext:
+    user: User
+    net: Net
+    role: NetRole | None  # None if access is via is_admin
+
+
+def require_net_role(min_role: NetRole) -> Callable:
+    """Factory: returns a FastAPI dependency that enforces minimum net-level access.
+
+    The dependency reads ``net_slug`` from the path, resolves the Net, checks
+    the caller's NetMembership (or grants full access if ``user.is_admin``),
+    and returns a ``NetContext`` on success.  Raises 404 if the net does not
+    exist and 403 if the caller's role is insufficient.
+    """
+    min_rank = _NET_ROLE_RANK[min_role]
+
+    def dep(
+        net_slug: str = Path(..., alias="net_slug"),
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db_session),
+    ) -> NetContext:
+        net = db.query(Net).filter(Net.slug == net_slug).one_or_none()
+        if net is None:
+            raise HTTPException(status_code=404, detail="Net not found")
+        if user.is_admin:
+            return NetContext(user=user, net=net, role=None)
+        m = db.get(NetMembership, (user.callsign, net.id))
+        if m is None or _NET_ROLE_RANK[m.role] < min_rank:
+            raise HTTPException(status_code=403, detail="Insufficient permissions for net")
+        return NetContext(user=user, net=net, role=m.role)
+
+    return dep

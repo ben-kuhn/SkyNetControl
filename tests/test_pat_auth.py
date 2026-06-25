@@ -6,16 +6,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.auth.dependencies import get_current_user, require_scope
 from backend.auth.pat_service import create_token
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -50,19 +47,18 @@ def seeded_db(db_session_factory):
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin User",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer User",
-            role=UserRole.VIEWER,
         )
         pending = User(
             callsign="PENDING-abc",
             oidc_subject="auth0|pending",
             name="Pending User",
-            role=UserRole.PENDING,
+            is_pending=True,
         )
         session.add_all([admin, viewer, pending])
         session.commit()
@@ -77,7 +73,7 @@ def test_app(test_settings, seeded_db):
 
     @app.get("/api/test/me")
     async def me(user: User = Depends(get_current_user)):
-        return {"callsign": user.callsign, "role": user.role.value}
+        return {"callsign": user.callsign, "is_admin": user.is_admin}
 
     @app.get("/api/test/scoped")
     async def scoped(user: User = Depends(require_scope("schedule:read"))):
@@ -104,7 +100,7 @@ async def test_client(test_app):
 @pytest.mark.asyncio
 async def test_bearer_pat_authenticates(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Test", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Test", ["schedule:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/me",
@@ -128,7 +124,7 @@ async def test_bearer_revoked_token_returns_401(test_client, seeded_db):
     from backend.auth.pat_service import revoke_token
 
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Revoke me", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Revoke me", ["schedule:read"], None)
         raw = result["token"]
         revoke_token(session, result["id"], "W0NE", is_admin=False)
     response = await test_client.get(
@@ -163,7 +159,7 @@ async def test_bearer_pending_user_returns_401(test_client, seeded_db):
 
 @pytest.mark.asyncio
 async def test_cookie_auth_still_works(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/test/me", cookies={"access_token": token})
     assert response.status_code == 200
     assert response.json()["callsign"] == "W0NE"
@@ -172,7 +168,7 @@ async def test_cookie_auth_still_works(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_require_scope_passes_with_correct_scope(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Scoped", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Scoped", ["schedule:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/scoped",
@@ -184,7 +180,7 @@ async def test_require_scope_passes_with_correct_scope(test_client, seeded_db):
 @pytest.mark.asyncio
 async def test_require_scope_fails_with_missing_scope(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Wrong scope", ["checkins:read"], None)
+        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/scoped",
@@ -196,7 +192,7 @@ async def test_require_scope_fails_with_missing_scope(test_client, seeded_db):
 
 @pytest.mark.asyncio
 async def test_require_scope_cookie_auth_bypasses(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/test/scoped",
         cookies={"access_token": token},
@@ -207,7 +203,7 @@ async def test_require_scope_cookie_auth_bypasses(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_require_scope_multi_scope_all_needed(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Multi", ["schedule:read", "checkins:read"], None)
+        result = create_token(session, "W0NE", True, "Multi", ["schedule:read", "checkins:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/multi-scope",
@@ -219,7 +215,7 @@ async def test_require_scope_multi_scope_all_needed(test_client, seeded_db):
 @pytest.mark.asyncio
 async def test_require_scope_multi_scope_partial_fails(test_client, seeded_db):
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Partial", ["schedule:read"], None)
+        result = create_token(session, "W0NE", True, "Partial", ["schedule:read"], None)
         raw = result["token"]
     response = await test_client.get(
         "/api/test/multi-scope",
@@ -251,13 +247,13 @@ async def test_schedule_endpoint_requires_scope():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin User",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         session.add(admin)
         session.commit()
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Wrong scope", ["checkins:read"], None)
+        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None)
         raw_wrong = result["token"]
-        result2 = create_token(session, "W0NE", UserRole.ADMIN, "Right scope", ["schedule:read"], None)
+        result2 = create_token(session, "W0NE", True, "Right scope", ["schedule:read"], None)
         raw_right = result2["token"]
 
     transport = ASGITransport(app=app)
@@ -276,33 +272,45 @@ async def test_schedule_endpoint_requires_scope():
 
 
 @pytest.mark.asyncio
-async def test_require_scope_enforces_role_intersection(test_client, seeded_db):
-    """If admin is downgraded to viewer, admin-scoped tokens are rejected."""
+async def test_require_scope_enforces_admin_on_admin_scope(test_client, seeded_db):
+    """Non-admin user cannot use admin-scoped tokens; admin who loses is_admin is rejected."""
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Admin scope", ["users:read"], None)
+        # Mint token for admin user, then revoke admin status
+        result = create_token(session, "W0NE", True, "Admin scope", ["users:read"], None)
         raw = result["token"]
         user = session.get(User, "W0NE")
-        user.role = UserRole.VIEWER
+        user.is_admin = False
         session.commit()
     response = await test_client.get(
         "/api/test/admin-scoped",
         headers={"Authorization": f"Bearer {raw}"},
     )
     assert response.status_code == 403
-    assert "role" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
-async def test_role_intersection_downgraded_admin(test_client, seeded_db):
+async def test_me_returns_is_admin_flag(test_client, seeded_db):
+    """The /me endpoint returns is_admin boolean."""
     with seeded_db() as session:
-        result = create_token(session, "W0NE", UserRole.ADMIN, "Admin scope", ["users:read"], None)
+        result = create_token(session, "W0NE", True, "Admin token", ["users:read"], None)
         raw = result["token"]
-        user = session.get(User, "W0NE")
-        user.role = UserRole.VIEWER
-        session.commit()
     response = await test_client.get(
         "/api/test/me",
         headers={"Authorization": f"Bearer {raw}"},
     )
     assert response.status_code == 200
-    assert response.json()["role"] == "viewer"
+    assert response.json()["is_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_viewer_me_returns_is_admin_false(test_client, seeded_db):
+    """Non-admin user has is_admin=False."""
+    with seeded_db() as session:
+        result = create_token(session, "KD0TST", False, "Viewer token", ["schedule:read"], None)
+        raw = result["token"]
+    response = await test_client.get(
+        "/api/test/me",
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["is_admin"] is False

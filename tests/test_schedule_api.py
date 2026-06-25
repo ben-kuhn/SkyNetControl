@@ -6,15 +6,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.modules.schedule.routes import schedule_router
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -36,13 +33,13 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
         session.add_all([admin, viewer])
         session.commit()
@@ -67,7 +64,7 @@ async def test_client(test_app):
 
 @pytest.mark.asyncio
 async def test_create_season(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/schedule/seasons",
         json={
@@ -90,7 +87,7 @@ async def test_create_season(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_list_seasons(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     # Create a season first
     await test_client.post(
         "/api/schedule/seasons",
@@ -121,7 +118,7 @@ async def test_session_roster_status_field(test_client, test_settings, db_setup)
     from backend.modules.roster.models import RosterLog, RosterStatus
     from backend.modules.schedule.models import NetSession, SessionType
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     with db_setup() as session:
         net_session = NetSession(
             start_date=date(2026, 4, 10),
@@ -158,7 +155,7 @@ async def test_session_roster_status_null_when_no_roster(test_client, test_setti
     from datetime import date
     from backend.modules.schedule.models import NetSession, SessionType
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     with db_setup() as session:
         net_session = NetSession(
             start_date=date(2026, 4, 10),
@@ -180,7 +177,7 @@ async def test_session_roster_status_null_when_no_roster(test_client, test_setti
 
 @pytest.mark.asyncio
 async def test_list_sessions(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
         "/api/schedule/seasons",
         json={
@@ -207,7 +204,7 @@ async def test_list_sessions(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_update_session(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
         "/api/schedule/seasons",
         json={
@@ -234,7 +231,7 @@ async def test_update_session(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_create_adhoc_real_event(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/schedule/sessions",
         json={
@@ -253,7 +250,7 @@ async def test_create_adhoc_real_event(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_create_real_event_with_season_rejected(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     season_resp = await test_client.post(
         "/api/schedule/seasons",
         json={
@@ -282,7 +279,7 @@ async def test_create_real_event_with_season_rejected(test_client, test_settings
 
 @pytest.mark.asyncio
 async def test_list_sessions_with_filters(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     season_resp = await test_client.post(
         "/api/schedule/seasons",
@@ -331,7 +328,7 @@ async def test_list_sessions_with_filters(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_get_single_session(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
         "/api/schedule/sessions",
         json={
@@ -355,7 +352,7 @@ async def test_get_single_session(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_get_session_not_found(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/schedule/sessions/9999",
         cookies={"access_token": token},
@@ -365,7 +362,7 @@ async def test_get_session_not_found(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_create_season_end_before_start_rejected(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/schedule/seasons",
         json={
@@ -382,7 +379,7 @@ async def test_create_season_end_before_start_rejected(test_client, test_setting
 
 @pytest.mark.asyncio
 async def test_create_season_no_day_of_week_rejected(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/schedule/seasons",
         json={
@@ -398,8 +395,8 @@ async def test_create_season_no_day_of_week_rejected(test_client, test_settings)
 
 @pytest.mark.asyncio
 async def test_viewer_can_read_but_not_create(test_client, test_settings):
-    admin_token = create_access_token("W0NE", "admin", test_settings)
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
 
     # Create as admin
     await test_client.post(
@@ -442,7 +439,7 @@ async def test_list_sessions_public_completed_only(test_client, test_settings, d
     """Anonymous viewers only see COMPLETED sessions."""
     from backend.modules.schedule.models import SessionStatus
 
-    admin_token = create_access_token("W0NE", "admin", test_settings)
+    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # Create a season with multiple sessions
     season_resp = await test_client.post(
@@ -483,7 +480,7 @@ async def test_list_sessions_public_completed_only(test_client, test_settings, d
 @pytest.mark.asyncio
 async def test_list_sessions_authenticated_sees_all(test_client, test_settings, db_setup):
     """Authenticated callers see all session statuses."""
-    admin_token = create_access_token("W0NE", "admin", test_settings)
+    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # Create a season with multiple sessions
     season_resp = await test_client.post(
@@ -510,10 +507,9 @@ async def test_list_sessions_authenticated_sees_all(test_client, test_settings, 
 @pytest.mark.asyncio
 async def test_list_sessions_pending_user_sees_only_completed(test_client, test_settings, db_setup):
     """Audit M3: PENDING users are treated like anonymous viewers."""
-    from backend.auth.models import User, UserRole
     from backend.modules.schedule.models import NetSession, SessionStatus
 
-    admin_token = create_access_token("W0NE", "admin", test_settings)
+    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # Create a season with sessions, mark statuses to differentiate
     season_resp = await test_client.post(
@@ -540,12 +536,12 @@ async def test_list_sessions_pending_user_sees_only_completed(test_client, test_
                 callsign="PENDING-y",
                 oidc_subject="auth0|pendingy",
                 name="Pending",
-                role=UserRole.PENDING,
+                is_pending=True,
             )
         )
         session.commit()
 
-    pending_token = create_access_token("PENDING-y", "pending", test_settings)
+    pending_token = make_test_token("PENDING-y", test_settings, is_pending=True, token_version=0)
     resp = await test_client.get(
         "/api/schedule/sessions",
         cookies={"access_token": pending_token},
@@ -563,7 +559,7 @@ async def test_delete_season_preserves_completed_sessions(test_client, test_sett
     scheduled and cancelled sessions go with the season."""
     from backend.modules.schedule.models import NetSession, SessionStatus
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     season_resp = await test_client.post(
         "/api/schedule/seasons",

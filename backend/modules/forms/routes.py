@@ -4,8 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_db_session, require_role
-from backend.auth.models import UserRole
+from backend.auth.dependencies import get_db_session, require_admin
 from backend.config_mgmt.service import get_config_value, set_config_value
 from backend.modules.forms.fetch import (
     DEFAULT_SOURCE_URL,
@@ -19,7 +18,7 @@ forms_router = APIRouter(prefix="/forms", tags=["forms"])
 @forms_router.get("/status")
 async def get_forms_status(
     db: Session = Depends(get_db_session),
-    _user=Depends(require_role(UserRole.ADMIN)),
+    _user=Depends(require_admin),
 ) -> dict:
     return {
         "source_url": get_config_value(db, "forms.source_url") or DEFAULT_SOURCE_URL,
@@ -31,7 +30,7 @@ async def get_forms_status(
 @forms_router.post("/fetch")
 async def fetch_forms_library(
     db: Session = Depends(get_db_session),
-    _user=Depends(require_role(UserRole.ADMIN)),
+    _user=Depends(require_admin),
 ) -> dict:
     source_url = get_config_value(db, "forms.source_url") or DEFAULT_SOURCE_URL
     try:

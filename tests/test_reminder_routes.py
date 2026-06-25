@@ -8,17 +8,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.modules.reminders.routes import reminders_router
 from backend.modules.reminders.models import ReminderLog, ReminderStatus, ReminderTemplate, TemplateType
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -44,19 +41,19 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         net_control = User(
             callsign="W0NC",
             oidc_subject="auth0|netcontrol",
             name="Net Control",
-            role=UserRole.NET_CONTROL,
+            
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
         season = NetSeason(
             name="Spring 2026",
@@ -103,7 +100,7 @@ async def test_client(test_app):
 
 @pytest.mark.asyncio
 async def test_create_template(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/reminders/templates",
         json={
@@ -137,7 +134,7 @@ async def test_list_templates(test_client, test_settings, db_setup):
         session.add(tmpl)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/reminders/templates",
         cookies={"access_token": token},
@@ -163,7 +160,7 @@ async def test_update_template(test_client, test_settings, db_setup):
         session.commit()
         tmpl_id = tmpl.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.patch(
         f"/api/reminders/templates/{tmpl_id}",
         json={"name": "Updated Name"},
@@ -189,7 +186,7 @@ async def test_delete_template(test_client, test_settings, db_setup):
         session.commit()
         tmpl_id = tmpl.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.delete(
         f"/api/reminders/templates/{tmpl_id}",
         cookies={"access_token": token},
@@ -212,7 +209,7 @@ async def test_cannot_delete_default_template(test_client, test_settings, db_set
         session.commit()
         tmpl_id = tmpl.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.delete(
         f"/api/reminders/templates/{tmpl_id}",
         cookies={"access_token": token},
@@ -237,7 +234,7 @@ async def test_generate_draft_for_session(test_client, test_settings, db_setup):
         session.add(tmpl)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/reminders/generate/1",
         cookies={"access_token": token},
@@ -263,7 +260,7 @@ async def test_generate_due_drafts(test_client, test_settings, db_setup):
         session.add(tmpl)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     # session date is April 10, 2026 — mock today to April 8 so it's within lead time of 3
     with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
         response = await test_client.post(
@@ -293,7 +290,7 @@ async def test_get_reminder_for_session(test_client, test_settings, db_setup):
         session.add(log)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/reminders/session/1",
         cookies={"access_token": token},
@@ -322,7 +319,7 @@ async def test_approve_reminder(test_client, test_settings, db_setup):
         session.commit()
         log_id = log.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         f"/api/reminders/{log_id}/approve",
         cookies={"access_token": token},
@@ -351,7 +348,7 @@ async def test_send_reminder(test_client, test_settings, db_setup):
         session.commit()
         log_id = log.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     with patch(
         "backend.integrations.delivery.service.dispatch_delivery",
         return_value=True,
@@ -381,7 +378,7 @@ async def test_skip_reminder(test_client, test_settings, db_setup):
         session.commit()
         log_id = log.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         f"/api/reminders/{log_id}/skip",
         cookies={"access_token": token},
@@ -406,7 +403,7 @@ async def test_edit_draft(test_client, test_settings, db_setup):
         session.commit()
         log_id = log.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.patch(
         f"/api/reminders/{log_id}",
         json={"content_subject": "New Subject", "content_body": "New Body"},
@@ -435,7 +432,7 @@ async def test_list_reminders_with_status_filter(test_client, test_settings, db_
         session.add(log)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     response = await test_client.get(
         "/api/reminders/?status=draft",
@@ -466,7 +463,7 @@ async def test_viewer_can_read_but_not_generate(test_client, test_settings, db_s
         session.add(tmpl)
         session.commit()
 
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
 
     # Viewer can list reminders
     response = await test_client.get(
@@ -513,7 +510,7 @@ async def test_regenerate_reminder_route_rewrites_draft(test_client, test_settin
         session.commit()
         log_id = log.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         f"/api/reminders/{log_id}/regenerate",
         cookies={"access_token": token},
@@ -528,7 +525,7 @@ async def test_regenerate_reminder_route_rewrites_draft(test_client, test_settin
 
 @pytest.mark.asyncio
 async def test_regenerate_reminder_route_404_when_missing(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/reminders/999/regenerate",
         cookies={"access_token": token},
@@ -554,7 +551,7 @@ async def test_regenerate_reminder_route_409_when_not_draft(test_client, test_se
         session.commit()
         log_id = log.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         f"/api/reminders/{log_id}/regenerate",
         cookies={"access_token": token},
@@ -578,7 +575,7 @@ async def test_regenerate_reminder_route_requires_role(test_client, test_setting
         session.commit()
         log_id = log.id
 
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.post(
         f"/api/reminders/{log_id}/regenerate",
         cookies={"access_token": viewer_token},
@@ -592,7 +589,7 @@ async def test_regenerate_reminder_route_requires_role(test_client, test_setting
 @pytest.mark.asyncio
 async def test_template_defaults_returns_seed_list(test_client, test_settings):
     """The endpoint returns both shipped seeds, in their genericized form."""
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/reminders/template-defaults",
         cookies={"access_token": token},
@@ -612,7 +609,7 @@ async def test_template_defaults_returns_seed_list(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_template_defaults_requires_role(test_client, test_settings):
     """Viewer cannot see the defaults endpoint (matches create's role gate)."""
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
         "/api/reminders/template-defaults",
         cookies={"access_token": viewer_token},

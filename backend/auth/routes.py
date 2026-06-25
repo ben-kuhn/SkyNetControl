@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, get_settings, require_role
+from backend.auth.dependencies import get_current_user, get_db_session, get_settings, require_admin
 from backend.auth.rate_limit import rate_limit
 from backend.auth.email import (
     notify_admins_new_registration,
@@ -18,7 +18,7 @@ from backend.auth.email import (
     notify_user_approved,
     notify_user_callsign_approved,
 )
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token, decode_access_token, resolve_provider
 from backend.audit.service import log_action
 from backend.config import Settings
@@ -242,22 +242,34 @@ async def callback(
                     detail="Registration is closed. Contact the net administrator.",
                 )
 
-        role = UserRole.ADMIN if user_count == 0 else UserRole.PENDING
-
+        is_first = user_count == 0
         placeholder_callsign = f"PENDING-{oidc_subject[:12]}"
 
         user = User(
             callsign=placeholder_callsign,
             oidc_subject=oidc_subject,
             name=name,
-            role=role,
+            is_admin=is_first,
+            is_pending=not is_first,
             email=email or None,
         )
         db.add(user)
+        db.flush()
+
+        # Add new non-admin users to the default net (id=1) as VIEWERs so
+        # they can see net content immediately.  Admins don't need a membership
+        # row because require_net_role bypasses the check for is_admin=True.
+        if not is_first:
+            from backend.modules.nets.models import Net, NetMembership, NetRole as NR
+
+            default_net = db.get(Net, 1)
+            if default_net is not None:
+                db.add(NetMembership(user_callsign=placeholder_callsign, net_id=1, role=NR.VIEWER))
+
         db.commit()
         db.refresh(user)
 
-    jwt_token = create_access_token(user.callsign, user.role.value, app_settings, user.token_version)
+    jwt_token = create_access_token(user, app_settings)
     response = RedirectResponse(url=app_settings.app_base_url)
     is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
@@ -276,7 +288,8 @@ async def me(user: User = Depends(get_current_user)):
     return {
         "callsign": user.callsign,
         "name": user.name,
-        "role": user.role.value,
+        "is_admin": user.is_admin,
+        "is_pending": user.is_pending,
         "email": user.email,
         "pending_callsign": user.pending_callsign,
     }
@@ -353,7 +366,7 @@ async def register(
     # (which no longer exists), so the *very next* request 401s
     # ("User not found") and the user has to sign in again. Use the
     # current token_version so the new cookie is immediately valid.
-    new_jwt = create_access_token(user.callsign, user.role.value, app_settings, user.token_version)
+    new_jwt = create_access_token(user, app_settings)
     is_secure = app_settings.app_base_url.startswith("https://")
     response.set_cookie(
         key="access_token",
@@ -365,13 +378,14 @@ async def register(
     )
 
     # Notify admins (fire-and-forget)
-    admins = db.query(User).filter(User.role == UserRole.ADMIN).all()
+    admins = db.query(User).filter(User.is_admin.is_(True)).all()
     await notify_admins_new_registration(db, admins, user)
 
     return {
         "callsign": user.callsign,
         "name": user.name,
-        "role": user.role.value,
+        "is_admin": user.is_admin,
+        "is_pending": user.is_pending,
         "email": user.email,
         "pending_callsign": user.pending_callsign,
     }
@@ -400,25 +414,27 @@ async def update_me(
     db.refresh(user)
 
     # Notify admins (fire-and-forget)
-    admins = db.query(User).filter(User.role == UserRole.ADMIN).all()
+    admins = db.query(User).filter(User.is_admin.is_(True)).all()
     await notify_admins_callsign_change(db, admins, user, callsign)
 
     return {
         "callsign": user.callsign,
         "name": user.name,
-        "role": user.role.value,
+        "is_admin": user.is_admin,
+        "is_pending": user.is_pending,
         "email": user.email,
         "pending_callsign": user.pending_callsign,
     }
 
 
-class UserRoleUpdate(BaseModel):
-    role: UserRole
+class UserStatusUpdate(BaseModel):
+    is_admin: bool | None = None
+    is_pending: bool | None = None
 
 
 @auth_router.get("/users")
 async def list_users(
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     users = db.query(User).order_by(User.callsign).all()
@@ -426,7 +442,8 @@ async def list_users(
         {
             "callsign": u.callsign,
             "name": u.name,
-            "role": u.role.value,
+            "is_admin": u.is_admin,
+            "is_pending": u.is_pending,
             "email": u.email,
             "pending_callsign": u.pending_callsign,
         }
@@ -437,20 +454,21 @@ async def list_users(
 @auth_router.patch("/users/{callsign}")
 async def update_user_role(
     callsign: str,
-    body: UserRoleUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    body: UserStatusUpdate,
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     target_user = db.get(User, callsign)
     if target_user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    old_role = target_user.role.value
-    was_pending = target_user.role == UserRole.PENDING
-    target_user.role = body.role
-    # Bump token_version so any outstanding JWT for this user — which
-    # encoded the old role — is rejected on next request. Without this,
-    # a demoted admin keeps admin privileges until their JWT expires
-    # (jwt_expire_minutes, default 1440 / 24 h).
+    was_pending = target_user.is_pending
+    if body.is_admin is not None:
+        target_user.is_admin = body.is_admin
+    if body.is_pending is not None:
+        target_user.is_pending = body.is_pending
+    # Bump token_version so any outstanding JWT for this user is rejected on
+    # next request. Without this, a demoted admin keeps admin privileges until
+    # their JWT expires (jwt_expire_minutes, default 1440 / 24 h).
     target_user.token_version += 1
     db.commit()
     db.refresh(target_user)
@@ -459,14 +477,15 @@ async def update_user_role(
         actor=user.callsign,
         action="user.role_changed",
         target=callsign,
-        details={"from": old_role, "to": body.role.value},
+        details={"is_admin": target_user.is_admin, "is_pending": target_user.is_pending},
     )
-    if was_pending and target_user.role != UserRole.PENDING:
+    if was_pending and not target_user.is_pending:
         await notify_user_approved(db, target_user)
     return {
         "callsign": target_user.callsign,
         "name": target_user.name,
-        "role": target_user.role.value,
+        "is_admin": target_user.is_admin,
+        "is_pending": target_user.is_pending,
         "email": target_user.email,
         "pending_callsign": target_user.pending_callsign,
     }
@@ -475,7 +494,7 @@ async def update_user_role(
 @auth_router.post("/users/{callsign}/approve-callsign")
 async def approve_callsign(
     callsign: str,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     target_user = db.get(User, callsign)
@@ -508,7 +527,8 @@ async def approve_callsign(
     return {
         "callsign": updated_user.callsign,
         "name": updated_user.name,
-        "role": updated_user.role.value,
+        "is_admin": updated_user.is_admin,
+        "is_pending": updated_user.is_pending,
         "email": updated_user.email,
         "pending_callsign": updated_user.pending_callsign,
     }
@@ -517,7 +537,7 @@ async def approve_callsign(
 @auth_router.delete("/users/{callsign}/pending-callsign")
 async def reject_callsign(
     callsign: str,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     target_user = db.get(User, callsign)

@@ -4,8 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, optional_user_with_scope, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import (
+    get_current_user,
+    get_db_session,
+    optional_user_with_scope,
+    require_admin,
+    require_net_member,
+)
+from backend.auth.models import User
 from backend.modules.roster.models import RosterLog
 from backend.modules.schedule.models import (
     NetSeason,
@@ -150,7 +156,7 @@ def _season_to_response(db: Session, season: NetSeason) -> dict:
 @schedule_router.post("/seasons", status_code=201)
 async def create_season(
     body: SeasonCreate,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     if body.end_date < body.start_date:
@@ -219,7 +225,7 @@ async def list_season_sessions(
 @schedule_router.post("/sessions", status_code=201)
 async def create_session_route(
     body: SessionCreate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     if body.session_type == SessionType.REAL_EVENT and body.season_id is not None:
@@ -253,7 +259,7 @@ async def list_sessions_route(
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
     # Anonymous and PENDING (unapproved) viewers see only COMPLETED sessions.
-    is_public_viewer = user is None or user.role == UserRole.PENDING
+    is_public_viewer = user is None or user.is_pending
     if is_public_viewer:
         status_enum = SessionStatus.COMPLETED
 
@@ -277,7 +283,7 @@ async def get_session_route(
 async def update_session(
     session_id: int,
     body: SessionUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     session_obj = update_session_service(
@@ -298,7 +304,7 @@ async def update_session(
 @schedule_router.delete("/seasons/{season_id}", status_code=204)
 async def delete_season(
     season_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     season = db.get(NetSeason, season_id)

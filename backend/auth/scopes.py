@@ -1,46 +1,53 @@
-from typing import TypedDict
+ADMIN_SCOPES = {
+    "users:read",
+    "users:write",
+    "config:read",
+    "config:write",
+    "nets:read",
+    "nets:write",
+    "nets:members:write",
+}
+PER_NET_SCOPES = {
+    "schedule:read",
+    "schedule:write",
+    "checkins:read",
+    "checkins:write",
+    "roster:read",
+    "map:read",
+}
+SCOPE_NAMES: set[str] = ADMIN_SCOPES | PER_NET_SCOPES
 
-from backend.auth.models import UserRole
-
-
-class ScopeEntry(TypedDict):
-    description: str
-    min_role: UserRole
-
-
-# Scope name → minimum role required to create a token with this scope.
-# Role hierarchy: ADMIN > NET_CONTROL > VIEWER > PENDING
-_ROLE_RANK: dict[UserRole, int] = {
-    UserRole.PENDING: 0,
-    UserRole.VIEWER: 1,
-    UserRole.NET_CONTROL: 2,
-    UserRole.ADMIN: 3,
+# Keep SCOPES dict for backward-compat with PAT route UI (description strings).
+# Keys are scope names; values have a "description" field.
+SCOPES: dict[str, dict] = {
+    "schedule:read": {"description": "View sessions"},
+    "schedule:write": {"description": "Create/edit/delete sessions"},
+    "checkins:read": {"description": "View check-in data"},
+    "checkins:write": {"description": "Submit/manage check-ins"},
+    "roster:read": {"description": "View roster data"},
+    "map:read": {"description": "View map/GeoJSON data"},
+    "users:read": {"description": "List users"},
+    "users:write": {"description": "Manage users/roles"},
+    "config:read": {"description": "View app configuration"},
+    "config:write": {"description": "Modify app configuration"},
+    "nets:read": {"description": "List nets"},
+    "nets:write": {"description": "Create/edit nets"},
+    "nets:members:write": {"description": "Manage net memberships"},
 }
 
-SCOPES: dict[str, ScopeEntry] = {
-    "schedule:read": {"description": "View sessions", "min_role": UserRole.VIEWER},
-    "schedule:write": {"description": "Create/edit/delete sessions", "min_role": UserRole.NET_CONTROL},
-    "checkins:read": {"description": "View check-in data", "min_role": UserRole.VIEWER},
-    "checkins:write": {"description": "Submit/manage check-ins", "min_role": UserRole.NET_CONTROL},
-    "roster:read": {"description": "View roster data", "min_role": UserRole.NET_CONTROL},
-    "map:read": {"description": "View map/GeoJSON data", "min_role": UserRole.VIEWER},
-    "users:read": {"description": "List users", "min_role": UserRole.ADMIN},
-    "users:write": {"description": "Manage users/roles", "min_role": UserRole.ADMIN},
-    "config:read": {"description": "View app configuration", "min_role": UserRole.ADMIN},
-    "config:write": {"description": "Modify app configuration", "min_role": UserRole.ADMIN},
-}
 
-SCOPE_NAMES: set[str] = set(SCOPES.keys())
+def validate_pat_scopes(scopes: list[str], is_admin: bool, net_id: int | None) -> None:
+    """Validate scopes for a PAT.
 
-
-def validate_scopes_for_role(scopes: list[str], role: UserRole) -> None:
+    ``net_id`` is optional: if provided, the token is scoped to a specific net
+    and ``require_net_role`` will enforce cross-net isolation.  When ``None``
+    the token is valid for any net the user is a member of (or all nets if the
+    user is an admin).
+    """
     if not scopes:
         raise ValueError("Token must have at least one scope")
-
-    user_rank = _ROLE_RANK[role]
-    for scope in scopes:
-        if scope not in SCOPES:
-            raise ValueError(f"Unknown scope: {scope}")
-        required_rank = _ROLE_RANK[SCOPES[scope]["min_role"]]
-        if user_rank < required_rank:
-            raise ValueError(f"Your role cannot use scope: {scope}")
+    for s in scopes:
+        if s not in SCOPE_NAMES:
+            raise ValueError(f"Unknown scope: {s}")
+        if s in ADMIN_SCOPES and not is_admin:
+            raise ValueError(f"Only admins can issue scope: {s}")

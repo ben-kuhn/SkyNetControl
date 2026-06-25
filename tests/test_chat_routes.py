@@ -7,16 +7,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.config_mgmt.models import AppConfig
 from backend.modules.activities.routes import activities_router
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -42,7 +39,7 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         session.add(admin)
         # Seed Claude API key in AppConfig
@@ -70,7 +67,7 @@ async def test_client(test_app):
 
 @pytest.mark.asyncio
 async def test_create_chat_session(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
         "/api/activities/chat/sessions",
         cookies={"access_token": token},
@@ -84,7 +81,7 @@ async def test_create_chat_session(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_send_chat_message(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # Create session
     create_resp = await test_client.post(
@@ -112,7 +109,7 @@ async def test_send_chat_message(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_get_chat_session_with_messages(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     create_resp = await test_client.post(
         "/api/activities/chat/sessions",
@@ -142,7 +139,7 @@ async def test_get_chat_session_with_messages(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_approve_chat_creates_activity(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     create_resp = await test_client.post(
         "/api/activities/chat/sessions",
@@ -182,7 +179,7 @@ async def test_send_message_without_api_key(test_client, test_settings, db_setup
             session.delete(config)
             session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     create_resp = await test_client.post(
         "/api/activities/chat/sessions",

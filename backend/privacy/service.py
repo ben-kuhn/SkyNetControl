@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.pat_models import PersonalAccessToken
 from backend.audit.models import AuditLog
 from backend.audit.service import log_action
@@ -29,8 +29,8 @@ def anonymize_user(
     if user is None:
         raise ValueError("User not found")
 
-    if user.role == UserRole.ADMIN:
-        admin_count = db.query(User).filter(User.role == UserRole.ADMIN).count()
+    if user.is_admin:
+        admin_count = db.query(User).filter(User.is_admin.is_(True)).count()
         if admin_count <= 1:
             raise ValueError("Cannot anonymize: sole admin")
         raise ValueError("Cannot anonymize an admin")
@@ -95,7 +95,7 @@ def anonymize_user(
         # anonymizations don't collide on a shared "deleted" sentinel.
         oidc_subject=f"deleted:{anon_id}",
         name="Deleted User",
-        role=UserRole.DELETED,
+        is_deleted=True,
         email=None,
         pending_callsign=None,
         created_at=created_at,
@@ -123,7 +123,8 @@ def export_user_data(db: Session, callsign: str) -> dict:
         "callsign": user.callsign,
         "name": user.name,
         "email": user.email,
-        "role": user.role.value,
+        "is_admin": user.is_admin,
+        "is_pending": user.is_pending,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 

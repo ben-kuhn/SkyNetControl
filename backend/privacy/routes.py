@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import get_current_user, get_db_session, require_admin
+from backend.auth.models import User
 from backend.privacy.service import anonymize_user, export_user_data
 
 privacy_router = APIRouter()
@@ -31,7 +31,7 @@ def export_own_data(
 @privacy_router.get("/export/{callsign}")
 def export_user_data_admin(
     callsign: str,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     try:
@@ -74,7 +74,7 @@ def anonymize_own_account(
 def anonymize_user_admin(
     callsign: str,
     body: AnonymizeRequest,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     if not body.confirm:

@@ -8,6 +8,36 @@ from backend.config import Settings
 from backend.db.base import Base
 
 
+def make_test_token(
+    callsign: str,
+    settings: Settings,
+    *,
+    is_admin: bool = False,
+    is_pending: bool = False,
+    token_version: int = 0,
+) -> str:
+    """Mint a test JWT for *callsign* without requiring a DB row.
+
+    Use this in tests instead of calling ``create_access_token`` with the old
+    ``(callsign, role_str, settings)`` signature — the real function now
+    requires a ``User`` object.
+    """
+    from backend.auth.models import User
+    from backend.auth.service import create_access_token
+
+    # create_access_token only reads .callsign, .is_admin, .is_pending, .token_version
+    # from the user object; we can satisfy this with a SimpleNamespace rather
+    # than a full ORM-instrumented User instance.
+    from types import SimpleNamespace
+    stub = SimpleNamespace(
+        callsign=callsign,
+        is_admin=is_admin,
+        is_pending=is_pending,
+        token_version=token_version,
+    )
+    return create_access_token(stub, settings)
+
+
 # Many tests construct routes / call upsert_oauth_provider without going
 # through create_app, so the secret_box key isn't bound. Install a fixed
 # test key once at session start — encrypt/decrypt are symmetric within a

@@ -260,7 +260,6 @@ def test_process_raw_message_low_confidence(db, season_and_session):
     assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
 
 
-<<<<<<< HEAD
 def test_process_raw_message_reverse_geocodes_when_city_missing(db, season_and_session, monkeypatch):
     """A form with valid lat/lon but no city falls through to the Overpass
     reverse-geocode hook in `_compute_checkin_fields`."""
@@ -347,7 +346,6 @@ def test_process_raw_message_no_reverse_geocode_when_city_already_set(db, season
     assert checkin.state == "MI"
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_scan_and_import_deduplicates(db, season_and_session):
     _, net_session = season_and_session
 
@@ -375,7 +373,6 @@ def test_scan_and_import_deduplicates(db, season_and_session):
     assert checkins[0].city == "Aurora"
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_scan_and_import_retains_source_files(db, season_and_session, tmp_path):
     """After a successful import, PAT mailbox files are kept on disk (deletion
     is deferred until the session roster is sent/skipped). The RawMessage rows
@@ -689,16 +686,15 @@ def test_get_checkins_by_callsign_returns_all_sessions_desc(db):
     assert get_checkins_by_callsign(db, "NOBODY") == []
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_scan_creates_notification_when_checkins_imported(db, season_and_session):
     """After importing at least one check-in, the session's NCS gets a notification."""
     from datetime import datetime, timezone
-    from backend.auth.models import User, UserRole
+    from backend.auth.models import User
     from backend.modules.notifications.models import Notification, NotificationKind
 
     season, session = season_and_session
     session.net_control_callsign = "W0NE"
-    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", role=UserRole.NET_CONTROL))
+    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", ))
     db.commit()
 
     raw_messages = [
@@ -740,7 +736,6 @@ def test_scan_creates_no_notification_when_no_imports(db, season_and_session):
     assert db.query(Notification).count() == 0
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_scan_and_import_persists_source_path(db, tmp_path):
     """New imports record their on-disk path on the RawMessage row."""
     net_session = NetSession(

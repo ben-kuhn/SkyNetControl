@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.config_mgmt.models import AppConfig
 from backend.modules.schedule.models import (
@@ -19,11 +19,8 @@ from backend.modules.schedule.models import (
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
 from backend.modules.checkins.routes import checkins_router
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -49,21 +46,29 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         nc = User(
             callsign="W0NC",
             oidc_subject="auth0|nc",
             name="Net Control",
-            role=UserRole.NET_CONTROL,
+            
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
-        session.add_all([admin, nc, viewer])
+        nomember = User(callsign="W0NOMEMBER", oidc_subject="auth0|nomember", name="No Member")
+        session.add_all([admin, nc, viewer, nomember])
+
+        from backend.modules.nets.models import Net, NetMembership, NetRole
+        net = Net(slug="default", name="Default Net")
+        session.add(net)
+        session.flush()
+        session.add(NetMembership(user_callsign="W0NC", net_id=net.id, role=NetRole.NET_CONTROL))
+        session.add(NetMembership(user_callsign="KD0TST", net_id=net.id, role=NetRole.VIEWER))
 
         session.add(AppConfig(key="pat_mailbox_path", value="/tmp/test-mailbox"))
         session.add(AppConfig(key="net_address", value="w0ne@winlink.org"))
@@ -107,7 +112,7 @@ async def test_client(test_app):
 
 @pytest.mark.asyncio
 async def test_scan_mailbox(test_client, test_settings):
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     mock_messages = [
         {
@@ -148,7 +153,7 @@ async def test_get_checkins_for_session(test_client, test_settings, db_setup):
         session.add(checkin)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/checkins/session/1",
         cookies={"access_token": token},
@@ -161,7 +166,7 @@ async def test_get_checkins_for_session(test_client, test_settings, db_setup):
 
 @pytest.mark.asyncio
 async def test_create_manual_checkin(test_client, test_settings):
-    token = create_access_token("W0NC", "net_control", test_settings)
+    token = make_test_token("W0NC", test_settings, token_version=0)
     response = await test_client.post(
         "/api/checkins/manual",
         json={
@@ -195,7 +200,7 @@ async def test_update_checkin(test_client, test_settings, db_setup):
         session.commit()
         checkin_id = checkin.id
 
-    token = create_access_token("W0NC", "net_control", test_settings)
+    token = make_test_token("W0NC", test_settings, token_version=0)
     response = await test_client.patch(
         f"/api/checkins/{checkin_id}",
         json={"name": "John Smith", "city": "Denver"},
@@ -221,7 +226,7 @@ async def test_delete_checkin(test_client, test_settings, db_setup):
         session.commit()
         checkin_id = checkin.id
 
-    token = create_access_token("W0NC", "net_control", test_settings)
+    token = make_test_token("W0NC", test_settings, token_version=0)
     resp = await test_client.delete(
         f"/api/checkins/{checkin_id}",
         cookies={"access_token": token},
@@ -238,7 +243,8 @@ async def test_delete_checkin(test_client, test_settings, db_setup):
 
 
 @pytest.mark.asyncio
-async def test_delete_checkin_viewer_denied(test_client, test_settings, db_setup):
+async def test_delete_checkin_non_member_denied(test_client, test_settings, db_setup):
+    """Users with no net membership cannot delete checkins."""
     with db_setup() as session:
         checkin = CheckIn(
             session_id=1,
@@ -252,7 +258,7 @@ async def test_delete_checkin_viewer_denied(test_client, test_settings, db_setup
         session.commit()
         checkin_id = checkin.id
 
-    token = create_access_token("KD0TST", "viewer", test_settings)
+    token = make_test_token("W0NOMEMBER", test_settings, token_version=0)
     resp = await test_client.delete(
         f"/api/checkins/{checkin_id}",
         cookies={"access_token": token},
@@ -275,7 +281,7 @@ async def test_approve_session(test_client, test_settings, db_setup):
         session.add(checkin)
         session.commit()
 
-    token = create_access_token("W0NC", "net_control", test_settings)
+    token = make_test_token("W0NC", test_settings, token_version=0)
     response = await test_client.post(
         "/api/checkins/approve/1",
         cookies={"access_token": token},
@@ -287,8 +293,9 @@ async def test_approve_session(test_client, test_settings, db_setup):
 
 
 @pytest.mark.asyncio
-async def test_viewer_can_read_but_not_scan(test_client, test_settings):
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+async def test_member_can_read_and_scan(test_client, test_settings):
+    """Net members (including viewers) can read checkins and trigger scan."""
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
 
     response = await test_client.get(
         "/api/checkins/session/1",
@@ -301,6 +308,20 @@ async def test_viewer_can_read_but_not_scan(test_client, test_settings):
         response = await test_client.post(
             "/api/checkins/scan/1",
             cookies={"access_token": viewer_token},
+        )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_non_member_cannot_scan(test_client, test_settings):
+    """Users with no net membership are denied scan access."""
+    non_member_token = make_test_token("W0NOMEMBER", test_settings, token_version=0)
+
+    with patch("backend.modules.checkins.routes.read_mailbox") as mock_read:
+        mock_read.return_value = []
+        response = await test_client.post(
+            "/api/checkins/scan/1",
+            cookies={"access_token": non_member_token},
         )
     assert response.status_code == 403
 
@@ -320,7 +341,7 @@ async def test_get_members(test_client, test_settings, db_setup):
         session.add(member)
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/checkins/members",
         cookies={"access_token": token},
@@ -335,7 +356,7 @@ async def test_get_members(test_client, test_settings, db_setup):
 @pytest.mark.asyncio
 async def test_get_modes_returns_default(test_client, test_settings):
     """Any authenticated user can fetch the modes list."""
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
         "/api/checkins/modes",
         cookies={"access_token": viewer_token},
@@ -368,7 +389,7 @@ async def test_get_checkins_by_callsign_returns_history(test_client, test_settin
         session.add(checkin)
         session.commit()
 
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
         "/api/checkins/by-callsign/w0ne",  # case-insensitive
         cookies={"access_token": viewer_token},
@@ -384,7 +405,7 @@ async def test_get_checkins_by_callsign_returns_history(test_client, test_settin
 @pytest.mark.asyncio
 async def test_get_checkins_by_callsign_empty(test_client, test_settings):
     """Unknown callsign returns 200 with empty list, not 404."""
-    viewer_token = create_access_token("KD0TST", "viewer", test_settings)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
         "/api/checkins/by-callsign/NOBODY",
         cookies={"access_token": viewer_token},
@@ -454,7 +475,7 @@ async def test_get_session_checkins_authenticated_sees_non_completed(test_client
         net_session = session.query(NetSession).first()
         net_session_id = net_session.id
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         f"/api/checkins/session/{net_session_id}",
         cookies={"access_token": token},
@@ -472,14 +493,14 @@ async def test_get_session_checkins_pending_user_sees_only_completed(test_client
             callsign="PENDING-x",
             oidc_subject="auth0|pending",
             name="Pending",
-            role=UserRole.PENDING,
+            is_pending=True,
         )
         session.add(pending)
         session.commit()
         net_session = session.query(NetSession).first()
         net_session_id = net_session.id
 
-    token = create_access_token("PENDING-x", "pending", test_settings)
+    token = make_test_token("PENDING-x", test_settings, is_pending=True, token_version=0)
     resp = await test_client.get(
         f"/api/checkins/session/{net_session_id}",
         cookies={"access_token": token},
@@ -516,7 +537,7 @@ async def test_list_checkins_includes_raw_message(test_client, test_settings, db
         ))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/checkins/session/1",
         cookies={"access_token": token},
@@ -546,7 +567,7 @@ async def test_list_checkins_raw_message_null_for_manual(test_client, test_setti
         ))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
         "/api/checkins/session/1",
         cookies={"access_token": token},
@@ -606,7 +627,7 @@ async def test_winlink_form_checkin_response_includes_form_view_html(
         ))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/checkins/session/1",
         cookies={"access_token": token},
@@ -647,7 +668,7 @@ async def test_non_winlink_checkin_response_has_null_form_view_html(
         ))
         session.commit()
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/checkins/session/1",
         cookies={"access_token": token},

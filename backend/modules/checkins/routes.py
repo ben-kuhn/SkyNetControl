@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import get_current_user, get_db_session, get_optional_user, require_net_member
+from backend.auth.models import User
 from backend.config_mgmt.service import get_config_value, get_checkin_modes
 from backend.modules.checkins.mailbox_reader import read_mailbox
 from backend.modules.checkins.models import (
@@ -138,7 +138,7 @@ async def get_modes_route(
 @checkins_router.post("/scan/{session_id}")
 async def scan_mailbox_route(
     session_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     net_session = db.get(NetSession, session_id)
@@ -177,7 +177,7 @@ async def get_session_checkins_route(
 
     # PENDING users are treated like anonymous for this public endpoint —
     # they shouldn't see in-progress sessions before admin approval.
-    is_public_viewer = user is None or user.role == UserRole.PENDING
+    is_public_viewer = user is None or user.is_pending
     if is_public_viewer and net_session.status != SessionStatus.COMPLETED:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -188,7 +188,7 @@ async def get_session_checkins_route(
 @checkins_router.post("/manual", status_code=201)
 async def create_manual_checkin_route(
     body: ManualCheckinCreate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     net_session = db.get(NetSession, body.session_id)
@@ -213,7 +213,7 @@ async def create_manual_checkin_route(
 async def update_checkin_route(
     checkin_id: int,
     body: CheckinUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     checkin = update_checkin(
@@ -236,7 +236,7 @@ async def update_checkin_route(
 @checkins_router.delete("/{checkin_id}", status_code=204)
 async def delete_checkin_route(
     checkin_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     if not delete_checkin(db, checkin_id):
@@ -281,7 +281,7 @@ async def reparse_session_route(
 @checkins_router.post("/approve/{session_id}")
 async def approve_session_route(
     session_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     net_session = db.get(NetSession, session_id)
@@ -320,7 +320,7 @@ async def get_checkins_by_callsign_route(
 @checkins_router.get("/lookup/{callsign}")
 async def lookup_callsign_route(
     callsign: str,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     if not is_callbook_configured(db):

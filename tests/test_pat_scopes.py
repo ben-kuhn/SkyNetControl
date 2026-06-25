@@ -1,7 +1,6 @@
 import pytest
 
-from backend.auth.scopes import SCOPES, SCOPE_NAMES, validate_scopes_for_role
-from backend.auth.models import UserRole
+from backend.auth.scopes import SCOPES, SCOPE_NAMES, ADMIN_SCOPES, PER_NET_SCOPES, validate_pat_scopes
 
 
 def test_scopes_dict_has_expected_entries():
@@ -15,40 +14,43 @@ def test_scopes_dict_has_expected_entries():
     assert "users:write" in SCOPES
     assert "config:read" in SCOPES
     assert "config:write" in SCOPES
-    assert len(SCOPES) == 10
 
 
 def test_scope_names_matches_scopes_keys():
     assert SCOPE_NAMES == set(SCOPES.keys())
 
 
-def test_validate_scopes_viewer_can_read_schedule():
-    validate_scopes_for_role(["schedule:read"], UserRole.VIEWER)
+def test_admin_scopes_are_separate_from_per_net_scopes():
+    assert ADMIN_SCOPES.isdisjoint(PER_NET_SCOPES)
+    assert ADMIN_SCOPES | PER_NET_SCOPES == SCOPE_NAMES
 
 
-def test_validate_scopes_viewer_cannot_write_schedule():
-    with pytest.raises(ValueError, match="schedule:write"):
-        validate_scopes_for_role(["schedule:write"], UserRole.VIEWER)
+def test_validate_pat_scopes_admin_can_use_admin_scope():
+    validate_pat_scopes(["users:read"], is_admin=True, net_id=None)
 
 
-def test_validate_scopes_net_control_can_write_schedule():
-    validate_scopes_for_role(["schedule:write"], UserRole.NET_CONTROL)
+def test_validate_pat_scopes_non_admin_cannot_use_admin_scope():
+    with pytest.raises(ValueError, match="Only admins"):
+        validate_pat_scopes(["users:read"], is_admin=False, net_id=None)
 
 
-def test_validate_scopes_admin_can_use_all():
-    validate_scopes_for_role(list(SCOPES.keys()), UserRole.ADMIN)
+def test_validate_pat_scopes_non_admin_can_use_per_net_scope():
+    validate_pat_scopes(["schedule:read"], is_admin=False, net_id=None)
 
 
-def test_validate_scopes_rejects_unknown_scope():
+def test_validate_pat_scopes_per_net_scope_with_net_id():
+    validate_pat_scopes(["schedule:read"], is_admin=False, net_id=1)
+
+
+def test_validate_pat_scopes_rejects_unknown_scope():
     with pytest.raises(ValueError, match="invalid:scope"):
-        validate_scopes_for_role(["invalid:scope"], UserRole.ADMIN)
+        validate_pat_scopes(["invalid:scope"], is_admin=True, net_id=None)
 
 
-def test_validate_scopes_rejects_empty():
+def test_validate_pat_scopes_rejects_empty():
     with pytest.raises(ValueError, match="at least one"):
-        validate_scopes_for_role([], UserRole.ADMIN)
+        validate_pat_scopes([], is_admin=True, net_id=None)
 
 
-def test_validate_scopes_pending_role_rejected():
-    with pytest.raises(ValueError, match="schedule:read"):
-        validate_scopes_for_role(["schedule:read"], UserRole.PENDING)
+def test_validate_pat_scopes_admin_can_mix_scopes():
+    validate_pat_scopes(["users:read", "schedule:read"], is_admin=True, net_id=None)

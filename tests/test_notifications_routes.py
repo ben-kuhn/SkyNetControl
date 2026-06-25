@@ -7,16 +7,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.service import create_access_token
 from backend.modules.notifications.routes import notifications_router
 from backend.modules.notifications.models import Notification, NotificationKind
 from backend.config import Settings
+from tests.conftest import make_test_token
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -38,8 +35,8 @@ def db_setup():
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
-        admin = User(callsign="W0NE", oidc_subject="x|a", name="Admin", role=UserRole.ADMIN)
-        viewer = User(callsign="KD0TST", oidc_subject="x|v", name="Viewer", role=UserRole.VIEWER)
+        admin = User(callsign="W0NE", oidc_subject="x|a", name="Admin", is_admin=True)
+        viewer = User(callsign="KD0TST", oidc_subject="x|v", name="Viewer", )
         session.add_all([admin, viewer])
         session.commit()
     return factory
@@ -81,7 +78,7 @@ async def test_list_returns_unread_only_by_default(test_client, test_settings, d
     _seed(db_setup, "W0NE")
     _seed(db_setup, "W0NE", read=True)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/notifications/",
         cookies={"access_token": token},
@@ -97,7 +94,7 @@ async def test_list_with_all_includes_read(test_client, test_settings, db_setup)
     _seed(db_setup, "W0NE")
     _seed(db_setup, "W0NE", read=True)
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/notifications/?all=1",
         cookies={"access_token": token},
@@ -111,7 +108,7 @@ async def test_list_only_returns_users_own(test_client, test_settings, db_setup)
     _seed(db_setup, "W0NE")
     _seed(db_setup, "KD0TST")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
         "/api/notifications/",
         cookies={"access_token": token},
@@ -125,7 +122,7 @@ async def test_list_only_returns_users_own(test_client, test_settings, db_setup)
 async def test_mark_one_read(test_client, test_settings, db_setup):
     nid = _seed(db_setup, "W0NE")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         f"/api/notifications/{nid}/read",
         cookies={"access_token": token},
@@ -138,7 +135,7 @@ async def test_mark_one_read(test_client, test_settings, db_setup):
 async def test_mark_one_read_not_owned_returns_404(test_client, test_settings, db_setup):
     nid = _seed(db_setup, "KD0TST")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         f"/api/notifications/{nid}/read",
         cookies={"access_token": token},
@@ -152,7 +149,7 @@ async def test_mark_all_read(test_client, test_settings, db_setup):
     _seed(db_setup, "W0NE")
     _seed(db_setup, "KD0TST")
 
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.post(
         "/api/notifications/read-all",
         cookies={"access_token": token},

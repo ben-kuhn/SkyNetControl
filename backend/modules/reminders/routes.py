@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import get_current_user, get_db_session, require_net_member
+from backend.auth.models import User
 from backend.modules.reminders.models import ReminderLog, ReminderStatus, ReminderTemplate, TemplateType
 from backend.modules.reminders.service import (
     approve_reminder,
@@ -84,7 +84,7 @@ def _reminder_to_response(log: ReminderLog) -> dict:
 @reminders_router.post("/templates", status_code=201)
 async def create_template_route(
     body: TemplateCreate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     template = create_template(
@@ -110,7 +110,7 @@ async def list_templates_route(
 
 @reminders_router.get("/template-defaults")
 async def template_defaults_route(
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
 ):
     """Return the shipped seed templates so the "+ New template" UI can
     pre-fill from pristine originals, even after operators have edited
@@ -124,7 +124,7 @@ async def template_defaults_route(
 async def update_template_route(
     template_id: int,
     body: TemplateUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     template = update_template(
@@ -145,7 +145,7 @@ async def update_template_route(
 @reminders_router.delete("/templates/{template_id}", status_code=204)
 async def delete_template_route(
     template_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     from backend.modules.reminders.service import get_template
@@ -163,7 +163,7 @@ async def delete_template_route(
 
 @reminders_router.post("/generate")
 async def generate_due_drafts_route(
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     reminders = generate_due_drafts(db)
@@ -176,7 +176,7 @@ async def generate_due_drafts_route(
 @reminders_router.post("/generate/{session_id}")
 async def generate_draft_route(
     session_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = generate_draft(db, session_id)
@@ -246,7 +246,7 @@ async def get_reminder_for_session_route(
 async def update_draft_route(
     reminder_id: int,
     body: DraftUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = update_draft(
@@ -263,7 +263,7 @@ async def update_draft_route(
 @reminders_router.post("/{reminder_id}/approve")
 async def approve_reminder_route(
     reminder_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = approve_reminder(db, reminder_id, approver_callsign=user.callsign)
@@ -275,7 +275,7 @@ async def approve_reminder_route(
 @reminders_router.post("/{reminder_id}/send")
 async def mark_sent_route(
     reminder_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = mark_sent(db, reminder_id)
@@ -287,7 +287,7 @@ async def mark_sent_route(
 @reminders_router.post("/{reminder_id}/skip")
 async def skip_reminder_route(
     reminder_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = skip_reminder(db, reminder_id)
@@ -299,7 +299,7 @@ async def skip_reminder_route(
 @reminders_router.post("/{reminder_id}/regenerate")
 async def regenerate_reminder_route(
     reminder_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     log = regenerate_draft(db, reminder_id)

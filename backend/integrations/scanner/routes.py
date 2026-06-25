@@ -3,8 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_db_session, require_role
-from backend.auth.models import UserRole
+from backend.auth.dependencies import get_db_session, require_net_member
 from backend.integrations.scanner.service import run_scan, scanner_state
 
 scanner_router = APIRouter()
@@ -12,7 +11,7 @@ scanner_router = APIRouter()
 
 @scanner_router.get("/status")
 def get_scanner_status(
-    _user=Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    _user=Depends(require_net_member),
 ):
     next_scan_time = None
     if scanner_state.running and scanner_state.last_scan_time:
@@ -30,7 +29,7 @@ def get_scanner_status(
 @scanner_router.post("/trigger")
 def trigger_scan(
     db: Session = Depends(get_db_session),
-    _user=Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    _user=Depends(require_net_member),
 ):
     now = datetime.now(tz=timezone.utc)
     count = run_scan(db, now)

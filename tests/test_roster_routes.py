@@ -7,17 +7,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.auth.models import User, UserRole
-from backend.auth.service import create_access_token
+from backend.auth.models import User
 from backend.modules.roster.models import RosterTemplate
+from tests.conftest import make_test_token
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
 from backend.config import Settings
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -43,13 +39,13 @@ def db_setup():
             callsign="W0NE",
             oidc_subject="auth0|admin",
             name="Admin",
-            role=UserRole.ADMIN,
+            is_admin=True,
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            role=UserRole.VIEWER,
+            
         )
         season = NetSeason(
             name="Spring 2026",
@@ -124,15 +120,11 @@ def app(test_settings, db_setup):
     return application
 
 
-def _auth_cookie(settings, callsign, role):
-    token = create_access_token(callsign, role.value, settings)
-    return {"access_token": token}
-
-
 @pytest.fixture
 async def admin_client(app, test_settings, db_setup):
     transport = ASGITransport(app=app)
-    cookies = _auth_cookie(test_settings, "W0NE", UserRole.ADMIN)
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    cookies = {"access_token": token}
     async with AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as c:
         yield c
 
@@ -140,7 +132,8 @@ async def admin_client(app, test_settings, db_setup):
 @pytest.fixture
 async def viewer_client(app, test_settings, db_setup):
     transport = ASGITransport(app=app)
-    cookies = _auth_cookie(test_settings, "KD0TST", UserRole.VIEWER)
+    token = make_test_token("KD0TST", test_settings, token_version=0)
+    cookies = {"access_token": token}
     async with AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as c:
         yield c
 

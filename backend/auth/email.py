@@ -97,7 +97,7 @@ async def notify_user_approved(db: Session, user: User) -> None:
         db,
         user.email,
         "[SkyNetControl] Your account has been approved",
-        f"Your account ({user.callsign}) has been approved as {user.role.value}. "
+        f"Your account ({user.callsign}) has been approved. "
         f"You can now access SkyNetControl at {base_url}.",
     )
 

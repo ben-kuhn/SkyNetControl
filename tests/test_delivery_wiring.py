@@ -21,10 +21,6 @@ from backend.modules.schedule.models import (
     SessionType,
 )
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -164,7 +160,7 @@ def test_roster_mark_sent_dispatches_delivery(db):
 
 
 def test_reminder_send_failure_creates_delivery_failure_notification(db):
-    from backend.auth.models import User, UserRole
+    from backend.auth.models import User
     from backend.modules.reminders.service import mark_sent as reminder_mark_sent
     from backend.modules.reminders.models import ReminderLog, ReminderStatus
     from backend.modules.notifications.models import Notification, NotificationKind
@@ -182,7 +178,7 @@ def test_reminder_send_failure_creates_delivery_failure_notification(db):
         net_control_callsign="W0NE",
     )
     db.add(sess)
-    db.add(User(callsign="W0NE", oidc_subject="x", name="N", role=UserRole.NET_CONTROL))
+    db.add(User(callsign="W0NE", oidc_subject="x", name="N", ))
     db.flush()
 
     log = ReminderLog(
@@ -211,7 +207,7 @@ def test_reminder_send_failure_creates_delivery_failure_notification(db):
 
 
 def test_roster_send_failure_creates_delivery_failure_notification(db):
-    from backend.auth.models import User, UserRole
+    from backend.auth.models import User
     from backend.modules.roster.service import mark_sent as roster_mark_sent
     from backend.modules.roster.models import RosterLog, RosterStatus
     from backend.modules.notifications.models import Notification, NotificationKind
@@ -229,7 +225,7 @@ def test_roster_send_failure_creates_delivery_failure_notification(db):
         net_control_callsign="W0NE",
     )
     db.add(sess)
-    db.add(User(callsign="W0NE", oidc_subject="x", name="N", role=UserRole.NET_CONTROL))
+    db.add(User(callsign="W0NE", oidc_subject="x", name="N", ))
     db.flush()
 
     log = RosterLog(

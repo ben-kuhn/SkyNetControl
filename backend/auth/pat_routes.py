@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_db_session, require_not_pending
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.pat_service import create_token, list_tokens, revoke_token
 
 pat_router = APIRouter(tags=["tokens"])
@@ -37,7 +37,7 @@ async def create_token_route(
         result = create_token(
             db=db,
             user_callsign=user.callsign,
-            user_role=user.role,
+            is_admin=user.is_admin,
             name=body.name,
             scopes=body.scopes,
             expires_at=body.expires_at,
@@ -66,7 +66,7 @@ async def revoke_token_route(
             db=db,
             token_id=token_id,
             user_callsign=user.callsign,
-            is_admin=user.role == UserRole.ADMIN,
+            is_admin=user.is_admin,
         )
     except ValueError:
         raise HTTPException(status_code=404, detail="Token not found")

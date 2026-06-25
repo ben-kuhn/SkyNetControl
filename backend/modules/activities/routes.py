@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_role
-from backend.auth.models import User, UserRole
+from backend.auth.dependencies import get_current_user, get_db_session, require_admin, require_net_member
+from backend.auth.models import User
 from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.chat_service import (
     create_chat_session,
@@ -74,7 +74,7 @@ def _activity_to_response(activity: Activity) -> dict:
 @activities_router.post("/", status_code=201)
 async def create_activity_route(
     body: ActivityCreate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     activity = create_activity(
@@ -121,7 +121,7 @@ async def get_activity_route(
 async def update_activity_route(
     activity_id: int,
     body: ActivityUpdate,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     activity = update_activity(
@@ -140,7 +140,7 @@ async def update_activity_route(
 @activities_router.delete("/{activity_id}", status_code=204)
 async def delete_activity_route(
     activity_id: int,
-    user: User = Depends(require_role(UserRole.ADMIN)),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
     activity = get_activity(db, activity_id)
@@ -200,7 +200,7 @@ def _message_to_response(msg: ChatMessage) -> dict:
 
 @activities_router.post("/chat/sessions", status_code=201)
 async def create_chat_session_route(
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     chat = create_chat_session(db)
@@ -224,7 +224,7 @@ async def get_chat_session_route(
 async def send_chat_message_route(
     chat_session_id: int,
     body: ChatMessageRequest,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     chat = get_chat_session(db, chat_session_id)
@@ -256,7 +256,7 @@ async def send_chat_message_route(
 async def approve_chat_route(
     chat_session_id: int,
     body: ChatApproveRequest,
-    user: User = Depends(require_role(UserRole.ADMIN, UserRole.NET_CONTROL)),
+    user: User = Depends(require_net_member),
     db: Session = Depends(get_db_session),
 ):
     chat = get_chat_session(db, chat_session_id)

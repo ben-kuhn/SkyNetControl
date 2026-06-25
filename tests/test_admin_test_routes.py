@@ -10,18 +10,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.auth.routes import auth_router
-from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.config_mgmt.smtp import SmtpConfig, upsert_smtp_config
 from backend.config_mgmt.test_routes import _TEST_SESSIONS
 from backend.db.base import Base
-
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
+from tests.conftest import make_test_token
 
 
 @pytest.fixture(autouse=True)
@@ -72,11 +67,11 @@ def test_app(test_settings, db_setup):
 async def admin_client(test_app, test_settings):
     factory = test_app.state.session_factory
     with factory() as db:
-        admin = User(callsign="W0NE", oidc_subject="test:admin", name="Admin", role=UserRole.ADMIN)
+        admin = User(callsign="W0NE", oidc_subject="test:admin", name="Admin", is_admin=True)
         db.add(admin)
         db.commit()
         db.refresh(admin)
-    token = create_access_token("W0NE", "admin", test_settings)
+    token = make_test_token("W0NE", test_settings, is_admin=True)
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, token

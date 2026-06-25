@@ -10,7 +10,7 @@ from backend.auth.email import (
     notify_user_callsign_approved,
     send_email,
 )
-from backend.auth.models import User, UserRole
+from backend.auth.models import User
 from backend.config_mgmt.smtp import SmtpConfig, upsert_smtp_config
 from backend.db.base import Base
 
@@ -69,10 +69,9 @@ async def test_send_email_failure_does_not_raise(smtp_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_notify_admins_new_registration(smtp_db):
-    admin = User(callsign="W0NE", oidc_subject="g:1", name="Admin", role=UserRole.ADMIN, email="admin@example.com")
-    new_user = User(callsign="W0ABC", oidc_subject="g:2", name="New User", role=UserRole.PENDING)
+    admin = User(callsign="W0NE", oidc_subject="g:1", name="Admin", is_admin=True, email="admin@example.com")
+    new_user = User(callsign="W0ABC", oidc_subject="g:2", name="New User", is_pending=True)
 
     with patch("backend.auth.email.send_email") as mock_send:
         await notify_admins_new_registration(smtp_db, [admin], new_user)
@@ -83,10 +82,9 @@ async def test_notify_admins_new_registration(smtp_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_notify_admins_skips_admins_without_email(smtp_db):
-    admin_no_email = User(callsign="W0NE", oidc_subject="g:1", name="Admin", role=UserRole.ADMIN, email=None)
-    new_user = User(callsign="W0ABC", oidc_subject="g:2", name="New User", role=UserRole.PENDING)
+    admin_no_email = User(callsign="W0NE", oidc_subject="g:1", name="Admin", is_admin=True, email=None)
+    new_user = User(callsign="W0ABC", oidc_subject="g:2", name="New User", is_pending=True)
 
     with patch("backend.auth.email.send_email") as mock_send:
         await notify_admins_new_registration(smtp_db, [admin_no_email], new_user)
@@ -94,9 +92,8 @@ async def test_notify_admins_skips_admins_without_email(smtp_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_notify_user_approved(smtp_db):
-    user = User(callsign="W0ABC", oidc_subject="g:1", name="User", role=UserRole.VIEWER, email="user@example.com")
+    user = User(callsign="W0ABC", oidc_subject="g:1", name="User",  email="user@example.com")
 
     with patch("backend.auth.email.send_email") as mock_send:
         await notify_user_approved(smtp_db, user)
@@ -105,9 +102,8 @@ async def test_notify_user_approved(smtp_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_notify_user_approved_no_email(smtp_db):
-    user = User(callsign="W0ABC", oidc_subject="g:1", name="User", role=UserRole.VIEWER, email=None)
+    user = User(callsign="W0ABC", oidc_subject="g:1", name="User",  email=None)
 
     with patch("backend.auth.email.send_email") as mock_send:
         await notify_user_approved(smtp_db, user)
@@ -115,10 +111,9 @@ async def test_notify_user_approved_no_email(smtp_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_notify_admins_callsign_change(smtp_db):
-    admin = User(callsign="W0NE", oidc_subject="g:1", name="Admin", role=UserRole.ADMIN, email="admin@example.com")
-    user = User(callsign="W0OLD", oidc_subject="g:2", name="User", role=UserRole.VIEWER)
+    admin = User(callsign="W0NE", oidc_subject="g:1", name="Admin", is_admin=True, email="admin@example.com")
+    user = User(callsign="W0OLD", oidc_subject="g:2", name="User", )
 
     with patch("backend.auth.email.send_email") as mock_send:
         await notify_admins_callsign_change(smtp_db, [admin], user, "W0NEW")
@@ -129,9 +124,8 @@ async def test_notify_admins_callsign_change(smtp_db):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 async def test_notify_user_callsign_approved(smtp_db):
-    user = User(callsign="W0NEW", oidc_subject="g:1", name="User", role=UserRole.VIEWER, email="user@example.com")
+    user = User(callsign="W0NEW", oidc_subject="g:1", name="User",  email="user@example.com")
 
     with patch("backend.auth.email.send_email") as mock_send:
         await notify_user_callsign_approved(smtp_db, user, "W0OLD")

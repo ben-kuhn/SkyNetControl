@@ -1,20 +1,9 @@
-import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
-
-
-class UserRole(str, enum.Enum):
-    """Kept for test backward-compat until Task 4 removes it."""
-
-    ADMIN = "admin"
-    NET_CONTROL = "net_control"
-    VIEWER = "viewer"
-    PENDING = "pending"
-    DELETED = "deleted"
 
 
 class User(Base):

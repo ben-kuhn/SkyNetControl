@@ -697,19 +697,18 @@ def test_regenerate_roster_draft_returns_none_when_missing(db):
     assert regenerate_draft(db, 999) is None
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_generate_due_drafts_creates_notification(db, season_and_sessions, default_template):
     """When generate_due_drafts creates a roster, the session's NCS gets a notification."""
     from datetime import date
     from unittest.mock import patch
-    from backend.auth.models import User, UserRole
+    from backend.auth.models import User
     from backend.modules.notifications.models import Notification, NotificationKind
     from backend.modules.roster.service import generate_due_drafts
     from backend.modules.schedule.models import SessionStatus
 
     _, session1, _, _ = season_and_sessions
     session1.status = SessionStatus.COMPLETED
-    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", role=UserRole.NET_CONTROL))
+    db.add(User(callsign="W0NE", oidc_subject="x|w0ne", name="NCS", ))
     db.commit()
 
     with patch("backend.modules.roster.service._today", return_value=date(2026, 4, 11)):
@@ -803,7 +802,6 @@ def test_mark_sent_purges_session_source_files(db, tmp_path, monkeypatch):
     assert not src.exists(), "source file must be purged after a successful send"
 
 
-@pytest.mark.xfail(reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4", strict=False)
 def test_mark_sent_failure_does_not_purge(db, tmp_path, monkeypatch):
     """A failed delivery (mark_sent returns None) leaves files in place."""
     from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus

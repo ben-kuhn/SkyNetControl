@@ -5,10 +5,6 @@ from sqlalchemy.orm import sessionmaker
 from backend.db.base import Base
 from backend.modules.notifications.models import Notification, NotificationKind
 
-pytestmark = pytest.mark.xfail(
-    reason="role attribute removed in Task 3; restored as is_admin/is_pending/is_deleted in Task 4",
-    strict=False,
-)
 
 
 @pytest.fixture
@@ -22,9 +18,8 @@ def db():
 
 
 def test_notification_model_loads(db):
-    from backend.auth.models import User, UserRole
-
-    user = User(callsign="W0NE", oidc_subject="x", name="X", role=UserRole.ADMIN)
+    from backend.auth.models import User
+    user = User(callsign="W0NE", oidc_subject="x", name="X", is_admin=True)
     db.add(user)
     db.flush()
 
@@ -44,14 +39,13 @@ def test_notification_model_loads(db):
     assert n.read_at is None
 
 
-def _seed_user(db, callsign="W0NE", role=None):
-    from backend.auth.models import User, UserRole
-
+def _seed_user(db, callsign="W0NE", is_admin=False):
+    from backend.auth.models import User
     user = User(
         callsign=callsign,
         oidc_subject=f"sub|{callsign}",
         name=callsign,
-        role=role or UserRole.NET_CONTROL,
+        is_admin=is_admin,
     )
     db.add(user)
     db.flush()
@@ -253,12 +247,11 @@ def test_resolve_session_recipient_prefers_ncs(db):
 
 
 def test_resolve_session_recipient_falls_back_to_admin(db):
-    from backend.auth.models import UserRole
     from backend.modules.notifications.service import resolve_session_recipient
-
-    _seed_user(db, callsign="W0ADM", role=UserRole.ADMIN)
     from datetime import date, time
     from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+
+    _seed_user(db, callsign="W0ADM", is_admin=True)
 
     season = NetSeason(
         name="S",
