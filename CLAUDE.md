@@ -47,6 +47,14 @@ After any push to `main`, **wait for CI green before starting the next task**. R
 
 Don't push without explicit user confirmation. Don't force-push to `main` ever without explicit ask.
 
+## Tool failure handling
+
+The harness does NOT auto-retry failed tool results. If a tool returns `[Tool result missing due to internal error]`, an empty result, a transport error, or `"tool use rejected"` **when the user wasn't actually prompted** (a silent reject is a harness failure, not a real denial), you must react **in the same turn** — retry immediately or surface the failure as text. Do not end the turn asking the human whether to retry; that just re-creates the stall you're trying to prevent. If the user genuinely denied it, they'll tell you on the next turn.
+
+If your turn ends without a follow-up after a tool failure, the session goes silent and waits for the human (no inference, no progress). This has stalled multi-day SDD runs more than once.
+
+Corollary: don't batch a long-running or flaky Bash call (e.g. `review-package` on a large diff, or a long subagent dispatch) in parallel with unrelated tool calls. A transport failure on the slow one gets buried among the successes. Run it on its own so the error is impossible to miss.
+
 ## Permissions
 
 The user prefers commands that don't trigger permission prompts. When a dedicated tool can do the job, use it instead of Bash:
