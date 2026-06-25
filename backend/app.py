@@ -17,6 +17,7 @@ from backend.config import Settings, settings as default_settings
 from backend.db.session import create_engine_from_url, create_session_factory
 from backend.modules.nets import models as nets_models  # noqa: F401
 from backend.auth.routes import auth_router
+from backend.modules.nets.routes import router as nets_router
 from backend.auth.pat_routes import pat_router
 from backend.config_mgmt.routes import config_router
 from backend.modules.schedule.routes import schedule_router
@@ -278,7 +279,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from backend.version import GIT_SHA, VERSION
         return {"version": VERSION, "git_sha": GIT_SHA}
 
-    # Register API routers
+    # Register API routers — nets must come before per-net module routers (Tasks 6–11)
+    app.include_router(nets_router)
     app.include_router(auth_router, prefix="/api/auth")
     app.include_router(pat_router, prefix="/api/auth/tokens")
     app.include_router(config_router, prefix="/api/config")
