@@ -1,4 +1,6 @@
 """Tests for backend.modules.nets.service."""
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -83,6 +85,13 @@ def test_create_net_bad_slug_raises():
     db = _make_db()
     with pytest.raises(ValueError):
         create_net(db, slug="Bad_Slug!", name="Bad Net", creator_callsign="W0NE")
+
+
+def test_create_net_calls_seed_default_net_content():
+    db = _make_db()
+    with patch("backend.modules.nets.service.net_seeds.seed_default_net_content") as mock_seed:
+        net = create_net(db, slug="seed-net", name="Seed Net", creator_callsign="W0NE")
+        mock_seed.assert_called_once_with(db, net.id)
 
 
 # ---------------------------------------------------------------------------

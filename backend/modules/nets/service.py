@@ -10,6 +10,7 @@ import re
 from sqlalchemy.orm import Session
 
 from backend.auth.models import User
+from backend.modules.nets import seeds as net_seeds
 from backend.modules.nets.models import Net, NetConfig, NetMembership, NetRole
 
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9]))*$")
@@ -38,11 +39,12 @@ def create_net(db: Session, *, slug: str, name: str, creator_callsign: str) -> N
     db.flush()  # assign net.id
 
     # Seed default net content (roster + reminder templates).
+    net_seeds.seed_default_net_content(db, net.id)
     # TODO (Tasks 8/9): once RosterTemplate and ReminderTemplate models gain
-    # a net_id FK column, call seeds.seed_default_net_content(db, net.id) here.
-    # For now we skip template seeding; the Default Net templates were backfilled
-    # by the multi_net_cutover migration, and new nets will receive templates
-    # once those modules are made net-aware.
+    # a net_id FK column, seed_default_net_content will insert copies of the seed
+    # templates from backend.modules.roster.seeds and backend.modules.reminders.seeds
+    # with the given net_id. Until then this is a no-op; the Default Net templates
+    # were backfilled by the multi_net_cutover migration.
 
     db.commit()
     db.refresh(net)
