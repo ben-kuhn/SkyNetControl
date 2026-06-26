@@ -268,7 +268,7 @@ def test_process_raw_message_low_confidence(db, net_id, season_and_session):
     assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
 
 
-def test_process_raw_message_reverse_geocodes_when_city_missing(db, season_and_session, monkeypatch):
+def test_process_raw_message_reverse_geocodes_when_city_missing(db, net_id, season_and_session, monkeypatch):
     """A form with valid lat/lon but no city falls through to the Overpass
     reverse-geocode hook in `_compute_checkin_fields`."""
     from backend.integrations.geocoder import service as geocoder_service
@@ -306,14 +306,14 @@ def test_process_raw_message_reverse_geocodes_when_city_missing(db, season_and_s
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.city == "Marquette"
     assert checkin.state == "Michigan"
     assert checkin.latitude == 46.5625
     assert checkin.longitude == -87.375
 
 
-def test_process_raw_message_no_reverse_geocode_when_city_already_set(db, season_and_session, monkeypatch):
+def test_process_raw_message_no_reverse_geocode_when_city_already_set(db, net_id, season_and_session, monkeypatch):
     """If the parser already supplied a city (e.g. from comments), the
     reverse-geocode hook must not run — comments win, network stays quiet."""
     from backend.integrations.geocoder import service as geocoder_service
@@ -349,7 +349,7 @@ def test_process_raw_message_no_reverse_geocode_when_city_already_set(db, season
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.city == "Marquette"
     assert checkin.state == "MI"
 
