@@ -158,8 +158,7 @@ async def create_season(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    if not ctx.user.is_admin and ctx.role != NetRole.NET_CONTROL:
-        raise HTTPException(status_code=403, detail="Net control or admin required")
+    # require_net_role(NET_CONTROL) already enforces the role — no manual guard needed.
     if body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="end_date must not be before start_date")
     if not body.is_week_long and body.day_of_week is None:
@@ -256,7 +255,7 @@ async def create_session_route(
 async def list_sessions_route(
     season_id: int | None = Query(default=None),
     status: str | None = Query(default=None),
-    ctx: NetContext | None = Depends(require_net_role(NetRole.VIEWER)),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
     status_enum = None
@@ -276,7 +275,9 @@ async def get_session_route(
     ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    session_obj = get_session_service(db, session_id)
+    # Pass net_id to enforce cross-net isolation: sessions belonging to another
+    # net's season (or orphaned sessions) return 404, hiding their existence.
+    session_obj = get_session_service(db, session_id, net_id=ctx.net.id)
     if session_obj is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return _session_response_for(db, session_obj)
@@ -289,9 +290,12 @@ async def update_session(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
+    # Pass net_id to enforce cross-net isolation: a NET_CONTROL user on net A
+    # must not be able to mutate sessions that belong to net B.
     session_obj = update_session_service(
         db,
         session_id,
+        net_id=ctx.net.id,
         status=body.status,
         session_type=body.session_type,
         net_control_callsign=body.net_control_callsign,
@@ -310,6 +314,12 @@ async def delete_season(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
+    # Policy: creating seasons is a NET_CONTROL operation; *deleting* them is
+    # destructive (orphans completed sessions, removes planning history) so we
+    # restrict it to admins.  We still gate on require_net_role(NET_CONTROL)
+    # above so that the net membership / slug resolution happens — but we add
+    # an explicit admin check here because the dependency alone would allow any
+    # NET_CONTROL member to delete.
     if not ctx.user.is_admin:
         raise HTTPException(status_code=403, detail="Admin required")
     season = service.get_season(db, season_id=season_id, net_id=ctx.net.id)

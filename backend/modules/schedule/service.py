@@ -50,8 +50,30 @@ def create_session(
     return session_obj
 
 
-def get_session(db: Session, session_id: int) -> NetSession | None:
-    return db.get(NetSession, session_id)
+def get_session(db: Session, session_id: int, net_id: int | None = None) -> NetSession | None:
+    """Return the session by ID.
+
+    If *net_id* is supplied the session is validated against it: sessions whose
+    season belongs to a different net return ``None`` so the caller can issue a
+    404 without leaking that the ID exists elsewhere.  Orphaned sessions
+    (``season_id=NULL``) are also treated as belonging to no net and will return
+    ``None`` when *net_id* is given — they are accessible only via the
+    unfiltered form (``net_id=None``), which is used internally by
+    ``delete_season`` to clean up after itself.
+    """
+    session_obj = db.get(NetSession, session_id)
+    if session_obj is None:
+        return None
+    if net_id is not None:
+        # Resolve isolation: the session must be reachable via a season that
+        # belongs to *net_id*. An orphaned session (season_id=NULL) cannot be
+        # attributed to any net, so it is treated as not found.
+        if session_obj.season_id is None:
+            return None
+        season = db.get(NetSeason, session_obj.season_id)
+        if season is None or season.net_id != net_id:
+            return None
+    return session_obj
 
 
 def list_sessions(
@@ -61,8 +83,12 @@ def list_sessions(
     status: SessionStatus | None = None,
 ) -> list[NetSession]:
     # Sessions without a season (orphaned completed rows) cannot be attributed
-    # to a specific net, so they are excluded from the per-net listing but
-    # remain accessible individually via get_session.
+    # to a specific net via the season join, so they are excluded from the
+    # per-net listing.  They remain accessible individually via get_session
+    # (called without net_id) — e.g. for historical check-in lookups — but
+    # will NOT appear in this list even if their original season belonged to
+    # this net, because the INNER JOIN on NetSeason requires season_id IS NOT
+    # NULL.
     query = (
         db.query(NetSession)
         .join(NetSeason, NetSession.season_id == NetSeason.id)
@@ -78,6 +104,7 @@ def list_sessions(
 def update_session(
     db: Session,
     session_id: int,
+    net_id: int | None = None,
     status: SessionStatus | None = None,
     session_type: SessionType | None = None,
     net_control_callsign: str | None = None,
@@ -85,7 +112,7 @@ def update_session(
     grace_period_hours: float | None = None,
     end_date: date | None = None,
 ) -> NetSession | None:
-    session_obj = db.get(NetSession, session_id)
+    session_obj = get_session(db, session_id, net_id=net_id)
     if session_obj is None:
         return None
 

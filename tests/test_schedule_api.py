@@ -365,6 +365,7 @@ async def test_list_sessions_with_filters(test_client, test_settings):
 
 @pytest.mark.asyncio
 async def test_get_single_session(test_client, test_settings):
+    """Session created via a season is accessible by ID on the correct net."""
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
         SEASONS_URL,
@@ -387,6 +388,8 @@ async def test_get_single_session(test_client, test_settings):
     data = response.json()
     assert data["id"] == session_id
     assert data["session_type"] == "regular_checkin"
+    # The session has a non-null season_id (season-attached path)
+    assert data["season_id"] is not None
 
 
 @pytest.mark.asyncio
@@ -554,3 +557,86 @@ async def test_delete_season_preserves_completed_sessions(test_client, test_sett
         assert session.query(NetSession).filter_by(id=cancelled_id).first() is None
         for sid in scheduled_ids:
             assert session.query(NetSession).filter_by(id=sid).first() is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-net isolation tests (C1)
+# ---------------------------------------------------------------------------
+
+
+def _seed_other_net_session(db_setup):
+    """Create a second net 'other' with its own season and session.
+
+    Returns the session ID so tests can attempt cross-net access.
+    """
+    from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+    from datetime import date
+
+    with db_setup() as session:
+        other_net = Net(slug="other", name="Other Net")
+        session.add(other_net)
+        session.flush()
+        season = NetSeason(
+            net_id=other_net.id,
+            name="Other Season",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            day_of_week=2,
+            is_week_long=False,
+            activity_cadence=2,
+        )
+        session.add(season)
+        session.flush()
+        net_session = NetSession(
+            season_id=season.id,
+            start_date=date(2026, 1, 7),
+            end_date=date(2026, 1, 7),
+            session_type=SessionType.REGULAR_CHECKIN,
+            status=SessionStatus.SCHEDULED,
+            grace_period_hours=24.0,
+        )
+        session.add(net_session)
+        session.commit()
+        return net_session.id
+
+
+@pytest.mark.asyncio
+async def test_get_session_rejects_cross_net(test_client, test_settings, db_setup):
+    """GET /sessions/{id} on net 't' must return 404 for a session that belongs
+    to a different net, hiding its existence (no 403 leakage)."""
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    other_session_id = _seed_other_net_session(db_setup)
+
+    # Attempt to read the other net's session via net 't'
+    resp = await test_client.get(
+        f"/api/nets/t/schedule/sessions/{other_session_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404, (
+        f"Expected 404 for cross-net session access, got {resp.status_code}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_session_rejects_cross_net(test_client, test_settings, db_setup):
+    """PATCH /sessions/{id} on net 't' must return 404 for a session that belongs
+    to a different net, hiding its existence and preventing cross-net mutation."""
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    other_session_id = _seed_other_net_session(db_setup)
+
+    # Attempt to mutate the other net's session via net 't'
+    resp = await test_client.patch(
+        f"/api/nets/t/schedule/sessions/{other_session_id}",
+        json={"status": "cancelled"},
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404, (
+        f"Expected 404 for cross-net session mutation, got {resp.status_code}"
+    )
+
+    # Verify the session was NOT mutated
+    from backend.modules.schedule.models import NetSession, SessionStatus
+
+    with db_setup() as session:
+        still_there = session.query(NetSession).filter_by(id=other_session_id).one()
+        assert still_there.status == SessionStatus.SCHEDULED
