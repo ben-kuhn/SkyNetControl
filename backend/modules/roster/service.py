@@ -31,9 +31,10 @@ def _today() -> date_type:
     return date_type.today()
 
 
-def _clear_default(db: Session) -> None:
-    """Clear is_default on all roster templates."""
+def _clear_default(db: Session, net_id: int) -> None:
+    """Clear is_default on all roster templates for *net_id*."""
     db.query(RosterTemplate).filter(
+        RosterTemplate.net_id == net_id,
         RosterTemplate.is_default.is_(True),
     ).update({"is_default": False})
 
@@ -48,6 +49,7 @@ _DAY_NAMES = list(calendar.day_name)  # Monday=0 … Sunday=6
 
 def create_template(
     db: Session,
+    net_id: int,
     name: str,
     subject_template: str,
     header_template: str,
@@ -58,9 +60,10 @@ def create_template(
     is_default: bool = False,
 ) -> RosterTemplate:
     if is_default:
-        _clear_default(db)
+        _clear_default(db, net_id)
 
     tmpl = RosterTemplate(
+        net_id=net_id,
         name=name,
         subject_template=subject_template,
         header_template=header_template,
@@ -76,17 +79,24 @@ def create_template(
     return tmpl
 
 
-def get_template(db: Session, template_id: int) -> RosterTemplate | None:
-    return db.get(RosterTemplate, template_id)
+def get_template(db: Session, template_id: int, net_id: int | None = None) -> RosterTemplate | None:
+    """Return a RosterTemplate by id, optionally verifying it belongs to *net_id*."""
+    tmpl = db.get(RosterTemplate, template_id)
+    if tmpl is None:
+        return None
+    if net_id is not None and tmpl.net_id != net_id:
+        return None
+    return tmpl
 
 
-def list_templates(db: Session) -> list[RosterTemplate]:
-    return db.query(RosterTemplate).order_by(RosterTemplate.name).all()
+def list_templates(db: Session, net_id: int) -> list[RosterTemplate]:
+    return db.query(RosterTemplate).filter(RosterTemplate.net_id == net_id).order_by(RosterTemplate.name).all()
 
 
 def update_template(
     db: Session,
     template_id: int,
+    net_id: int | None = None,
     name: str | None = None,
     subject_template: str | None = None,
     header_template: str | None = None,
@@ -96,12 +106,12 @@ def update_template(
     lead_time_days: int | None = None,
     is_default: bool | None = None,
 ) -> RosterTemplate | None:
-    tmpl = db.get(RosterTemplate, template_id)
+    tmpl = get_template(db, template_id, net_id=net_id)
     if tmpl is None:
         return None
 
     if is_default is True:
-        _clear_default(db)
+        _clear_default(db, tmpl.net_id)
 
     if name is not None:
         tmpl.name = name
@@ -125,8 +135,8 @@ def update_template(
     return tmpl
 
 
-def delete_template(db: Session, template_id: int) -> bool:
-    tmpl = db.get(RosterTemplate, template_id)
+def delete_template(db: Session, template_id: int, net_id: int | None = None) -> bool:
+    tmpl = get_template(db, template_id, net_id=net_id)
     if tmpl is None:
         return False
     if tmpl.is_default:
@@ -286,10 +296,20 @@ def render_roster(
 # ---------------------------------------------------------------------------
 
 
+def _get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
+    """Resolve the net_id for a session by joining through its season."""
+    if net_session.season_id is None:
+        return None
+    from backend.modules.schedule.models import NetSeason
+    season = db.get(NetSeason, net_session.season_id)
+    return season.net_id if season else None
+
+
 def generate_draft(
     db: Session,
     session_id: int,
     template_id: int | None = None,
+    net_id: int | None = None,
 ) -> RosterLog | None:
     """Create a DRAFT RosterLog for the given session. Idempotent."""
     existing = db.query(RosterLog).filter(RosterLog.session_id == session_id).first()
@@ -300,10 +320,16 @@ def generate_draft(
     if net_session is None:
         return None
 
+    # Resolve net_id from session if not provided
+    resolved_net_id = net_id if net_id is not None else _get_net_id_for_session(db, net_session)
+
     if template_id is not None:
         template = db.get(RosterTemplate, template_id)
     else:
-        template = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True)).first()
+        q = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True))
+        if resolved_net_id is not None:
+            q = q.filter(RosterTemplate.net_id == resolved_net_id)
+        template = q.first()
 
     if template is None:
         return None
@@ -329,15 +355,25 @@ def generate_draft(
     return log
 
 
-def generate_due_drafts(db: Session) -> list[RosterLog]:
-    """Generate drafts for completed sessions past their lead time without a roster."""
+def generate_due_drafts(db: Session, net_id: int | None = None) -> list[RosterLog]:
+    """Generate drafts for completed sessions past their lead time without a roster.
+
+    If *net_id* is supplied only sessions belonging to that net are processed and
+    only that net's default template is used.  When *net_id* is ``None`` all nets
+    are processed (background task / cron use-case).
+    """
     today = _today()
 
-    default_template = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True)).first()
-    if default_template is None:
-        return []
-
     existing_session_ids = {row[0] for row in db.query(RosterLog.session_id).all()}
+
+    # Build a mapping of net_id → default_template for all nets that have one.
+    default_templates_q = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True))
+    if net_id is not None:
+        default_templates_q = default_templates_q.filter(RosterTemplate.net_id == net_id)
+    net_default_template: dict[int, RosterTemplate] = {t.net_id: t for t in default_templates_q.all()}
+
+    if not net_default_template:
+        return []
 
     completed_sessions = db.query(NetSession).filter(NetSession.status == SessionStatus.COMPLETED).all()
 
@@ -349,9 +385,18 @@ def generate_due_drafts(db: Session) -> list[RosterLog]:
         if session.end_date is None:
             continue
 
+        # Resolve which net this session belongs to
+        session_net_id = _get_net_id_for_session(db, session)
+        if session_net_id is None:
+            continue
+
+        default_template = net_default_template.get(session_net_id)
+        if default_template is None:
+            continue
+
         days_since = (today - session.end_date).days
         if days_since >= default_template.lead_time_days:
-            log = generate_draft(db, session.id, template_id=default_template.id)
+            log = generate_draft(db, session.id, template_id=default_template.id, net_id=session_net_id)
             if log is not None:
                 recipient = resolve_session_recipient(db, session)
                 if recipient is not None:
@@ -533,7 +578,12 @@ def regenerate_draft(db: Session, roster_id: int) -> RosterLog | None:
     if log.template_id is not None:
         template = db.get(RosterTemplate, log.template_id)
     if template is None:
-        template = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True)).first()
+        # Fall back to net's default template, scoped by the session's net
+        session_net_id = _get_net_id_for_session(db, net_session)
+        q = db.query(RosterTemplate).filter(RosterTemplate.is_default.is_(True))
+        if session_net_id is not None:
+            q = q.filter(RosterTemplate.net_id == session_net_id)
+        template = q.first()
     if template is None:
         return None
 

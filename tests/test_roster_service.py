@@ -95,9 +95,10 @@ def season_and_sessions(db, net_id):
 # --- Template CRUD ---
 
 
-def test_create_template(db):
+def test_create_template(db, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Test Roster",
         subject_template="Subj {{ date }}",
         header_template="Header",
@@ -112,9 +113,10 @@ def test_create_template(db):
     assert tmpl.is_default is True
 
 
-def test_create_template_clears_previous_default(db):
+def test_create_template_clears_previous_default(db, net_id):
     t1 = create_template(
         db,
+        net_id=net_id,
         name="First",
         subject_template="s",
         header_template="h",
@@ -125,6 +127,7 @@ def test_create_template_clears_previous_default(db):
     )
     t2 = create_template(
         db,
+        net_id=net_id,
         name="Second",
         subject_template="s",
         header_template="h",
@@ -138,9 +141,10 @@ def test_create_template_clears_previous_default(db):
     assert t2.is_default is True
 
 
-def test_get_template(db):
+def test_get_template(db, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="T",
         subject_template="s",
         header_template="h",
@@ -157,9 +161,10 @@ def test_get_template_not_found(db):
     assert get_template(db, 999) is None
 
 
-def test_list_templates(db):
+def test_list_templates(db, net_id):
     create_template(
         db,
+        net_id=net_id,
         name="Beta",
         subject_template="s",
         header_template="h",
@@ -169,6 +174,7 @@ def test_list_templates(db):
     )
     create_template(
         db,
+        net_id=net_id,
         name="Alpha",
         subject_template="s",
         header_template="h",
@@ -176,14 +182,15 @@ def test_list_templates(db):
         comments_template="c",
         footer_template="f",
     )
-    result = list_templates(db)
+    result = list_templates(db, net_id=net_id)
     assert len(result) == 2
     assert result[0].name == "Alpha"  # ordered by name
 
 
-def test_update_template(db):
+def test_update_template(db, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Old",
         subject_template="s",
         header_template="h",
@@ -191,18 +198,19 @@ def test_update_template(db):
         comments_template="c",
         footer_template="f",
     )
-    updated = update_template(db, tmpl.id, name="New", lead_time_days=3)
+    updated = update_template(db, tmpl.id, net_id=net_id, name="New", lead_time_days=3)
     assert updated.name == "New"
     assert updated.lead_time_days == 3
 
 
-def test_update_template_not_found(db):
-    assert update_template(db, 999, name="X") is None
+def test_update_template_not_found(db, net_id):
+    assert update_template(db, 999, net_id=net_id, name="X") is None
 
 
-def test_delete_template(db):
+def test_delete_template(db, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Del",
         subject_template="s",
         header_template="h",
@@ -210,13 +218,14 @@ def test_delete_template(db):
         comments_template="c",
         footer_template="f",
     )
-    assert delete_template(db, tmpl.id) is True
+    assert delete_template(db, tmpl.id, net_id=net_id) is True
     assert get_template(db, tmpl.id) is None
 
 
-def test_delete_template_blocked_if_default(db):
+def test_delete_template_blocked_if_default(db, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Def",
         subject_template="s",
         header_template="h",
@@ -225,7 +234,7 @@ def test_delete_template_blocked_if_default(db):
         footer_template="f",
         is_default=True,
     )
-    assert delete_template(db, tmpl.id) is False
+    assert delete_template(db, tmpl.id, net_id=net_id) is False
     assert get_template(db, tmpl.id) is not None
 
 
@@ -355,9 +364,10 @@ def test_build_roster_context_session_url(db, season_and_sessions):
 
 
 @pytest.fixture
-def default_template(db):
+def default_template(db, net_id):
     return create_template(
         db,
+        net_id=net_id,
         name="Default",
         subject_template="Roster — {{ date }}",
         header_template="Session: {{ date }}, NCS: {{ net_control }}, Count: {{ total_count }}",
@@ -417,9 +427,10 @@ def test_render_roster(db, default_template):
     assert "73 de W0NE" in sections["footer"]
 
 
-def test_render_roster_jinja_error(db):
+def test_render_roster_jinja_error(db, net_id):
     bad_template = create_template(
         db,
+        net_id=net_id,
         name="Bad",
         subject_template="{{ bad syntax {% }}",
         header_template="ok",
@@ -460,10 +471,11 @@ def test_generate_draft_no_default_template(db, season_and_sessions):
     assert generate_draft(db, session1.id) is None
 
 
-def test_generate_draft_with_specific_template(db, season_and_sessions):
+def test_generate_draft_with_specific_template(db, net_id, season_and_sessions):
     _, session1, _, _ = season_and_sessions
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Custom",
         subject_template="Custom {{ date }}",
         header_template="h",

@@ -1,10 +1,14 @@
+// TODO(Task 13): replace DEFAULT_NET_SLUG with useCurrentNet() hook once
+// the CurrentNetContext is available. Task 14 will wire slug into the API calls.
+const DEFAULT_NET_SLUG = "default-net";
+
 import { apiFetch } from "./client";
 import type { Roster, RosterTemplate } from "../types";
 
 // --- Rosters ---
 
-export async function fetchRosters(): Promise<Roster[]> {
-  return apiFetch<Roster[]>("/roster/");
+export async function fetchRosters(netSlug: string = DEFAULT_NET_SLUG): Promise<Roster[]> {
+  return apiFetch<Roster[]>(`/nets/${netSlug}/roster/`);
 }
 
 export async function updateRosterDraft(
@@ -13,41 +17,42 @@ export async function updateRosterDraft(
     Roster,
     "content_subject" | "content_header" | "content_welcome" | "content_comments" | "content_footer"
   >>,
+  netSlug: string = DEFAULT_NET_SLUG,
 ): Promise<Roster> {
-  return apiFetch<Roster>(`/roster/${id}`, {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
 }
 
-export async function approveRoster(id: number): Promise<Roster> {
-  return apiFetch<Roster>(`/roster/${id}/approve`, { method: "POST" });
+export async function approveRoster(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/approve`, { method: "POST" });
 }
 
-export async function sendRoster(id: number): Promise<Roster> {
-  return apiFetch<Roster>(`/roster/${id}/send`, { method: "POST" });
+export async function sendRoster(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/send`, { method: "POST" });
 }
 
-export async function skipRoster(id: number): Promise<Roster> {
-  return apiFetch<Roster>(`/roster/${id}/skip`, { method: "POST" });
+export async function skipRoster(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/skip`, { method: "POST" });
 }
 
-export async function regenerateRosterDraft(id: number): Promise<Roster> {
-  return apiFetch<Roster>(`/roster/${id}/regenerate`, { method: "POST" });
+export async function regenerateRosterDraft(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/regenerate`, { method: "POST" });
 }
 
-export async function generateRosterDraft(sessionId: number): Promise<Roster> {
-  return apiFetch<Roster>(`/roster/generate/${sessionId}`, { method: "POST" });
+export async function generateRosterDraft(sessionId: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/generate/${sessionId}`, { method: "POST" });
 }
 
-export async function previewRoster(id: number): Promise<{ text: string }> {
-  return apiFetch<{ text: string }>(`/roster/${id}/preview`);
+export async function previewRoster(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<{ text: string }> {
+  return apiFetch<{ text: string }>(`/nets/${netSlug}/roster/${id}/preview`);
 }
 
 // --- Templates ---
 
-export async function fetchRosterTemplates(): Promise<RosterTemplate[]> {
-  return apiFetch<RosterTemplate[]>("/roster/templates");
+export async function fetchRosterTemplates(netSlug: string = DEFAULT_NET_SLUG): Promise<RosterTemplate[]> {
+  return apiFetch<RosterTemplate[]>(`/nets/${netSlug}/roster/templates`);
 }
 
 export interface RosterTemplateInput {
@@ -61,8 +66,11 @@ export interface RosterTemplateInput {
   is_default: boolean;
 }
 
-export async function createRosterTemplate(input: RosterTemplateInput): Promise<RosterTemplate> {
-  return apiFetch<RosterTemplate>("/roster/templates", {
+export async function createRosterTemplate(
+  input: RosterTemplateInput,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<RosterTemplate> {
+  return apiFetch<RosterTemplate>(`/nets/${netSlug}/roster/templates`, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -71,15 +79,16 @@ export async function createRosterTemplate(input: RosterTemplateInput): Promise<
 export async function updateRosterTemplate(
   id: number,
   input: Partial<RosterTemplateInput>,
+  netSlug: string = DEFAULT_NET_SLUG,
 ): Promise<RosterTemplate> {
-  return apiFetch<RosterTemplate>(`/roster/templates/${id}`, {
+  return apiFetch<RosterTemplate>(`/nets/${netSlug}/roster/templates/${id}`, {
     method: "PATCH",
     body: JSON.stringify(input),
   });
 }
 
-export async function deleteRosterTemplate(id: number): Promise<void> {
-  await apiFetch<void>(`/roster/templates/${id}`, { method: "DELETE" });
+export async function deleteRosterTemplate(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<void> {
+  await apiFetch<void>(`/nets/${netSlug}/roster/templates/${id}`, { method: "DELETE" });
 }
 
 export interface RosterTemplateDefault {
@@ -92,6 +101,6 @@ export interface RosterTemplateDefault {
   lead_time_days: number;
 }
 
-export async function fetchRosterTemplateDefaults(): Promise<RosterTemplateDefault[]> {
-  return apiFetch<RosterTemplateDefault[]>("/roster/template-defaults");
+export async function fetchRosterTemplateDefaults(netSlug: string = DEFAULT_NET_SLUG): Promise<RosterTemplateDefault[]> {
+  return apiFetch<RosterTemplateDefault[]>(`/nets/${netSlug}/roster/template-defaults`);
 }

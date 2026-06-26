@@ -24,8 +24,9 @@ def net_id(db):
     return make_test_net(db).id
 
 
-def test_create_roster_template(db):
+def test_create_roster_template(db, net_id):
     template = RosterTemplate(
+        net_id=net_id,
         name="Default Roster",
         subject_template="{{ net_callsign }} Roster — {{ date }}",
         header_template="Session on {{ date }}.",
@@ -68,6 +69,7 @@ def test_create_roster_log(db, net_id):
     db.flush()
 
     template = RosterTemplate(
+        net_id=net_id,
         name="Default",
         subject_template="subj",
         header_template="hdr",

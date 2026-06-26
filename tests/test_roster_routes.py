@@ -12,8 +12,12 @@ from backend.modules.roster.models import RosterTemplate
 from tests.conftest import make_test_token
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
+from backend.modules.nets.models import Net, NetMembership, NetRole
 from backend.config import Settings
 
+
+NET_SLUG = "t"
+BASE = f"/api/nets/{NET_SLUG}/roster"
 
 
 @pytest.fixture
@@ -45,12 +49,14 @@ def db_setup():
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-
         )
-        from backend.modules.nets.models import Net
-        net = Net(slug="t", name="Test Net")
+        net = Net(slug=NET_SLUG, name="Test Net")
         session.add_all([admin, viewer, net])
         session.flush()
+
+        # Viewer gets a net membership so require_net_role(VIEWER) passes
+        session.add(NetMembership(user_callsign="KD0TST", net_id=net.id, role=NetRole.VIEWER))
+
         season = NetSeason(
             net_id=net.id,
             name="Spring 2026",
@@ -74,6 +80,7 @@ def db_setup():
         session.flush()
 
         template = RosterTemplate(
+            net_id=net.id,
             name="Default Roster",
             subject_template="Roster — {{ date }}",
             header_template="NCS: {{ net_control }}, Count: {{ total_count }}",
@@ -108,6 +115,7 @@ def db_setup():
             "factory": factory,
             "admin": admin,
             "viewer": viewer,
+            "net": net,
             "season": season,
             "net_session": net_session,
             "template": template,
@@ -149,7 +157,7 @@ async def viewer_client(app, test_settings, db_setup):
 @pytest.mark.anyio
 async def test_create_template(admin_client):
     resp = await admin_client.post(
-        "/api/roster/templates",
+        f"{BASE}/templates",
         json={
             "name": "Custom",
             "subject_template": "s",
@@ -162,11 +170,12 @@ async def test_create_template(admin_client):
     assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "Custom"
+    assert "net_id" in data
 
 
 @pytest.mark.anyio
 async def test_list_templates(admin_client):
-    resp = await admin_client.get("/api/roster/templates")
+    resp = await admin_client.get(f"{BASE}/templates")
     assert resp.status_code == 200
     assert len(resp.json()) >= 1
 
@@ -174,7 +183,7 @@ async def test_list_templates(admin_client):
 @pytest.mark.anyio
 async def test_update_template(admin_client, db_setup):
     tid = db_setup["template"].id
-    resp = await admin_client.patch(f"/api/roster/templates/{tid}", json={"name": "Updated"})
+    resp = await admin_client.patch(f"{BASE}/templates/{tid}", json={"name": "Updated"})
     assert resp.status_code == 200
     assert resp.json()["name"] == "Updated"
 
@@ -182,14 +191,14 @@ async def test_update_template(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_delete_template_blocked_if_default(admin_client, db_setup):
     tid = db_setup["template"].id
-    resp = await admin_client.delete(f"/api/roster/templates/{tid}")
+    resp = await admin_client.delete(f"{BASE}/templates/{tid}")
     assert resp.status_code == 400
 
 
 @pytest.mark.anyio
 async def test_viewer_cannot_create_template(viewer_client):
     resp = await viewer_client.post(
-        "/api/roster/templates",
+        f"{BASE}/templates",
         json={
             "name": "X",
             "subject_template": "s",
@@ -205,7 +214,7 @@ async def test_viewer_cannot_create_template(viewer_client):
 @pytest.mark.anyio
 async def test_template_defaults_returns_seed(admin_client):
     """Endpoint returns the shipped roster seed in genericized form."""
-    resp = await admin_client.get("/api/roster/template-defaults")
+    resp = await admin_client.get(f"{BASE}/template-defaults")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -220,8 +229,39 @@ async def test_template_defaults_returns_seed(admin_client):
 @pytest.mark.anyio
 async def test_template_defaults_requires_role(viewer_client):
     """Viewer cannot see the defaults endpoint (matches create's role gate)."""
-    resp = await viewer_client.get("/api/roster/template-defaults")
+    resp = await viewer_client.get(f"{BASE}/template-defaults")
     assert resp.status_code == 403
+
+
+# --- Cross-net rejection ---
+
+
+@pytest.mark.anyio
+async def test_template_cross_net_404(admin_client, db_setup):
+    """A template belonging to a different net returns 404."""
+    # Create another net and template in it
+    with db_setup["factory"]() as db:
+        from backend.modules.nets.models import Net
+        net2 = Net(slug="other-net", name="Other Net")
+        db.add(net2)
+        db.flush()
+        tmpl2 = RosterTemplate(
+            net_id=net2.id,
+            name="Other Template",
+            subject_template="s",
+            header_template="h",
+            welcome_template="w",
+            comments_template="c",
+            footer_template="f",
+            is_default=False,
+        )
+        db.add(tmpl2)
+        db.commit()
+        other_id = tmpl2.id
+
+    # Accessing it via this net's slug should 404
+    resp = await admin_client.patch(f"{BASE}/templates/{other_id}", json={"name": "Hack"})
+    assert resp.status_code == 404
 
 
 # --- Generation routes ---
@@ -230,7 +270,7 @@ async def test_template_defaults_requires_role(viewer_client):
 @pytest.mark.anyio
 async def test_generate_draft_for_session(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    resp = await admin_client.post(f"{BASE}/generate/{sid}")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "draft"
@@ -239,7 +279,7 @@ async def test_generate_draft_for_session(admin_client, db_setup):
 
 @pytest.mark.anyio
 async def test_generate_draft_session_not_found(admin_client):
-    resp = await admin_client.post("/api/roster/generate/999")
+    resp = await admin_client.post(f"{BASE}/generate/999")
     assert resp.status_code == 404
 
 
@@ -251,7 +291,7 @@ async def test_generate_due_drafts(admin_client, db_setup):
         db.commit()
 
     with patch("backend.modules.roster.service._today", return_value=date(2026, 4, 11)):
-        resp = await admin_client.post("/api/roster/generate")
+        resp = await admin_client.post(f"{BASE}/generate")
     assert resp.status_code == 200
     assert resp.json()["generated"] >= 1
 
@@ -262,8 +302,8 @@ async def test_generate_due_drafts(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_list_rosters(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    await admin_client.post(f"/api/roster/generate/{sid}")
-    resp = await admin_client.get("/api/roster/")
+    await admin_client.post(f"{BASE}/generate/{sid}")
+    resp = await admin_client.get(f"{BASE}/")
     assert resp.status_code == 200
     assert len(resp.json()) >= 1
 
@@ -271,23 +311,23 @@ async def test_list_rosters(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_list_rosters_filter_status(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    await admin_client.post(f"/api/roster/generate/{sid}")
-    resp = await admin_client.get("/api/roster/?status=draft")
+    await admin_client.post(f"{BASE}/generate/{sid}")
+    resp = await admin_client.get(f"{BASE}/?status=draft")
     assert resp.status_code == 200
     assert all(r["status"] == "draft" for r in resp.json())
 
 
 @pytest.mark.anyio
 async def test_list_rosters_invalid_status(admin_client):
-    resp = await admin_client.get("/api/roster/?status=invalid")
+    resp = await admin_client.get(f"{BASE}/?status=invalid")
     assert resp.status_code == 400
 
 
 @pytest.mark.anyio
 async def test_get_roster_for_session(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    await admin_client.post(f"/api/roster/generate/{sid}")
-    resp = await admin_client.get(f"/api/roster/session/{sid}")
+    await admin_client.post(f"{BASE}/generate/{sid}")
+    resp = await admin_client.get(f"{BASE}/session/{sid}")
     assert resp.status_code == 200
     assert resp.json()["session_id"] == sid
 
@@ -295,9 +335,9 @@ async def test_get_roster_for_session(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_preview_roster(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    resp = await admin_client.get(f"/api/roster/{rid}/preview")
+    resp = await admin_client.get(f"{BASE}/{rid}/preview")
     assert resp.status_code == 200
     data = resp.json()
     assert "text" in data
@@ -307,9 +347,9 @@ async def test_preview_roster(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_update_draft_route(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    resp = await admin_client.patch(f"/api/roster/{rid}", json={"content_header": "Edited"})
+    resp = await admin_client.patch(f"{BASE}/{rid}", json={"content_header": "Edited"})
     assert resp.status_code == 200
     assert resp.json()["content_header"] == "Edited"
 
@@ -317,9 +357,9 @@ async def test_update_draft_route(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_approve_roster_route(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    resp = await admin_client.post(f"/api/roster/{rid}/approve")
+    resp = await admin_client.post(f"{BASE}/{rid}/approve")
     assert resp.status_code == 200
     assert resp.json()["status"] == "approved"
     assert resp.json()["approved_by"] == "W0NE"
@@ -328,14 +368,14 @@ async def test_approve_roster_route(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_send_roster_route(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    await admin_client.post(f"/api/roster/{rid}/approve")
+    await admin_client.post(f"{BASE}/{rid}/approve")
     with patch(
         "backend.integrations.delivery.service.dispatch_delivery",
         return_value=True,
     ):
-        resp = await admin_client.post(f"/api/roster/{rid}/send")
+        resp = await admin_client.post(f"{BASE}/{rid}/send")
     assert resp.status_code == 200
     assert resp.json()["status"] == "sent"
 
@@ -343,9 +383,9 @@ async def test_send_roster_route(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_skip_roster_route(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    resp = await admin_client.post(f"/api/roster/{rid}/skip")
+    resp = await admin_client.post(f"{BASE}/{rid}/skip")
     assert resp.status_code == 200
     assert resp.json()["status"] == "skipped"
 
@@ -353,10 +393,10 @@ async def test_skip_roster_route(admin_client, db_setup):
 @pytest.mark.anyio
 async def test_approve_non_draft_returns_409(admin_client, db_setup):
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    await admin_client.post(f"/api/roster/{rid}/approve")
-    resp = await admin_client.post(f"/api/roster/{rid}/approve")
+    await admin_client.post(f"{BASE}/{rid}/approve")
+    resp = await admin_client.post(f"{BASE}/{rid}/approve")
     assert resp.status_code == 409
 
 
@@ -364,7 +404,7 @@ async def test_approve_non_draft_returns_409(admin_client, db_setup):
 async def test_regenerate_roster_route_rewrites_draft(admin_client, db_setup):
     """Net control / admin can regenerate a draft from the current state."""
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
 
     with db_setup["factory"]() as session:
@@ -374,7 +414,7 @@ async def test_regenerate_roster_route_rewrites_draft(admin_client, db_setup):
         log.content_subject = "Stale subject"
         session.commit()
 
-    resp = await admin_client.post(f"/api/roster/{rid}/regenerate")
+    resp = await admin_client.post(f"{BASE}/{rid}/regenerate")
     assert resp.status_code == 200
     data = resp.json()
     assert data["id"] == rid
@@ -384,7 +424,7 @@ async def test_regenerate_roster_route_rewrites_draft(admin_client, db_setup):
 
 @pytest.mark.anyio
 async def test_regenerate_roster_route_404_when_missing(admin_client):
-    resp = await admin_client.post("/api/roster/9999/regenerate")
+    resp = await admin_client.post(f"{BASE}/9999/regenerate")
     assert resp.status_code == 404
 
 
@@ -392,11 +432,11 @@ async def test_regenerate_roster_route_404_when_missing(admin_client):
 async def test_regenerate_roster_route_409_when_not_draft(admin_client, db_setup):
     """Approved rosters can't be regenerated."""
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
-    await admin_client.post(f"/api/roster/{rid}/approve")
+    await admin_client.post(f"{BASE}/{rid}/approve")
 
-    resp = await admin_client.post(f"/api/roster/{rid}/regenerate")
+    resp = await admin_client.post(f"{BASE}/{rid}/regenerate")
     assert resp.status_code == 409
 
 
@@ -404,11 +444,24 @@ async def test_regenerate_roster_route_409_when_not_draft(admin_client, db_setup
 async def test_regenerate_roster_route_requires_role(viewer_client, admin_client, db_setup):
     """Viewer cannot regenerate."""
     sid = db_setup["net_session"].id
-    gen_resp = await admin_client.post(f"/api/roster/generate/{sid}")
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
 
-    resp = await viewer_client.post(f"/api/roster/{rid}/regenerate")
+    resp = await viewer_client.post(f"{BASE}/{rid}/regenerate")
     assert resp.status_code == 403
 
 
-# --- GeoJSON route ---
+# --- Cross-net roster rejection ---
+
+
+@pytest.mark.anyio
+async def test_roster_log_cross_net_404(admin_client, db_setup):
+    """A roster belonging to a session in another net returns 404."""
+    # First generate a roster in the test net
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+
+    # Now try to access it via a different net slug
+    resp = await admin_client.get(f"/api/nets/nonexistent-net/roster/{rid}/preview")
+    assert resp.status_code == 404

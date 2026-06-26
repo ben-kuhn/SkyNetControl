@@ -223,6 +223,7 @@ export interface Roster {
 
 export interface RosterTemplate {
   id: number;
+  net_id: number;
   name: string;
   subject_template: string;
   header_template: string;

@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_net_member
-from backend.auth.models import User
+from backend.auth.dependencies import NetContext, get_db_session, require_net_role
+from backend.modules.nets.models import NetRole
 from backend.modules.roster.models import RosterLog, RosterStatus
 from backend.modules.roster.service import (
     approve_roster as approve_roster_service,
@@ -19,9 +19,12 @@ from backend.modules.roster.service import (
     skip_roster as skip_roster_service,
     update_draft as update_draft_service,
     update_template as update_template_service,
+    _get_net_id_for_session,
 )
+from backend.modules.schedule.models import NetSession
 
-roster_router = APIRouter(tags=["roster"])
+# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
+roster_router = APIRouter(prefix="/api/nets/{net_slug}/roster", tags=["roster"])
 
 
 # --- Pydantic schemas ---
@@ -63,6 +66,7 @@ class DraftUpdate(BaseModel):
 def _template_to_response(template) -> dict:
     return {
         "id": template.id,
+        "net_id": template.net_id,
         "name": template.name,
         "subject_template": template.subject_template,
         "header_template": template.header_template,
@@ -93,17 +97,26 @@ def _roster_to_response(log: RosterLog) -> dict:
     }
 
 
+def _verify_log_net(db: Session, log: RosterLog, net_id: int) -> bool:
+    """Return True iff log's session belongs to *net_id*."""
+    net_session = db.get(NetSession, log.session_id)
+    if net_session is None:
+        return False
+    return _get_net_id_for_session(db, net_session) == net_id
+
+
 # --- Template routes ---
 
 
 @roster_router.post("/templates", status_code=201)
 async def create_template_route(
     body: TemplateCreate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = create_template_service(
         db,
+        net_id=ctx.net.id,
         name=body.name,
         subject_template=body.subject_template,
         header_template=body.header_template,
@@ -118,16 +131,16 @@ async def create_template_route(
 
 @roster_router.get("/templates")
 async def list_templates_route(
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    templates = list_templates_service(db)
+    templates = list_templates_service(db, net_id=ctx.net.id)
     return [_template_to_response(t) for t in templates]
 
 
 @roster_router.get("/template-defaults")
 async def template_defaults_route(
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
 ):
     """Return the shipped seed templates so the "+ New template" UI can
     pre-fill from pristine originals, even after operators have edited
@@ -141,12 +154,13 @@ async def template_defaults_route(
 async def update_template_route(
     template_id: int,
     body: TemplateUpdate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = update_template_service(
         db,
         template_id,
+        net_id=ctx.net.id,
         name=body.name,
         subject_template=body.subject_template,
         header_template=body.header_template,
@@ -164,15 +178,15 @@ async def update_template_route(
 @roster_router.delete("/templates/{template_id}", status_code=204)
 async def delete_template_route(
     template_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    template = get_template_service(db, template_id)
+    template = get_template_service(db, template_id, net_id=ctx.net.id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
     if template.is_default:
         raise HTTPException(status_code=400, detail="Cannot delete the default template")
-    delete_template_service(db, template_id)
+    delete_template_service(db, template_id, net_id=ctx.net.id)
 
 
 # --- Generation routes ---
@@ -181,10 +195,17 @@ async def delete_template_route(
 @roster_router.post("/generate/{session_id}")
 async def generate_draft_route(
     session_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = generate_draft_service(db, session_id)
+    # Cross-net: verify session belongs to this net
+    net_session = db.get(NetSession, session_id)
+    if net_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if _get_net_id_for_session(db, net_session) != ctx.net.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    log = generate_draft_service(db, session_id, net_id=ctx.net.id)
     if log is None:
         raise HTTPException(status_code=404, detail="Session not found or no default template")
 
@@ -194,30 +215,27 @@ async def generate_draft_route(
         create_notification,
         resolve_session_recipient,
     )
-    from backend.modules.schedule.models import NetSession
 
-    net_session = db.get(NetSession, session_id)
-    if net_session is not None:
-        recipient = resolve_session_recipient(db, net_session)
-        if recipient is not None:
-            create_notification(
-                db,
-                recipient_callsign=recipient,
-                kind=NotificationKind.ROSTER_DRAFT,
-                message=f"Roster draft ready for {_format_session_date(net_session)}",
-                link_url="/roster",
-                session_id=net_session.id,
-            )
+    recipient = resolve_session_recipient(db, net_session)
+    if recipient is not None:
+        create_notification(
+            db,
+            recipient_callsign=recipient,
+            kind=NotificationKind.ROSTER_DRAFT,
+            message=f"Roster draft ready for {_format_session_date(net_session)}",
+            link_url="/roster",
+            session_id=net_session.id,
+        )
 
     return _roster_to_response(log)
 
 
 @roster_router.post("/generate")
 async def generate_due_drafts_route(
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    rosters = generate_due_drafts_service(db)
+    rosters = generate_due_drafts_service(db, net_id=ctx.net.id)
     return {
         "generated": len(rosters),
         "rosters": [_roster_to_response(r) for r in rosters],
@@ -230,10 +248,17 @@ async def generate_due_drafts_route(
 @roster_router.get("/")
 async def list_rosters_route(
     status: str | None = Query(default=None),
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    query = db.query(RosterLog)
+    from backend.modules.schedule.models import NetSeason
+
+    query = (
+        db.query(RosterLog)
+        .join(NetSession, RosterLog.session_id == NetSession.id)
+        .join(NetSeason, NetSession.season_id == NetSeason.id)
+        .filter(NetSeason.net_id == ctx.net.id)
+    )
     if status is not None:
         try:
             status_enum = RosterStatus(status)
@@ -247,9 +272,14 @@ async def list_rosters_route(
 @roster_router.get("/session/{session_id}")
 async def get_roster_for_session_route(
     session_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
+    # Cross-net: verify session belongs to this net
+    net_session = db.get(NetSession, session_id)
+    if net_session is None or _get_net_id_for_session(db, net_session) != ctx.net.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     log = db.query(RosterLog).filter(RosterLog.session_id == session_id).first()
     if log is None:
         raise HTTPException(status_code=404, detail="Roster not found for session")
@@ -259,9 +289,12 @@ async def get_roster_for_session_route(
 @roster_router.get("/{roster_id}/preview")
 async def preview_roster_route(
     roster_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
     text = assemble_roster_service(db, roster_id)
     if text is None:
         raise HTTPException(status_code=404, detail="Roster not found")
@@ -272,10 +305,13 @@ async def preview_roster_route(
 async def update_draft_route(
     roster_id: int,
     body: DraftUpdate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = update_draft_service(
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    result = update_draft_service(
         db,
         roster_id,
         content_subject=body.content_subject,
@@ -284,57 +320,66 @@ async def update_draft_route(
         content_comments=body.content_comments,
         content_footer=body.content_footer,
     )
-    if log is None:
+    if result is None:
         raise HTTPException(status_code=409, detail="Roster not in draft status")
-    return _roster_to_response(log)
+    return _roster_to_response(result)
 
 
 @roster_router.post("/{roster_id}/approve")
 async def approve_roster_route(
     roster_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = approve_roster_service(db, roster_id, approver_callsign=user.callsign)
-    if log is None:
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    result = approve_roster_service(db, roster_id, approver_callsign=ctx.user.callsign)
+    if result is None:
         raise HTTPException(status_code=409, detail="Roster not in draft status")
-    return _roster_to_response(log)
+    return _roster_to_response(result)
 
 
 @roster_router.post("/{roster_id}/send")
 async def mark_sent_route(
     roster_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = mark_sent_service(db, roster_id)
-    if log is None:
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    result = mark_sent_service(db, roster_id)
+    if result is None:
         raise HTTPException(status_code=409, detail="Roster not in approved status")
-    return _roster_to_response(log)
+    return _roster_to_response(result)
 
 
 @roster_router.post("/{roster_id}/skip")
 async def skip_roster_route(
     roster_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = skip_roster_service(db, roster_id)
-    if log is None:
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    result = skip_roster_service(db, roster_id)
+    if result is None:
         raise HTTPException(status_code=409, detail="Roster not in skippable status")
-    return _roster_to_response(log)
+    return _roster_to_response(result)
 
 
 @roster_router.post("/{roster_id}/regenerate")
 async def regenerate_roster_route(
     roster_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = regenerate_draft_service(db, roster_id)
-    if log is None:
-        existing = db.get(RosterLog, roster_id)
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Roster not found")
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    result = regenerate_draft_service(db, roster_id)
+    if result is None:
         raise HTTPException(status_code=409, detail="Roster not in draft status")
-    return _roster_to_response(log)
+    return _roster_to_response(result)

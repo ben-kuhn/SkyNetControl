@@ -288,7 +288,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(activities_router, prefix="/api/activities")
     app.include_router(checkins_router)
     app.include_router(reminders_router, prefix="/api/reminders")
-    app.include_router(roster_router, prefix="/api/roster")
+    app.include_router(roster_router)  # prefix: /api/nets/{net_slug}/roster
     app.include_router(notifications_router, prefix="/api/notifications")
     app.include_router(audit_router, prefix="/api/audit")
     app.include_router(delivery_router, prefix="/api/nets/{net_slug}/delivery")

@@ -10,8 +10,8 @@ behaviour every time we edited the constants.
 A snapshot test (`test_seeds_match_migrations`) keeps the two in
 sync: if the body drifts, that test fails.
 
-Exposed via `GET /api/roster/template-defaults` so the
-"+ New template" UI can pre-fill from the shipped original even
+Exposed via `GET /api/nets/{net_slug}/roster/template-defaults` so
+the "+ New template" UI can pre-fill from the shipped original even
 after operators have edited their own default.
 """
 from typing import TypedDict
@@ -55,3 +55,37 @@ DEFAULT_NET_ROSTER: SeedRosterTemplate = {
 }
 
 SEED_ROSTER_TEMPLATES: list[SeedRosterTemplate] = [DEFAULT_NET_ROSTER]
+
+
+def seed_net_roster_templates(db, net_id: int) -> None:
+    """Insert the default roster template set for *net_id*.
+
+    Called by ``backend.modules.nets.seeds.seed_default_net_content`` when a new
+    net is created.  Idempotent: skips templates whose (net_id, name) pair already
+    exists so it is safe to call more than once.
+    """
+    from sqlalchemy.orm import Session as _Session
+    from backend.modules.roster.models import RosterTemplate
+
+    assert isinstance(db, _Session)
+    for i, seed in enumerate(SEED_ROSTER_TEMPLATES):
+        existing = (
+            db.query(RosterTemplate)
+            .filter(RosterTemplate.net_id == net_id, RosterTemplate.name == seed["name"])
+            .one_or_none()
+        )
+        if existing is not None:
+            continue
+        tmpl = RosterTemplate(
+            net_id=net_id,
+            name=seed["name"],
+            subject_template=seed["subject_template"],
+            header_template=seed["header_template"],
+            welcome_template=seed["welcome_template"],
+            comments_template=seed["comments_template"],
+            footer_template=seed["footer_template"],
+            lead_time_days=seed["lead_time_days"],
+            is_default=(i == 0),  # first seed is the default
+        )
+        db.add(tmpl)
+    db.flush()
