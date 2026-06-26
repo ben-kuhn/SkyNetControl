@@ -161,6 +161,19 @@ def test_parse_plain_text_callsign_tactical_suffix_stripped():
     assert result["confidence"] == "medium"
 
 
+def test_parse_plain_text_callsign_portable_suffix_stripped():
+    """`/8` is a portable indicator (operator out of their licensed call area);
+    `/M` mobile, `/P` portable. Strip it so the primary path keeps parsing."""
+    body = "Ken, W9GM/8, Marquette, Marquette, MI, VARA HF"
+    result = parse_plain_text_message(body, known_modes={"VARA HF"})
+    assert result["callsign"] == "W9GM"
+    assert result["name"] == "Ken"
+    assert result["city"] == "Marquette"
+    assert result["county"] == "Marquette"
+    assert result["state"] == "MI"
+    assert result["mode"] == "VARA HF"
+
+
 def test_parse_plain_text_multiword_mode_beats_single_word():
     body = "Ben, KU0HN, Lewiston, MN, VARA HF testing"
     result = parse_plain_text_message(body, known_modes={"VARA", "VARA HF"})
@@ -366,6 +379,31 @@ def test_parse_winlink_form_comments_reparse_fills_mode():
     assert result["state"] == "MN"
     # Confidence is medium because mode came from comments re-parse, not structured form.
     assert result["confidence"] == "medium"
+
+
+def test_parse_winlink_form_comments_reparse_beats_freeform_location_var():
+    """The Winlink Check-in V5 form has a free-form `<location>` ("Home away
+    from home", "EOC", etc.) plus a structured `<comments>` line. The parser
+    must prefer the structured comments over the descriptive location, since
+    the location field is not meant to be city/county/state.
+    """
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    body = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters><display_form>Winlink_Check_In_Viewer.html</display_form></form_parameters>
+  <variables>
+    <msgsender>W9GM</msgsender>
+    <name>Ken Weigel</name>
+    <location>Home away from home</location>
+    <session>VARA HF</session>
+    <comments>Ken, W9GM/8, Marquette, Marquette, MI, USA, VARA HF, 40M</comments>
+  </variables>
+</RMS_Express_Form>
+"""
+    result = parse_winlink_form_message(body, known_modes={"VARA HF"})
+    assert result["city"] == "Marquette"
+    assert result["county"] == "Marquette"
+    assert result["state"] == "MI"
 
 
 def test_parse_winlink_form_malformed_xml_falls_through():

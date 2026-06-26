@@ -6,8 +6,11 @@ from backend.modules.checkins.models import MessageType
 # Callsign pattern: 1-2 letters, digit, 1-3 letters (with optional suffix)
 CALLSIGN_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z]{1,3}\b", re.IGNORECASE)
 
-# Strip a trailing tactical suffix like "-10" from a callsign.
-_TACTICAL_SUFFIX_RE = re.compile(r"-\d{1,3}$")
+# Strip trailing suffixes from callsigns.
+#   `-NN`  AX25 / packet SSID
+#   `/X[X]`  portable indicator (`/N` = operating in call-area N away from
+#   licensed region, `/M` mobile, `/P` portable, `/MM` maritime mobile, etc.)
+_CALLSIGN_SUFFIX_RE = re.compile(r"(?:-\d{1,3}|/[A-Za-z0-9]{1,3})$")
 
 # "via XYZ-NN" pattern that we must NOT pick as the primary callsign
 # when degrading the no-comma path.
@@ -86,7 +89,7 @@ def parse_form_message(body: str) -> dict:
 
 
 def _normalize_callsign(token: str) -> str:
-    return _TACTICAL_SUFFIX_RE.sub("", token.upper())
+    return _CALLSIGN_SUFFIX_RE.sub("", token.upper())
 
 
 def _assign_location(parts: list[str]) -> tuple[str | None, str | None, str | None]:
@@ -319,26 +322,12 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
                (field not in ("callsign", "name", "mode") and fields[field] is not None):
                 break
 
-    # Combined-location fallback (only if city/county/state all still unset).
-    if fields["city"] is None and fields["county"] is None and fields["state"] is None:
-        for var_name, var_value in variables.items():
-            if not var_value:
-                continue
-            if any(skip in var_name for skip in _LOCATION_VARIABLE_EXCLUDES):
-                continue
-            if any(hint in var_name for hint in _LOCATION_VARIABLE_HINTS):
-                parts = [p.strip() for p in var_value.split(",") if p.strip()]
-                if len(parts) >= 3:
-                    fields["city"], fields["county"], fields["state"] = parts[0], parts[1], parts[2]
-                elif len(parts) == 2:
-                    fields["city"], fields["state"] = parts[0], parts[1]
-                elif len(parts) == 1:
-                    fields["city"] = parts[0]
-                break
-
     # Comments re-parse: if comments are present and any core field is still
     # missing, re-run Spec A's plain-text parser over the comments string and
-    # merge in anything it produced.
+    # merge in anything it produced. Runs BEFORE the combined-location
+    # fallback so a structured `<comments>` line wins over a free-form
+    # `<location>` field (the Winlink Check-in V5 form puts descriptive text
+    # like "Home away from home" or "EOC" in `<location>`, never city/state).
     used_comments_reparse = False
     if fields["comments"]:
         missing_core = (
@@ -362,6 +351,24 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
                     if reparse_value:
                         fields[field] = reparse_value
                         used_comments_reparse = True
+
+    # Combined-location fallback (only if city/county/state all still unset
+    # after comments re-parse — last resort for older / simpler forms).
+    if fields["city"] is None and fields["county"] is None and fields["state"] is None:
+        for var_name, var_value in variables.items():
+            if not var_value:
+                continue
+            if any(skip in var_name for skip in _LOCATION_VARIABLE_EXCLUDES):
+                continue
+            if any(hint in var_name for hint in _LOCATION_VARIABLE_HINTS):
+                parts = [p.strip() for p in var_value.split(",") if p.strip()]
+                if len(parts) >= 3:
+                    fields["city"], fields["county"], fields["state"] = parts[0], parts[1], parts[2]
+                elif len(parts) == 2:
+                    fields["city"], fields["state"] = parts[0], parts[1]
+                elif len(parts) == 1:
+                    fields["city"] = parts[0]
+                break
 
     # Confidence.
     have_core = bool(fields["callsign"] and fields["name"] and fields["mode"])
