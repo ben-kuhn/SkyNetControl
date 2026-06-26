@@ -918,7 +918,7 @@ def test_purge_source_files_swallows_missing_file(tmp_path):
     assert not real.exists()
 
 
-def test_reparse_checkin_updates_fields_from_raw_message(db, season_and_session):
+def test_reparse_checkin_updates_fields_from_raw_message(db, net_id, season_and_session):
     """Re-parse re-runs the parser against the stored RawMessage and
     overwrites the row's fields. Use case: parser fix landed, want to redo
     a row without re-importing from the mailbox."""
@@ -933,7 +933,7 @@ def test_reparse_checkin_updates_fields_from_raw_message(db, season_and_session)
     )
     db.add(raw)
     db.commit()
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     # Operator hand-edits the wrong values into place.
     checkin.name = "Wrong Name"
     checkin.city = "Wrong City"
@@ -955,7 +955,7 @@ def test_reparse_checkin_returns_none_for_manual_entry(db, season_and_session):
     assert reparse_checkin(db, checkin.id) is None
 
 
-def test_reparse_checkin_preserves_is_new_member(db, season_and_session):
+def test_reparse_checkin_preserves_is_new_member(db, net_id, season_and_session):
     """is_new_member is a historical fact about the first time we saw the
     callsign, not a parser output — re-parse must not flip it."""
     _, net_session = season_and_session
@@ -969,11 +969,12 @@ def test_reparse_checkin_preserves_is_new_member(db, season_and_session):
     )
     db.add(raw)
     db.commit()
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.is_new_member is True
     # Approve to mark them as a known member, then re-parse. is_new_member
     # on the historical row should not change.
     db.add(Member(
+        net_id=net_id,
         callsign="W0NEW", name="New Op",
         first_check_in_date=datetime(2026, 4, 10, tzinfo=timezone.utc),
         last_check_in_date=datetime(2026, 4, 10, tzinfo=timezone.utc),
@@ -984,7 +985,7 @@ def test_reparse_checkin_preserves_is_new_member(db, season_and_session):
     assert result.is_new_member is True
 
 
-def test_reparse_session_updates_existing_and_reclaims_orphans(db, season_and_session):
+def test_reparse_session_updates_existing_and_reclaims_orphans(db, net_id, season_and_session):
     """Session re-parse: every existing CheckIn's RawMessage is re-parsed in
     place, AND orphan RawMessages whose received_at falls in the session
     window are imported as new CheckIns. Use case: parser was buggy and a
@@ -1001,7 +1002,7 @@ def test_reparse_session_updates_existing_and_reclaims_orphans(db, season_and_se
     )
     db.add(raw_existing)
     db.commit()
-    checkin = process_raw_message(db, raw_existing, net_session)
+    checkin = process_raw_message(db, raw_existing, net_session, net_id=net_id)
     checkin.name = "Stale Name"
     db.commit()
 

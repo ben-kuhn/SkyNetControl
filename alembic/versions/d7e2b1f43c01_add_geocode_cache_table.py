@@ -1,7 +1,7 @@
 """add geocode_cache table
 
 Revision ID: d7e2b1f43c01
-Revises: a91c4d3f5e02
+Revises: 859ed3de034e
 Create Date: 2026-06-24 13:00:00
 
 Cache of (city, state, country) -> lat/lon resolutions against
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "d7e2b1f43c01"
-down_revision: Union[str, None] = "a91c4d3f5e02"
+down_revision: Union[str, None] = "859ed3de034e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
