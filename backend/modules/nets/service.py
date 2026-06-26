@@ -39,12 +39,10 @@ def create_net(db: Session, *, slug: str, name: str, creator_callsign: str) -> N
     db.flush()  # assign net.id
 
     # Seed default net content (roster + reminder templates).
+    # Task 8 done: seeds roster templates for this net.
+    # TODO (Task 9): seed_default_net_content will also seed reminder templates once
+    # ReminderTemplate gains a net_id FK column.
     net_seeds.seed_default_net_content(db, net.id)
-    # TODO (Tasks 8/9): once RosterTemplate and ReminderTemplate models gain
-    # a net_id FK column, seed_default_net_content will insert copies of the seed
-    # templates from backend.modules.roster.seeds and backend.modules.reminders.seeds
-    # with the given net_id. Until then this is a no-op; the Default Net templates
-    # were backfilled by the multi_net_cutover migration.
 
     db.commit()
     db.refresh(net)

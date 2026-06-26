@@ -456,12 +456,18 @@ async def test_regenerate_roster_route_requires_role(viewer_client, admin_client
 
 @pytest.mark.anyio
 async def test_roster_log_cross_net_404(admin_client, db_setup):
-    """A roster belonging to a session in another net returns 404."""
-    # First generate a roster in the test net
+    """A roster log belonging to net1 returns 404 when accessed via net2's slug."""
+    # Create a real second net (admin is is_admin so no membership needed)
+    with db_setup["factory"]() as db:
+        net2 = Net(slug="other-net", name="Other Net")
+        db.add(net2)
+        db.commit()
+
+    # Generate a roster in the first (test) net
     sid = db_setup["net_session"].id
     gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
     rid = gen_resp.json()["id"]
 
-    # Now try to access it via a different net slug
-    resp = await admin_client.get(f"/api/nets/nonexistent-net/roster/{rid}/preview")
+    # Access that roster via net2's slug — _verify_log_net should reject it
+    resp = await admin_client.get(f"/api/nets/other-net/roster/{rid}/preview")
     assert resp.status_code == 404
