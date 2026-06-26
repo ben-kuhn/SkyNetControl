@@ -484,6 +484,23 @@ async def test_admin_can_list_users(test_client, test_settings, db_setup):
 
 
 @pytest.mark.asyncio
+async def test_list_users_excludes_deleted(test_client, test_settings, db_setup):
+    """Deleted users must not appear in the admin user list."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.add(User(callsign="KD0DEL", oidc_subject="auth0|deleted", name="Gone", is_deleted=True))
+        session.commit()
+
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    response = await test_client.get("/api/auth/users", cookies={"access_token": token})
+    assert response.status_code == 200
+    callsigns = [u["callsign"] for u in response.json()]
+    assert "KD0DEL" not in callsigns
+    assert "W0NE" in callsigns
+
+
+@pytest.mark.asyncio
 async def test_admin_can_update_user_role(test_client, test_settings, db_setup):
     _, factory = db_setup
     with factory() as session:

@@ -112,6 +112,19 @@ function GatedRoutes() {
         </Route>
 
         {/* Per-net routes: /nets/:slug/... */}
+        {/* Public routes — no auth required; backend enforces data visibility */}
+        <Route
+          path="/nets/:slug/*"
+          element={
+            <CurrentNetProvider>
+              <AppShell />
+            </CurrentNetProvider>
+          }
+        >
+          <Route path="checkins" element={<CheckInsPage />} />
+          <Route path="checkins/map" element={<CheckInsPage />} />
+        </Route>
+        {/* Auth-required routes */}
         <Route
           path="/nets/:slug/*"
           element={
@@ -123,7 +136,6 @@ function GatedRoutes() {
           }
         >
           <Route path="schedule" element={<RequireNetRole min="viewer"><SchedulePage /></RequireNetRole>} />
-          <Route path="checkins" element={<CheckInsPage />} />
           <Route path="members" element={<RequireNetRole min="viewer"><MembersPage /></RequireNetRole>} />
           <Route path="reminders" element={<RequireNetRole min="net_control"><RemindersPage /></RequireNetRole>} />
           <Route path="roster" element={<RequireNetRole min="net_control"><RosterPage /></RequireNetRole>} />

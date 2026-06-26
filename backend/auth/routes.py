@@ -456,7 +456,7 @@ async def list_users(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db_session),
 ):
-    users = db.query(User).order_by(User.callsign).all()
+    users = db.query(User).filter(User.is_deleted.is_(False)).order_by(User.callsign).all()
     return [
         {
             "callsign": u.callsign,
