@@ -30,6 +30,7 @@ def get_current_user(
     app_settings: Settings = Depends(get_settings),
 ) -> User:
     request.state.token_scopes = None
+    request.state.token_net_id = None
     # Try Bearer token first
     if authorization and authorization.startswith("Bearer skynet_"):
         raw_token = authorization[len("Bearer ") :]
@@ -42,6 +43,7 @@ def get_current_user(
             raise HTTPException(status_code=401, detail="User not found or pending")
 
         request.state.token_scopes = auth_result["scopes"]
+        request.state.token_net_id = auth_result["net_id"]
         return user
 
     # Fall back to cookie JWT
@@ -257,6 +259,7 @@ def require_net_role(min_role: NetRole) -> Callable:
     min_rank = _NET_ROLE_RANK[min_role]
 
     def dep(
+        request: Request,
         net_slug: str = Path(..., alias="net_slug"),
         user: User = Depends(get_current_user),
         db: Session = Depends(get_db_session),
@@ -264,6 +267,9 @@ def require_net_role(min_role: NetRole) -> Callable:
         net = db.query(Net).filter(Net.slug == net_slug).one_or_none()
         if net is None:
             raise HTTPException(status_code=404, detail="Net not found")
+        token_net_id = getattr(request.state, "token_net_id", None)
+        if token_net_id is not None and token_net_id != net.id:
+            raise HTTPException(status_code=403, detail="Token scoped to a different net")
         if user.is_admin:
             return NetContext(user=user, net=net, role=None)
         m = db.get(NetMembership, (user.callsign, net.id))

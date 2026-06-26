@@ -58,6 +58,7 @@ def create_token(
 
     pat = PersonalAccessToken(
         user_callsign=user_callsign,
+        net_id=net_id,
         name=name,
         token_hash=token_hash,
         token_prefix=raw[:8],
@@ -74,6 +75,7 @@ def create_token(
         "token": raw,
         "token_prefix": pat.token_prefix,
         "scopes": scopes,
+        "net_id": pat.net_id,
         "expires_at": pat.expires_at.isoformat() if pat.expires_at else None,
         "created_at": pat.created_at.isoformat(),
     }
@@ -93,6 +95,7 @@ def list_tokens(db: Session, user_callsign: str) -> list[dict]:
             "name": t.name,
             "token_prefix": t.token_prefix,
             "scopes": t.scopes.split(","),
+            "net_id": t.net_id,
             "expires_at": t.expires_at.isoformat() if t.expires_at else None,
             "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
             "created_at": t.created_at.isoformat(),
@@ -121,15 +124,22 @@ def authenticate_token(db: Session, raw_token: str) -> dict | None:
         return None
 
     now = datetime.now(timezone.utc)
-    if pat.expires_at is not None and pat.expires_at <= now:
-        return None
+    if pat.expires_at is not None:
+        expires_at = pat.expires_at if pat.expires_at.tzinfo else pat.expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= now:
+            return None
 
-    # Debounced last_used_at update
-    if pat.last_used_at is None or (now - pat.last_used_at).total_seconds() > LAST_USED_DEBOUNCE_SECONDS:
+    # Debounced last_used_at update. SQLite may return timezone-naive datetimes;
+    # attach UTC if needed so the subtraction doesn't raise TypeError.
+    last_used = pat.last_used_at
+    if last_used is not None and last_used.tzinfo is None:
+        last_used = last_used.replace(tzinfo=timezone.utc)
+    if last_used is None or (now - last_used).total_seconds() > LAST_USED_DEBOUNCE_SECONDS:
         pat.last_used_at = now
         db.commit()
 
     return {
         "user_callsign": pat.user_callsign,
         "scopes": pat.scopes.split(","),
+        "net_id": pat.net_id,
     }

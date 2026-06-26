@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import get_db_session, require_not_pending
 from backend.auth.models import User
 from backend.auth.pat_service import create_token, list_tokens, revoke_token
+from backend.modules.nets.models import Net
 
 pat_router = APIRouter(tags=["tokens"])
 
@@ -34,6 +35,9 @@ async def create_token_route(
     user: User = Depends(_require_cookie_auth),
     db: Session = Depends(get_db_session),
 ):
+    if body.net_id is not None:
+        if db.query(Net).filter(Net.id == body.net_id).one_or_none() is None:
+            raise HTTPException(status_code=422, detail="Net not found")
     try:
         result = create_token(
             db=db,

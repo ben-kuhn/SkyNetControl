@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from backend.db.base import Base
 from backend.auth.models import User
 from backend.auth.dependencies import require_net_role, NetContext
+from backend.auth.pat_service import create_token
 from backend.modules.nets.models import Net, NetMembership, NetRole
 from backend.config import Settings
 from tests.conftest import make_test_token
@@ -174,3 +175,61 @@ async def test_unknown_net_returns_404(client, test_settings):
     token = make_test_token("W0NC", test_settings, token_version=0)
     resp = await client.get("/nets/nonexistent/viewer-gate", cookies={"access_token": token})
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PAT net-binding enforcement tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pat_scoped_to_net_a_accepted_on_net_a_slug(test_app, seeded_db):
+    """A PAT bound to net-alpha accepted at alpha's endpoint."""
+    with seeded_db() as session:
+        # resolve alpha id
+        alpha = session.query(Net).filter_by(slug="alpha").one()
+        result = create_token(session, "W0NC", False, "Alpha PAT", ["schedule:read"], None, net_id=alpha.id)
+        raw = result["token"]
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.get("/nets/alpha/viewer-gate", headers={"Authorization": f"Bearer {raw}"})
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_pat_scoped_to_net_a_rejected_on_net_b_slug(test_app, seeded_db):
+    """A PAT bound to net-alpha is rejected when used against net-beta."""
+    with seeded_db() as session:
+        alpha = session.query(Net).filter_by(slug="alpha").one()
+        result = create_token(session, "W0NC", False, "Alpha PAT", ["schedule:read"], None, net_id=alpha.id)
+        raw = result["token"]
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.get("/nets/beta/viewer-gate", headers={"Authorization": f"Bearer {raw}"})
+    assert resp.status_code == 403
+    assert "scoped to a different net" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_global_pat_works_against_any_net(test_app, seeded_db):
+    """Admin-global PAT (net_id=None) succeeds on any net."""
+    with seeded_db() as session:
+        result = create_token(session, "W0ADM", True, "Global PAT", ["users:read"], None, net_id=None)
+        raw = result["token"]
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        # Admin bypasses membership check regardless of net
+        resp_alpha = await c.get("/nets/alpha/viewer-gate", headers={"Authorization": f"Bearer {raw}"})
+        resp_beta = await c.get("/nets/beta/viewer-gate", headers={"Authorization": f"Bearer {raw}"})
+    assert resp_alpha.status_code == 200
+    assert resp_beta.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_cookie_auth_unaffected_by_token_net_id(test_app, test_settings):
+    """Cookie-auth sessions never carry token_net_id so the gate must not fire."""
+    token = make_test_token("W0VW", test_settings, token_version=0)
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.get("/nets/alpha/viewer-gate", cookies={"access_token": token})
+    assert resp.status_code == 200

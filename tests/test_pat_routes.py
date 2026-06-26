@@ -11,6 +11,7 @@ from backend.auth.models import User
 from backend.auth.pat_service import create_token
 from backend.auth.pat_routes import pat_router
 from backend.config import Settings
+from backend.modules.nets.models import Net
 from tests.conftest import make_test_token
 
 
@@ -43,6 +44,7 @@ def db_session_factory(db_engine):
 @pytest.fixture
 def seeded_db(db_session_factory):
     with db_session_factory() as session:
+        net = Net(id=1, slug="test-net", name="Test Net")
         admin = User(
             callsign="W0NE",
             oidc_subject="auth0|admin",
@@ -53,7 +55,6 @@ def seeded_db(db_session_factory):
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer User",
-            
         )
         pending = User(
             callsign="PENDING-abc",
@@ -61,7 +62,7 @@ def seeded_db(db_session_factory):
             name="Pending User",
             is_pending=True,
         )
-        session.add_all([admin, viewer, pending])
+        session.add_all([net, admin, viewer, pending])
         session.commit()
     return db_session_factory
 
@@ -260,6 +261,29 @@ async def test_non_owner_non_admin_cannot_revoke(client, test_settings):
         cookies=_viewer_cookie(test_settings),
     )
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_token_rejects_nonexistent_net_id(client, test_settings):
+    """POST /api/auth/tokens with a bogus net_id returns 422."""
+    response = await client.post(
+        "/api/auth/tokens",
+        json={"name": "Bad net", "scopes": ["schedule:read"], "net_id": 99999},
+        cookies=_admin_cookie(test_settings),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_token_roundtrips_net_id(client, test_settings):
+    """POST /api/auth/tokens with a valid net_id returns net_id in the response."""
+    response = await client.post(
+        "/api/auth/tokens",
+        json={"name": "Net-bound", "scopes": ["schedule:read"], "net_id": 1},
+        cookies=_admin_cookie(test_settings),
+    )
+    assert response.status_code == 201
+    assert response.json()["net_id"] == 1
 
 
 @pytest.mark.asyncio

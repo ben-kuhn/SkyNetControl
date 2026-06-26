@@ -306,3 +306,50 @@ def test_authenticate_updates_last_used_at(seeded_db):
         authenticate_token(session, raw)
         session.refresh(pat)
         assert pat.last_used_at is not None
+
+
+def test_create_token_persists_net_id(seeded_db):
+    """net_id must be written to the DB row, not just validated."""
+    with seeded_db() as session:
+        result = create_token(session, "W0NE", True, "Net-bound", ["schedule:read"], None, net_id=1)
+        pat = session.query(PersonalAccessToken).filter_by(id=result["id"]).one()
+        assert pat.net_id == 1
+
+
+def test_create_token_persists_none_net_id(seeded_db):
+    """Admin-only scopes with no net_id must persist as NULL."""
+    with seeded_db() as session:
+        result = create_token(session, "W0NE", True, "Admin-global", ["users:read"], None, net_id=None)
+        pat = session.query(PersonalAccessToken).filter_by(id=result["id"]).one()
+        assert pat.net_id is None
+
+
+def test_authenticate_token_returns_net_id(seeded_db):
+    """authenticate_token result dict must include net_id."""
+    with seeded_db() as session:
+        result = create_token(session, "W0NE", True, "Auth net_id", ["schedule:read"], None, net_id=1)
+        raw = result["token"]
+        auth = authenticate_token(session, raw)
+        assert auth is not None
+        assert "net_id" in auth
+        assert auth["net_id"] == 1
+
+
+def test_authenticate_token_returns_none_net_id_for_admin_global(seeded_db):
+    """Admin-global tokens (net_id=None) must return net_id=None from authenticate_token."""
+    with seeded_db() as session:
+        result = create_token(session, "W0NE", True, "Global", ["users:read"], None, net_id=None)
+        raw = result["token"]
+        auth = authenticate_token(session, raw)
+        assert auth is not None
+        assert auth["net_id"] is None
+
+
+def test_list_tokens_includes_net_id(seeded_db):
+    """list_tokens must include net_id in each row."""
+    with seeded_db() as session:
+        create_token(session, "W0NE", True, "Net token", ["schedule:read"], None, net_id=1)
+        tokens = list_tokens(session, "W0NE")
+        assert len(tokens) == 1
+        assert "net_id" in tokens[0]
+        assert tokens[0]["net_id"] == 1
