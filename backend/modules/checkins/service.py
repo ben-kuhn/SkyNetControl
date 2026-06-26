@@ -13,11 +13,14 @@ from backend.modules.checkins.models import (
     RawMessage,
     TimingStatus,
 )
-# Registering the geocode_cache table early — `_compute_checkin_fields`
-# uses it for the city/state -> lat/lon fallback, and test fixtures
+# Register geocoder cache tables early — `_compute_checkin_fields` uses
+# them for the lat/lon <-> city/state fallbacks, and test fixtures
 # create tables via Base.metadata.create_all which only sees models that
 # have been imported by the time it runs.
-from backend.integrations.geocoder.models import GeocodeCache  # noqa: F401
+from backend.integrations.geocoder.models import (  # noqa: F401
+    GeocodeCache,
+    ReverseGeocodeCache,
+)
 from backend.modules.checkins.message_parser import parse_message
 from backend.config_mgmt.service import get_checkin_modes
 from backend.modules.schedule.models import NetSession, SessionStatus
@@ -184,6 +187,21 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
             coords = geocode_city(db, city, state)
             if coords is not None:
                 latitude, longitude = coords
+
+    # Reverse direction: parser couldn't pull a city from comments / the
+    # location fallback, but we do have coordinates. Resolve the closest
+    # populated place via Overpass so the table view shows something
+    # meaningful instead of an empty City column.
+    city = fields.get("city")
+    state = fields.get("state")
+    if city is None and latitude is not None and longitude is not None:
+        from backend.integrations.geocoder.service import reverse_geocode_closest_city
+        result = reverse_geocode_closest_city(db, latitude, longitude)
+        if result is not None:
+            rg_city, rg_state = result
+            fields["city"] = rg_city
+            if state is None and rg_state:
+                fields["state"] = rg_state
 
     return {
         "callsign": callsign,

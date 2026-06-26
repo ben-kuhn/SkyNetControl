@@ -260,6 +260,92 @@ def test_process_raw_message_low_confidence(db, season_and_session):
     assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
 
 
+def test_process_raw_message_reverse_geocodes_when_city_missing(db, season_and_session, monkeypatch):
+    """A form with valid lat/lon but no city falls through to the Overpass
+    reverse-geocode hook in `_compute_checkin_fields`."""
+    from backend.integrations.geocoder import service as geocoder_service
+    monkeypatch.setattr(
+        geocoder_service,
+        "_call_overpass_closest_place",
+        lambda lat, lon: ("Marquette", "Michigan"),
+    )
+
+    _, net_session = season_and_session
+    # Form provides coords but the parser yields no city — there's no
+    # comma-form `<comments>` line and no `<location>` variable to fall
+    # back on, so reverse-geocode is the only source of a city name.
+    body = (
+        '<?xml version="1.0"?>'
+        "<RMS_Express_Form>"
+        "<form_parameters><display_form>x.html</display_form></form_parameters>"
+        "<variables>"
+        "<msgsender>W0RVR</msgsender>"
+        "<name>Test Op</name>"
+        "<maplat>46.5625</maplat>"
+        "<maplon>-87.375</maplon>"
+        "<session>VARA HF</session>"
+        "</variables>"
+        "</RMS_Express_Form>"
+    )
+    raw = RawMessage(
+        message_id="REVGEO001",
+        from_address="W0RVR@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body=body,
+        message_type=MessageType.WINLINK_FORM,
+    )
+    db.add(raw)
+    db.commit()
+
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.city == "Marquette"
+    assert checkin.state == "Michigan"
+    assert checkin.latitude == 46.5625
+    assert checkin.longitude == -87.375
+
+
+def test_process_raw_message_no_reverse_geocode_when_city_already_set(db, season_and_session, monkeypatch):
+    """If the parser already supplied a city (e.g. from comments), the
+    reverse-geocode hook must not run — comments win, network stays quiet."""
+    from backend.integrations.geocoder import service as geocoder_service
+    monkeypatch.setattr(
+        geocoder_service,
+        "_call_overpass_closest_place",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not call Overpass")),
+    )
+
+    _, net_session = season_and_session
+    body = (
+        '<?xml version="1.0"?>'
+        "<RMS_Express_Form>"
+        "<form_parameters><display_form>x.html</display_form></form_parameters>"
+        "<variables>"
+        "<msgsender>W0RVR</msgsender>"
+        "<name>Test Op</name>"
+        "<maplat>46.5625</maplat>"
+        "<maplon>-87.375</maplon>"
+        "<session>VARA HF</session>"
+        "<comments>Test Op, W0RVR, Marquette, Marquette, MI, VARA HF</comments>"
+        "</variables>"
+        "</RMS_Express_Form>"
+    )
+    raw = RawMessage(
+        message_id="REVGEO002",
+        from_address="W0RVR@winlink.org",
+        received_at=datetime(2026, 4, 10, 18, 30, tzinfo=timezone.utc),
+        subject="Check-in",
+        body=body,
+        message_type=MessageType.WINLINK_FORM,
+    )
+    db.add(raw)
+    db.commit()
+
+    checkin = process_raw_message(db, raw, net_session)
+    assert checkin.city == "Marquette"
+    assert checkin.state == "MI"
+
+
 def test_scan_and_import_deduplicates(db, season_and_session):
     _, net_session = season_and_session
 
