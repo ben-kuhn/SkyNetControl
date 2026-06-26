@@ -198,16 +198,17 @@ def test_list_for_user_unread_only_by_default(db):
 
     _seed_user(db)
     sess = _seed_session(db)
+    net = _ensure_net(db)
 
     a = create_notification(db, "W0NE", NotificationKind.REMINDER_DRAFT, message="A", session_id=sess.id)
     b = create_notification(db, "W0NE", NotificationKind.ROSTER_DRAFT, message="B", session_id=sess.id)
     a.read_at = datetime.now(tz=timezone.utc)
     db.commit()
 
-    unread = list_for_user(db, "W0NE")
+    unread = list_for_user(db, "W0NE", net_id=net.id)
     assert [n.id for n in unread] == [b.id]
 
-    all_ = list_for_user(db, "W0NE", include_read=True)
+    all_ = list_for_user(db, "W0NE", net_id=net.id, include_read=True)
     assert {n.id for n in all_} == {a.id, b.id}
 
 
@@ -217,9 +218,10 @@ def test_mark_read_owned(db):
 
     _seed_user(db)
     sess = _seed_session(db)
+    net = _ensure_net(db)
 
     n = create_notification(db, "W0NE", NotificationKind.REMINDER_DRAFT, message="A", session_id=sess.id)
-    updated = mark_read(db, n.id, "W0NE")
+    updated = mark_read(db, n.id, "W0NE", net_id=net.id)
     assert updated is not None
     assert updated.read_at is not None
 
@@ -231,9 +233,10 @@ def test_mark_read_not_owned_returns_none(db):
     _seed_user(db, callsign="W0NE")
     _seed_user(db, callsign="KD0OTH")
     sess = _seed_session(db)
+    net = _ensure_net(db)
 
     n = create_notification(db, "W0NE", NotificationKind.REMINDER_DRAFT, message="A", session_id=sess.id)
-    assert mark_read(db, n.id, "KD0OTH") is None
+    assert mark_read(db, n.id, "KD0OTH", net_id=net.id) is None
 
 
 def test_mark_all_read_returns_count(db):
@@ -242,11 +245,98 @@ def test_mark_all_read_returns_count(db):
 
     _seed_user(db)
     sess = _seed_session(db)
+    net = _ensure_net(db)
 
     create_notification(db, "W0NE", NotificationKind.REMINDER_DRAFT, message="A", session_id=sess.id)
     create_notification(db, "W0NE", NotificationKind.ROSTER_DRAFT, message="B", session_id=sess.id)
-    count = mark_all_read(db, "W0NE")
+    count = mark_all_read(db, "W0NE", net_id=net.id)
     assert count == 2
+
+
+def test_mark_read_wrong_net_returns_none(db):
+    """mark_read returns None when the notification belongs to a different net."""
+    from backend.modules.notifications.service import create_notification, mark_read
+    from backend.modules.notifications.models import NotificationKind
+    from backend.modules.nets.models import Net
+    from datetime import date, time
+    from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+
+    _seed_user(db)
+    net_a = _ensure_net(db)
+    net_b = Net(slug="b", name="Net B")
+    db.add(net_b)
+    db.flush()
+
+    season_b = NetSeason(
+        net_id=net_b.id,
+        name="S",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        day_of_week=3,
+        time=time(18, 0),
+    )
+    db.add(season_b)
+    db.flush()
+    sess_b = NetSession(
+        season_id=season_b.id,
+        start_date=date(2026, 5, 1),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
+        net_control_callsign="W0NE",
+    )
+    db.add(sess_b)
+    db.commit()
+
+    n = create_notification(db, "W0NE", NotificationKind.REMINDER_DRAFT, message="B-net", session_id=sess_b.id)
+    # Attempt to mark as read via net_a's id — should return None
+    assert mark_read(db, n.id, "W0NE", net_id=net_a.id) is None
+
+
+def test_mark_all_read_cross_net_isolation(db):
+    """mark_all_read on net A leaves net B's notifications unread."""
+    from backend.modules.notifications.service import create_notification, mark_all_read
+    from backend.modules.notifications.models import NotificationKind, Notification
+    from backend.modules.nets.models import Net
+    from datetime import date, time
+    from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
+
+    _seed_user(db)
+    net_a = _ensure_net(db)
+    sess_a = _seed_session(db)
+
+    net_b = Net(slug="b2", name="Net B2")
+    db.add(net_b)
+    db.flush()
+    season_b = NetSeason(
+        net_id=net_b.id,
+        name="S",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        day_of_week=3,
+        time=time(18, 0),
+    )
+    db.add(season_b)
+    db.flush()
+    sess_b = NetSession(
+        season_id=season_b.id,
+        start_date=date(2026, 5, 1),
+        session_type=SessionType.REGULAR_CHECKIN,
+        status=SessionStatus.SCHEDULED,
+        net_control_callsign="W0NE",
+    )
+    db.add(sess_b)
+    db.commit()
+
+    n_a = create_notification(db, "W0NE", NotificationKind.REMINDER_DRAFT, message="A", session_id=sess_a.id)
+    n_b = create_notification(db, "W0NE", NotificationKind.ROSTER_DRAFT, message="B", session_id=sess_b.id)
+
+    count = mark_all_read(db, "W0NE", net_id=net_a.id)
+    assert count == 1  # only net A's notification
+
+    db.refresh(n_a)
+    db.refresh(n_b)
+    assert n_a.read_at is not None
+    assert n_b.read_at is None
 
 
 def test_resolve_session_recipient_prefers_ncs(db):

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from backend.auth.models import User
 from backend.modules.notifications.models import Notification, NotificationKind
-from backend.modules.schedule.models import NetSession
+from backend.modules.schedule.models import NetSeason, NetSession
 
 
 def create_notification(
@@ -48,12 +48,33 @@ def create_notification(
     return n
 
 
+def _get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
+    """Resolve the net_id for a session by joining through its season."""
+    if net_session.season_id is None:
+        return None
+    season = db.get(NetSeason, net_session.season_id)
+    return season.net_id if season else None
+
+
 def list_for_user(
     db: Session,
     callsign: str,
+    net_id: int,
     include_read: bool = False,
 ) -> list[Notification]:
-    query = db.query(Notification).filter(Notification.recipient_callsign == callsign)
+    """List notifications for *callsign* scoped to *net_id*.
+
+    Notifications without a session_id have no net affiliation and are excluded.
+    """
+    query = (
+        db.query(Notification)
+        .join(NetSession, Notification.session_id == NetSession.id)
+        .join(NetSeason, NetSession.season_id == NetSeason.id)
+        .filter(
+            Notification.recipient_callsign == callsign,
+            NetSeason.net_id == net_id,
+        )
+    )
     if not include_read:
         query = query.filter(Notification.read_at.is_(None))
     return query.order_by(Notification.created_at.desc()).all()
@@ -63,9 +84,17 @@ def mark_read(
     db: Session,
     notification_id: int,
     callsign: str,
+    net_id: int,
 ) -> Notification | None:
+    """Mark a notification read.  Returns None if the notification doesn't exist,
+    doesn't belong to *callsign*, or doesn't belong to *net_id*."""
     n = db.get(Notification, notification_id)
     if n is None or n.recipient_callsign != callsign:
+        return None
+    if n.session_id is None:
+        return None
+    net_session = db.get(NetSession, n.session_id)
+    if net_session is None or _get_net_id_for_session(db, net_session) != net_id:
         return None
     if n.read_at is None:
         n.read_at = datetime.now(tz=timezone.utc)
@@ -74,15 +103,30 @@ def mark_read(
     return n
 
 
-def mark_all_read(db: Session, callsign: str) -> int:
+def mark_all_read(db: Session, callsign: str, net_id: int) -> int:
+    """Mark all unread notifications for *callsign* within *net_id* as read."""
+    # Fetch IDs that belong to this net via session join, then bulk-update by id list.
+    ids = [
+        row[0]
+        for row in (
+            db.query(Notification.id)
+            .join(NetSession, Notification.session_id == NetSession.id)
+            .join(NetSeason, NetSession.season_id == NetSeason.id)
+            .filter(
+                Notification.recipient_callsign == callsign,
+                Notification.read_at.is_(None),
+                NetSeason.net_id == net_id,
+            )
+            .all()
+        )
+    ]
+    if not ids:
+        return 0
     now = datetime.now(tz=timezone.utc)
     result = (
         db.query(Notification)
-        .filter(
-            Notification.recipient_callsign == callsign,
-            Notification.read_at.is_(None),
-        )
-        .update({Notification.read_at: now})
+        .filter(Notification.id.in_(ids))
+        .update({Notification.read_at: now}, synchronize_session="fetch")
     )
     db.commit()
     return result
