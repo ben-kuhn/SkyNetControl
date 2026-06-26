@@ -25,6 +25,12 @@ def db():
     engine.dispose()
 
 
+@pytest.fixture
+def net_id(db):
+    from tests.conftest import make_test_net
+    return make_test_net(db).id
+
+
 def test_create_raw_message(db: Session):
     msg = RawMessage(
         message_id="ABC123",
@@ -68,7 +74,7 @@ def test_raw_message_id_is_unique(db: Session):
         db.commit()
 
 
-def test_create_checkin(db: Session):
+def test_create_checkin(db: Session, net_id):
     from backend.modules.schedule.models import (
         NetSeason,
         NetSession,
@@ -77,6 +83,7 @@ def test_create_checkin(db: Session):
     from datetime import date
 
     season = NetSeason(
+        net_id=net_id,
         name="Test Season",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 6, 30),
@@ -116,7 +123,7 @@ def test_create_checkin(db: Session):
     assert fetched.latitude is None
 
 
-def test_checkin_with_raw_message(db: Session):
+def test_checkin_with_raw_message(db: Session, net_id):
     from backend.modules.schedule.models import (
         NetSeason,
         NetSession,
@@ -125,6 +132,7 @@ def test_checkin_with_raw_message(db: Session):
     from datetime import date
 
     season = NetSeason(
+        net_id=net_id,
         name="Test Season",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 6, 30),

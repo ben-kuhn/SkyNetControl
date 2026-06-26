@@ -5,13 +5,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import (
-    get_current_user,
+    NetContext,
     get_db_session,
-    optional_user_with_scope,
-    require_admin,
-    require_net_member,
+    require_net_role,
 )
-from backend.auth.models import User
+from backend.modules.nets.models import NetRole
 from backend.modules.roster.models import RosterLog
 from backend.modules.schedule.models import (
     NetSeason,
@@ -19,6 +17,7 @@ from backend.modules.schedule.models import (
     SessionStatus,
     SessionType,
 )
+from backend.modules.schedule import service
 from backend.modules.schedule.service import (
     generate_sessions,
     create_session as create_session_service,
@@ -27,7 +26,7 @@ from backend.modules.schedule.service import (
     update_session as update_session_service,
 )
 
-schedule_router = APIRouter(tags=["schedule"])
+schedule_router = APIRouter(prefix="/api/nets/{net_slug}/schedule", tags=["schedule"])
 
 
 # --- Pydantic schemas ---
@@ -156,9 +155,11 @@ def _season_to_response(db: Session, season: NetSeason) -> dict:
 @schedule_router.post("/seasons", status_code=201)
 async def create_season(
     body: SeasonCreate,
-    user: User = Depends(require_admin),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
+    if not ctx.user.is_admin and ctx.role != NetRole.NET_CONTROL:
+        raise HTTPException(status_code=403, detail="Net control or admin required")
     if body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="end_date must not be before start_date")
     if not body.is_week_long and body.day_of_week is None:
@@ -170,6 +171,7 @@ async def create_season(
         parsed_time = time(int(parts[0]), int(parts[1]))
 
     season = NetSeason(
+        net_id=ctx.net.id,
         name=body.name,
         start_date=body.start_date,
         end_date=body.end_date,
@@ -191,20 +193,20 @@ async def create_season(
 
 @schedule_router.get("/seasons")
 async def list_seasons(
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    seasons = db.query(NetSeason).order_by(NetSeason.start_date.desc()).all()
+    seasons = service.list_seasons(db, net_id=ctx.net.id)
     return [_season_to_response(db, s) for s in seasons]
 
 
 @schedule_router.get("/seasons/{season_id}")
 async def get_season(
     season_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    season = db.get(NetSeason, season_id)
+    season = service.get_season(db, season_id=season_id, net_id=ctx.net.id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
     return _season_to_response(db, season)
@@ -213,10 +215,10 @@ async def get_season(
 @schedule_router.get("/seasons/{season_id}/sessions")
 async def list_season_sessions(
     season_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    season = db.get(NetSeason, season_id)
+    season = service.get_season(db, season_id=season_id, net_id=ctx.net.id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
     return _sessions_response_for(db, list(season.sessions))
@@ -225,11 +227,17 @@ async def list_season_sessions(
 @schedule_router.post("/sessions", status_code=201)
 async def create_session_route(
     body: SessionCreate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     if body.session_type == SessionType.REAL_EVENT and body.season_id is not None:
         raise HTTPException(status_code=400, detail="Real event sessions cannot belong to a season")
+
+    # Verify the season belongs to this net when provided
+    if body.season_id is not None:
+        season = service.get_season(db, season_id=body.season_id, net_id=ctx.net.id)
+        if season is None:
+            raise HTTPException(status_code=404, detail="Season not found")
 
     session_obj = create_session_service(
         db,
@@ -248,7 +256,7 @@ async def create_session_route(
 async def list_sessions_route(
     season_id: int | None = Query(default=None),
     status: str | None = Query(default=None),
-    user: User | None = Depends(optional_user_with_scope("schedule:read")),
+    ctx: NetContext | None = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
     status_enum = None
@@ -258,19 +266,14 @@ async def list_sessions_route(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
-    # Anonymous and PENDING (unapproved) viewers see only COMPLETED sessions.
-    is_public_viewer = user is None or user.is_pending
-    if is_public_viewer:
-        status_enum = SessionStatus.COMPLETED
-
-    sessions = list_sessions_service(db, season_id=season_id, status=status_enum)
+    sessions = list_sessions_service(db, net_id=ctx.net.id, season_id=season_id, status=status_enum)
     return _sessions_response_for(db, sessions)
 
 
 @schedule_router.get("/sessions/{session_id}")
 async def get_session_route(
     session_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
     session_obj = get_session_service(db, session_id)
@@ -283,7 +286,7 @@ async def get_session_route(
 async def update_session(
     session_id: int,
     body: SessionUpdate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     session_obj = update_session_service(
@@ -304,10 +307,12 @@ async def update_session(
 @schedule_router.delete("/seasons/{season_id}", status_code=204)
 async def delete_season(
     season_id: int,
-    user: User = Depends(require_admin),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    season = db.get(NetSeason, season_id)
+    if not ctx.user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin required")
+    season = service.get_season(db, season_id=season_id, net_id=ctx.net.id)
     if season is None:
         raise HTTPException(status_code=404, detail="Season not found")
 

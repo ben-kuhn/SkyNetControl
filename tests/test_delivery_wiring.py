@@ -33,8 +33,20 @@ def db() -> Session:
     engine.dispose()
 
 
+def _ensure_net(db: Session):
+    from backend.modules.nets.models import Net
+    net = db.query(Net).filter_by(slug="t").one_or_none()
+    if net is None:
+        net = Net(slug="t", name="Test Net")
+        db.add(net)
+        db.flush()
+    return net
+
+
 def _setup_session(db: Session) -> NetSession:
+    net = _ensure_net(db)
     season = NetSeason(
+        net_id=net.id,
         name="Test Season",
         start_date=date(2026, 1, 1),
         end_date=date(2026, 12, 31),
@@ -165,8 +177,9 @@ def test_reminder_send_failure_creates_delivery_failure_notification(db):
     from backend.modules.reminders.models import ReminderLog, ReminderStatus
     from backend.modules.notifications.models import Notification, NotificationKind
 
+    net = _ensure_net(db)
     season = NetSeason(
-        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
+        net_id=net.id, name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
     )
     db.add(season)
     db.flush()
@@ -212,8 +225,9 @@ def test_roster_send_failure_creates_delivery_failure_notification(db):
     from backend.modules.roster.models import RosterLog, RosterStatus
     from backend.modules.notifications.models import Notification, NotificationKind
 
+    net = _ensure_net(db)
     season = NetSeason(
-        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
+        net_id=net.id, name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
     )
     db.add(season)
     db.flush()

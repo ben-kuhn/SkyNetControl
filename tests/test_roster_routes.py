@@ -45,16 +45,21 @@ def db_setup():
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            
+
         )
+        from backend.modules.nets.models import Net
+        net = Net(slug="t", name="Test Net")
+        session.add_all([admin, viewer, net])
+        session.flush()
         season = NetSeason(
+            net_id=net.id,
             name="Spring 2026",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 6, 30),
             day_of_week=3,
             time=time(18, 0),
         )
-        session.add_all([admin, viewer, season])
+        session.add(season)
         session.flush()
 
         net_session = NetSession(

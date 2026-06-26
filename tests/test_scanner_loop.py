@@ -14,8 +14,19 @@ def db_session(app):
         yield session
 
 
+def _ensure_net(db_session):
+    from backend.modules.nets.models import Net
+    net = db_session.query(Net).filter_by(slug="t").one_or_none()
+    if net is None:
+        net = Net(slug="t", name="Test Net")
+        db_session.add(net)
+        db_session.flush()
+    return net
+
+
 def _create_active_session(db_session):
-    season = NetSeason(name="Test", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31))
+    net = _ensure_net(db_session)
+    season = NetSeason(net_id=net.id, name="Test", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31))
     db_session.add(season)
     db_session.flush()
     net_session = NetSession(

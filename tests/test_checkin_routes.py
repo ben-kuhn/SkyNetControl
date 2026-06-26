@@ -74,6 +74,7 @@ def db_setup():
         session.add(AppConfig(key="net_address", value="w0ne@winlink.org"))
 
         season = NetSeason(
+            net_id=net.id,
             name="Test Season",
             start_date=date(2026, 4, 1),
             end_date=date(2026, 6, 30),

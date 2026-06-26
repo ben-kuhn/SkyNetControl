@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
+from backend.modules.nets.models import Net
 from backend.modules.schedule.models import (
     NetSeason,
     SessionType,
@@ -28,8 +29,17 @@ def db():
     engine.dispose()
 
 
-def test_generate_weekly_sessions(db: Session):
+@pytest.fixture
+def net(db: Session) -> Net:
+    n = Net(slug="t", name="Test Net")
+    db.add(n)
+    db.commit()
+    return n
+
+
+def test_generate_weekly_sessions(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Test Season",
         start_date=date(2026, 9, 3),  # Thursday
         end_date=date(2026, 10, 1),  # Thursday (4 weeks)
@@ -58,11 +68,12 @@ def test_generate_weekly_sessions(db: Session):
         assert s.season_id == season.id
 
 
-def test_generate_sessions_with_default_nco(db: Session):
+def test_generate_sessions_with_default_nco(db: Session, net: Net):
     """Operator picks a per-season default NCO on the create form; every
     auto-generated session is stamped with it. Nets that rotate NCOs
     leave it None (see test_generate_sessions above)."""
     season = NetSeason(
+        net_id=net.id,
         name="Fall 2026",
         start_date=date(2026, 9, 3),
         end_date=date(2026, 9, 17),
@@ -81,8 +92,9 @@ def test_generate_sessions_with_default_nco(db: Session):
         assert s.net_control_callsign == "KD0NCO"
 
 
-def test_generate_sessions_correct_dates(db: Session):
+def test_generate_sessions_correct_dates(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Short Season",
         start_date=date(2026, 9, 3),
         end_date=date(2026, 9, 17),
@@ -102,8 +114,9 @@ def test_generate_sessions_correct_dates(db: Session):
     assert sessions[2].start_date == date(2026, 9, 17)
 
 
-def test_generate_sessions_default_grace_period(db: Session):
+def test_generate_sessions_default_grace_period(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Test",
         start_date=date(2026, 9, 3),
         end_date=date(2026, 9, 3),
@@ -121,8 +134,9 @@ def test_generate_sessions_default_grace_period(db: Session):
     assert sessions[0].grace_period_hours == 24.0
 
 
-def test_generate_week_long_sessions(db: Session):
+def test_generate_week_long_sessions(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Summer 2026",
         start_date=date(2026, 6, 1),
         end_date=date(2026, 6, 21),
@@ -186,8 +200,35 @@ def test_get_session(db: Session):
     assert missing is None
 
 
-def test_list_sessions_no_filter(db: Session):
+def test_list_sessions_no_filter(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
+        name="Test",
+        start_date=date(2026, 9, 3),
+        end_date=date(2026, 9, 10),
+        day_of_week=3,
+        time=time(19, 0),
+        is_week_long=False,
+        activity_cadence=2,
+    )
+    db.add(season)
+    db.commit()
+    generate_sessions(db, season)
+
+    # Ad-hoc session has no season → not attributable to a net; excluded from list
+    create_session(
+        db,
+        start_date=date(2026, 4, 15),
+        session_type=SessionType.REAL_EVENT,
+    )
+
+    all_sessions = list_sessions(db, net_id=net.id)
+    assert len(all_sessions) == 2  # only the 2 from the season
+
+
+def test_list_sessions_filter_by_season(db: Session, net: Net):
+    season = NetSeason(
+        net_id=net.id,
         name="Test",
         start_date=date(2026, 9, 3),
         end_date=date(2026, 9, 10),
@@ -206,52 +247,33 @@ def test_list_sessions_no_filter(db: Session):
         session_type=SessionType.REAL_EVENT,
     )
 
-    all_sessions = list_sessions(db)
-    assert len(all_sessions) == 3  # 2 from season + 1 ad-hoc
-
-
-def test_list_sessions_filter_by_season(db: Session):
-    season = NetSeason(
-        name="Test",
-        start_date=date(2026, 9, 3),
-        end_date=date(2026, 9, 10),
-        day_of_week=3,
-        time=time(19, 0),
-        is_week_long=False,
-        activity_cadence=2,
-    )
-    db.add(season)
-    db.commit()
-    generate_sessions(db, season)
-
-    create_session(
-        db,
-        start_date=date(2026, 4, 15),
-        session_type=SessionType.REAL_EVENT,
-    )
-
-    season_sessions = list_sessions(db, season_id=season.id)
+    season_sessions = list_sessions(db, net_id=net.id, season_id=season.id)
     assert len(season_sessions) == 2
     for s in season_sessions:
         assert s.season_id == season.id
 
 
-def test_list_sessions_filter_by_status(db: Session):
-    s1 = create_session(
-        db,
-        start_date=date(2026, 4, 15),
-        session_type=SessionType.REAL_EVENT,
+def test_list_sessions_filter_by_status(db: Session, net: Net):
+    season = NetSeason(
+        net_id=net.id,
+        name="Test",
+        start_date=date(2026, 9, 3),
+        end_date=date(2026, 9, 10),
+        day_of_week=3,
+        time=time(19, 0),
+        is_week_long=False,
+        activity_cadence=2,
     )
-    create_session(
-        db,
-        start_date=date(2026, 4, 16),
-        session_type=SessionType.REGULAR_CHECKIN,
-    )
+    db.add(season)
+    db.commit()
+    sessions_created = generate_sessions(db, season)
+    assert len(sessions_created) >= 2
 
+    s1 = sessions_created[0]
     s1.status = SessionStatus.CANCELLED
     db.commit()
 
-    cancelled = list_sessions(db, status=SessionStatus.CANCELLED)
+    cancelled = list_sessions(db, net_id=net.id, status=SessionStatus.CANCELLED)
     assert len(cancelled) == 1
     assert cancelled[0].id == s1.id
 

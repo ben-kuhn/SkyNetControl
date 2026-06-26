@@ -45,8 +45,15 @@ def db():
 
 
 @pytest.fixture
-def season_and_session(db):
+def net_id(db):
+    from tests.conftest import make_test_net
+    return make_test_net(db).id
+
+
+@pytest.fixture
+def season_and_session(db, net_id):
     season = NetSeason(
+        net_id=net_id,
         name="Test Season",
         start_date=date(2026, 4, 1),
         end_date=date(2026, 6, 30),
@@ -614,7 +621,7 @@ def test_approve_updates_existing_member(db, season_and_session):
     assert member.total_check_ins == 11
 
 
-def test_get_checkins_by_callsign_returns_all_sessions_desc(db):
+def test_get_checkins_by_callsign_returns_all_sessions_desc(db, net_id):
     """Returns (CheckIn, session_date) tuples for a callsign across sessions, newest first."""
     from datetime import date, time
     from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
@@ -622,7 +629,7 @@ def test_get_checkins_by_callsign_returns_all_sessions_desc(db):
     from backend.modules.checkins.service import get_checkins_by_callsign
 
     season = NetSeason(
-        name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
+        net_id=net_id, name="S", start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), day_of_week=3, time=time(18, 0)
     )
     db.add(season)
     db.flush()

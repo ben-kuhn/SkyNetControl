@@ -33,7 +33,11 @@ def test_copy_database_round_trips_rows(tmp_path):
     with SrcSession() as s:
         s.add(User(callsign="K0XYZ", oidc_subject="g:x", name="Alice", is_admin=True))
         s.add(AppConfig(key="default_net_control", value="K0XYZ"))
-        s.add(NetSeason(name="Spring", start_date=date(2026, 4, 1), end_date=date(2026, 6, 30), day_of_week=3))
+        from backend.modules.nets.models import Net
+        net = Net(slug="t", name="Test Net")
+        s.add(net)
+        s.flush()
+        s.add(NetSeason(net_id=net.id, name="Spring", start_date=date(2026, 4, 1), end_date=date(2026, 6, 30), day_of_week=3))
         s.commit()
     src_engine.dispose()
 

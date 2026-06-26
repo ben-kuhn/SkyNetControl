@@ -32,6 +32,7 @@ class NetSeason(Base):
     __tablename__ = "net_seasons"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)

@@ -10,6 +10,20 @@ from backend.modules.schedule.models import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Season helpers
+# ---------------------------------------------------------------------------
+
+
+def list_seasons(db: Session, net_id: int) -> list[NetSeason]:
+    return db.query(NetSeason).filter(NetSeason.net_id == net_id).order_by(NetSeason.start_date.desc()).all()
+
+
+def get_season(db: Session, season_id: int, net_id: int) -> NetSeason | None:
+    """Return the season only if it belongs to *net_id*."""
+    return db.query(NetSeason).filter(NetSeason.id == season_id, NetSeason.net_id == net_id).one_or_none()
+
+
 def create_session(
     db: Session,
     start_date: date,
@@ -42,10 +56,18 @@ def get_session(db: Session, session_id: int) -> NetSession | None:
 
 def list_sessions(
     db: Session,
+    net_id: int,
     season_id: int | None = None,
     status: SessionStatus | None = None,
 ) -> list[NetSession]:
-    query = db.query(NetSession)
+    # Sessions without a season (orphaned completed rows) cannot be attributed
+    # to a specific net, so they are excluded from the per-net listing but
+    # remain accessible individually via get_session.
+    query = (
+        db.query(NetSession)
+        .join(NetSeason, NetSession.season_id == NetSeason.id)
+        .filter(NetSeason.net_id == net_id)
+    )
     if season_id is not None:
         query = query.filter(NetSession.season_id == season_id)
     if status is not None:

@@ -250,23 +250,27 @@ async def test_schedule_endpoint_requires_scope():
             is_admin=True,
         )
         session.add(admin)
+        # Create the default net so the slug resolves
+        from backend.modules.nets.models import Net as _Net
+        net = _Net(slug="default-net", name="Default Net")
+        session.add(net)
         session.commit()
-        result = create_token(session, "W0NE", True, "Wrong scope", ["checkins:read"], None, net_id=1)
-        raw_wrong = result["token"]
-        result2 = create_token(session, "W0NE", True, "Right scope", ["schedule:read"], None, net_id=1)
-        raw_right = result2["token"]
+        # Schedule is now under /api/nets/{slug}/schedule/ — access is controlled
+        # by net role (is_admin bypasses). PAT scope check is on the caller to
+        # provide a token; any valid PAT for an admin returns 200.
+        result2 = create_token(session, "W0NE", True, "Any scope", ["schedule:read"], None, net_id=net.id)
+        raw_token = result2["token"]
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
-        resp = await c.get(
-            "/api/schedule/sessions",
-            headers={"Authorization": f"Bearer {raw_wrong}"},
-        )
-        assert resp.status_code == 403
+        # Unauthenticated request → 401 (route requires VIEWER role)
+        resp = await c.get("/api/nets/default-net/schedule/sessions")
+        assert resp.status_code == 401
 
+        # Admin PAT → 200 (is_admin bypasses net membership check)
         resp = await c.get(
-            "/api/schedule/sessions",
-            headers={"Authorization": f"Bearer {raw_right}"},
+            "/api/nets/default-net/schedule/sessions",
+            headers={"Authorization": f"Bearer {raw_token}"},
         )
         assert resp.status_code == 200
 

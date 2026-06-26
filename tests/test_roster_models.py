@@ -18,6 +18,12 @@ def db():
     engine.dispose()
 
 
+@pytest.fixture
+def net_id(db):
+    from tests.conftest import make_test_net
+    return make_test_net(db).id
+
+
 def test_create_roster_template(db):
     template = RosterTemplate(
         name="Default Roster",
@@ -39,8 +45,9 @@ def test_create_roster_template(db):
     assert template.lead_time_days == 1
 
 
-def test_create_roster_log(db):
+def test_create_roster_log(db, net_id):
     season = NetSeason(
+        net_id=net_id,
         name="Spring 2026",
         start_date=date(2026, 4, 1),
         end_date=date(2026, 6, 30),

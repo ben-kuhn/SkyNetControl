@@ -284,7 +284,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router, prefix="/api/auth")
     app.include_router(pat_router, prefix="/api/auth/tokens")
     app.include_router(config_router, prefix="/api/config")
-    app.include_router(schedule_router, prefix="/api/schedule")
+    app.include_router(schedule_router)
     app.include_router(activities_router, prefix="/api/activities")
     app.include_router(checkins_router, prefix="/api/checkins")
     app.include_router(reminders_router, prefix="/api/reminders")

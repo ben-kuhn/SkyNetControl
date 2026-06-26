@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
+from backend.modules.nets.models import Net
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 
 
@@ -17,8 +18,17 @@ def db():
     engine.dispose()
 
 
-def test_create_season(db: Session):
+@pytest.fixture
+def net(db: Session) -> Net:
+    n = Net(slug="t", name="Test Net")
+    db.add(n)
+    db.commit()
+    return n
+
+
+def test_create_season(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Fall/Winter 2026",
         start_date=date(2026, 9, 7),
         end_date=date(2027, 5, 26),
@@ -35,10 +45,12 @@ def test_create_season(db: Session):
     assert fetched.name == "Fall/Winter 2026"
     assert fetched.day_of_week == 3
     assert fetched.activity_cadence == 2
+    assert fetched.net_id == net.id
 
 
-def test_create_session(db: Session):
+def test_create_session(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Test Season",
         start_date=date(2026, 9, 7),
         end_date=date(2027, 5, 26),
@@ -71,8 +83,9 @@ def test_create_session(db: Session):
     assert fetched.activity_id is None
 
 
-def test_session_belongs_to_season(db: Session):
+def test_session_belongs_to_season(db: Session, net: Net):
     season = NetSeason(
+        net_id=net.id,
         name="Test",
         start_date=date(2026, 9, 7),
         end_date=date(2027, 5, 26),

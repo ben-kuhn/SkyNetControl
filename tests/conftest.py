@@ -107,3 +107,14 @@ def seed_oauth_provider():
             issuer_url=overrides.get("issuer_url", ""),
         ))
     return _seed
+
+
+def make_test_net(db, slug: str = "t", name: str = "Test Net"):
+    """Insert a Net row and return it. Helper for tests that need NetSeason.net_id."""
+    from backend.modules.nets.models import Net
+
+    n = Net(slug=slug, name=name)
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    return n

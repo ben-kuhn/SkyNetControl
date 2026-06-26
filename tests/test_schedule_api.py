@@ -1,3 +1,4 @@
+"""API tests for schedule routes mounted at /api/nets/{net_slug}/schedule/."""
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -7,11 +8,10 @@ from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
 from backend.auth.models import User
-from backend.auth.service import create_access_token
+from backend.modules.nets.models import Net, NetMembership, NetRole
 from backend.modules.schedule.routes import schedule_router
 from backend.config import Settings
 from tests.conftest import make_test_token
-
 
 
 @pytest.fixture
@@ -39,9 +39,14 @@ def db_setup():
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            
         )
-        session.add_all([admin, viewer])
+        net = Net(slug="t", name="Test Net")
+        session.add_all([admin, viewer, net])
+        session.flush()
+        # Give admin NET_CONTROL membership (is_admin bypasses role checks,
+        # but the membership row lets the viewer-role test work too)
+        session.add(NetMembership(user_callsign="W0NE", net_id=net.id, role=NetRole.NET_CONTROL))
+        session.add(NetMembership(user_callsign="KD0TST", net_id=net.id, role=NetRole.VIEWER))
         session.commit()
     return factory
 
@@ -51,7 +56,8 @@ def test_app(test_settings, db_setup):
     app = FastAPI()
     app.state.session_factory = db_setup
     app.state.settings = test_settings
-    app.include_router(schedule_router, prefix="/api/schedule")
+    # Router carries its own prefix: /api/nets/{net_slug}/schedule
+    app.include_router(schedule_router)
     return app
 
 
@@ -62,11 +68,16 @@ async def test_client(test_app):
         yield c
 
 
+# Shorthand helpers
+SEASONS_URL = "/api/nets/t/schedule/seasons"
+SESSIONS_URL = "/api/nets/t/schedule/sessions"
+
+
 @pytest.mark.asyncio
 async def test_create_season(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -90,7 +101,7 @@ async def test_list_seasons(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     # Create a season first
     await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -103,7 +114,7 @@ async def test_list_seasons(test_client, test_settings):
         cookies={"access_token": token},
     )
 
-    response = await test_client.get("/api/schedule/seasons", cookies={"access_token": token})
+    response = await test_client.get(SEASONS_URL, cookies={"access_token": token})
     assert response.status_code == 200
     seasons = response.json()
     assert len(seasons) == 1
@@ -117,10 +128,27 @@ async def test_session_roster_status_field(test_client, test_settings, db_setup)
     from datetime import date, datetime, timezone
     from backend.modules.roster.models import RosterLog, RosterStatus
     from backend.modules.schedule.models import NetSession, SessionType
+    from backend.modules.nets.models import Net
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     with db_setup() as session:
+        net = session.query(Net).filter_by(slug="t").one()
+        from backend.modules.schedule.models import NetSeason
+        from datetime import date as d
+
+        season = NetSeason(
+            net_id=net.id,
+            name="Test Season",
+            start_date=d(2026, 4, 1),
+            end_date=d(2026, 4, 30),
+            day_of_week=3,
+            is_week_long=False,
+            activity_cadence=2,
+        )
+        session.add(season)
+        session.flush()
         net_session = NetSession(
+            season_id=season.id,
             start_date=date(2026, 4, 10),
             end_date=date(2026, 4, 10),
             session_type=SessionType.REGULAR_CHECKIN,
@@ -143,7 +171,7 @@ async def test_session_roster_status_field(test_client, test_settings, db_setup)
         session_id = net_session.id
 
     response = await test_client.get(
-        f"/api/schedule/sessions/{session_id}",
+        f"/api/nets/t/schedule/sessions/{session_id}",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -153,11 +181,27 @@ async def test_session_roster_status_field(test_client, test_settings, db_setup)
 @pytest.mark.asyncio
 async def test_session_roster_status_null_when_no_roster(test_client, test_settings, db_setup):
     from datetime import date
-    from backend.modules.schedule.models import NetSession, SessionType
+    from backend.modules.schedule.models import NetSession, NetSeason, SessionType
+    from backend.modules.nets.models import Net
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     with db_setup() as session:
+        net = session.query(Net).filter_by(slug="t").one()
+        from datetime import date as d
+
+        season = NetSeason(
+            net_id=net.id,
+            name="Test Season",
+            start_date=d(2026, 4, 1),
+            end_date=d(2026, 4, 30),
+            day_of_week=3,
+            is_week_long=False,
+            activity_cadence=2,
+        )
+        session.add(season)
+        session.flush()
         net_session = NetSession(
+            season_id=season.id,
             start_date=date(2026, 4, 10),
             end_date=date(2026, 4, 10),
             session_type=SessionType.REGULAR_CHECKIN,
@@ -168,7 +212,7 @@ async def test_session_roster_status_null_when_no_roster(test_client, test_setti
         session_id = net_session.id
 
     response = await test_client.get(
-        f"/api/schedule/sessions/{session_id}",
+        f"/api/nets/t/schedule/sessions/{session_id}",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -179,7 +223,7 @@ async def test_session_roster_status_null_when_no_roster(test_client, test_setti
 async def test_list_sessions(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -194,7 +238,7 @@ async def test_list_sessions(test_client, test_settings):
     season_id = create_resp.json()["id"]
 
     response = await test_client.get(
-        f"/api/schedule/seasons/{season_id}/sessions",
+        f"/api/nets/t/schedule/seasons/{season_id}/sessions",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -206,7 +250,7 @@ async def test_list_sessions(test_client, test_settings):
 async def test_update_session(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -221,7 +265,7 @@ async def test_update_session(test_client, test_settings):
     session_id = create_resp.json()["sessions"][0]["id"]
 
     response = await test_client.patch(
-        f"/api/schedule/sessions/{session_id}",
+        f"/api/nets/t/schedule/sessions/{session_id}",
         json={"status": "cancelled"},
         cookies={"access_token": token},
     )
@@ -233,7 +277,7 @@ async def test_update_session(test_client, test_settings):
 async def test_create_adhoc_real_event(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
-        "/api/schedule/sessions",
+        SESSIONS_URL,
         json={
             "start_date": "2026-04-15",
             "session_type": "real_event",
@@ -252,7 +296,7 @@ async def test_create_adhoc_real_event(test_client, test_settings):
 async def test_create_real_event_with_season_rejected(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     season_resp = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -265,7 +309,7 @@ async def test_create_real_event_with_season_rejected(test_client, test_settings
     season_id = season_resp.json()["id"]
 
     response = await test_client.post(
-        "/api/schedule/sessions",
+        SESSIONS_URL,
         json={
             "start_date": "2026-04-15",
             "session_type": "real_event",
@@ -282,7 +326,7 @@ async def test_list_sessions_with_filters(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     season_resp = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -294,67 +338,62 @@ async def test_list_sessions_with_filters(test_client, test_settings):
     )
     season_id = season_resp.json()["id"]
 
-    await test_client.post(
-        "/api/schedule/sessions",
-        json={
-            "start_date": "2026-04-15",
-            "session_type": "real_event",
-        },
-        cookies={"access_token": token},
-    )
-
+    # Ad-hoc real event has no season, so it won't appear in per-net listing
+    # (no season_id → not attributable to a net via join). Season sessions: 2.
     resp_all = await test_client.get(
-        "/api/schedule/sessions",
+        SESSIONS_URL,
         cookies={"access_token": token},
     )
     assert resp_all.status_code == 200
     all_sessions = resp_all.json()
-    assert len(all_sessions) == 3
+    assert len(all_sessions) == 2  # only the 2 season sessions (ad-hoc excluded)
 
     resp_season = await test_client.get(
-        f"/api/schedule/sessions?season_id={season_id}",
+        f"{SESSIONS_URL}?season_id={season_id}",
         cookies={"access_token": token},
     )
     assert resp_season.status_code == 200
     assert len(resp_season.json()) == 2
 
     resp_status = await test_client.get(
-        "/api/schedule/sessions?status=scheduled",
+        f"{SESSIONS_URL}?status=scheduled",
         cookies={"access_token": token},
     )
     assert resp_status.status_code == 200
-    assert len(resp_status.json()) == 3
+    assert len(resp_status.json()) == 2
 
 
 @pytest.mark.asyncio
 async def test_get_single_session(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     create_resp = await test_client.post(
-        "/api/schedule/sessions",
+        SEASONS_URL,
         json={
-            "start_date": "2026-04-15",
-            "session_type": "real_event",
-            "net_control_callsign": "W0NE",
+            "name": "Fall 2026",
+            "start_date": "2026-09-03",
+            "end_date": "2026-09-03",
+            "day_of_week": 3,
+            "time": "19:00",
         },
         cookies={"access_token": token},
     )
-    session_id = create_resp.json()["id"]
+    session_id = create_resp.json()["sessions"][0]["id"]
 
     response = await test_client.get(
-        f"/api/schedule/sessions/{session_id}",
+        f"/api/nets/t/schedule/sessions/{session_id}",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == session_id
-    assert data["session_type"] == "real_event"
+    assert data["session_type"] == "regular_checkin"
 
 
 @pytest.mark.asyncio
 async def test_get_session_not_found(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
-        "/api/schedule/sessions/9999",
+        "/api/nets/t/schedule/sessions/9999",
         cookies={"access_token": token},
     )
     assert response.status_code == 404
@@ -364,7 +403,7 @@ async def test_get_session_not_found(test_client, test_settings):
 async def test_create_season_end_before_start_rejected(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Bad Season",
             "start_date": "2026-10-01",
@@ -381,7 +420,7 @@ async def test_create_season_end_before_start_rejected(test_client, test_setting
 async def test_create_season_no_day_of_week_rejected(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Bad Season",
             "start_date": "2026-09-03",
@@ -400,7 +439,7 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
 
     # Create as admin
     await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -414,12 +453,12 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
     )
 
     # Viewer can list
-    response = await test_client.get("/api/schedule/seasons", cookies={"access_token": viewer_token})
+    response = await test_client.get(SEASONS_URL, cookies={"access_token": viewer_token})
     assert response.status_code == 200
 
-    # Viewer cannot create
+    # Viewer cannot create (needs NET_CONTROL)
     response = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Hacked Season",
             "start_date": "2026-01-01",
@@ -435,56 +474,20 @@ async def test_viewer_can_read_but_not_create(test_client, test_settings):
 
 
 @pytest.mark.asyncio
-async def test_list_sessions_public_completed_only(test_client, test_settings, db_setup):
-    """Anonymous viewers only see COMPLETED sessions."""
-    from backend.modules.schedule.models import SessionStatus
-
-    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-
-    # Create a season with multiple sessions
-    season_resp = await test_client.post(
-        "/api/schedule/seasons",
-        json={
-            "name": "Fall 2026",
-            "start_date": "2026-09-03",
-            "end_date": "2026-09-10",
-            "day_of_week": 3,
-            "time": "19:00",
-        },
-        cookies={"access_token": admin_token},
-    )
-    season_id = season_resp.json()["id"]
-
-    # Get the created sessions and mark some as completed
-    with db_setup() as session:
-        from backend.modules.schedule.models import NetSession
-
-        sessions = session.query(NetSession).filter_by(season_id=season_id).all()
-        if len(sessions) >= 2:
-            sessions[0].status = SessionStatus.COMPLETED
-            sessions[1].status = SessionStatus.SCHEDULED
-            session.commit()
-
-    # Anonymous call should only see COMPLETED
-    resp = await test_client.get("/api/schedule/sessions")
-    assert resp.status_code == 200
-    body = resp.json()
-    # Should see at least one completed session from the season
-    completed = [s for s in body if s["status"] == "completed"]
-    assert len(completed) >= 1
-    # Should not see scheduled sessions
-    scheduled = [s for s in body if s["status"] == "scheduled"]
-    assert len(scheduled) == 0
+async def test_list_sessions_requires_auth(test_client):
+    """Anonymous requests are rejected (401) since the route now requires VIEWER role."""
+    resp = await test_client.get(SESSIONS_URL)
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_list_sessions_authenticated_sees_all(test_client, test_settings, db_setup):
-    """Authenticated callers see all session statuses."""
+    """Authenticated callers see all session statuses for their net."""
     admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     # Create a season with multiple sessions
-    season_resp = await test_client.post(
-        "/api/schedule/seasons",
+    await test_client.post(
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -494,62 +497,12 @@ async def test_list_sessions_authenticated_sees_all(test_client, test_settings, 
         },
         cookies={"access_token": admin_token},
     )
-    season_id = season_resp.json()["id"]
 
     # Authenticated user should see all
-    resp = await test_client.get("/api/schedule/sessions", cookies={"access_token": admin_token})
+    resp = await test_client.get(SESSIONS_URL, cookies={"access_token": admin_token})
     assert resp.status_code == 200
     body = resp.json()
-    # Authenticated users are not constrained to completed
     assert len(body) >= 2  # At least some sessions from the season
-
-
-@pytest.mark.asyncio
-async def test_list_sessions_pending_user_sees_only_completed(test_client, test_settings, db_setup):
-    """Audit M3: PENDING users are treated like anonymous viewers."""
-    from backend.modules.schedule.models import NetSession, SessionStatus
-
-    admin_token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-
-    # Create a season with sessions, mark statuses to differentiate
-    season_resp = await test_client.post(
-        "/api/schedule/seasons",
-        json={
-            "name": "Fall 2026",
-            "start_date": "2026-09-03",
-            "end_date": "2026-09-10",
-            "day_of_week": 3,
-            "time": "19:00",
-        },
-        cookies={"access_token": admin_token},
-    )
-    season_id = season_resp.json()["id"]
-
-    with db_setup() as session:
-        sessions = session.query(NetSession).filter_by(season_id=season_id).all()
-        if len(sessions) >= 2:
-            sessions[0].status = SessionStatus.COMPLETED
-            sessions[1].status = SessionStatus.SCHEDULED
-        # Seed a PENDING user
-        session.add(
-            User(
-                callsign="PENDING-y",
-                oidc_subject="auth0|pendingy",
-                name="Pending",
-                is_pending=True,
-            )
-        )
-        session.commit()
-
-    pending_token = make_test_token("PENDING-y", test_settings, is_pending=True, token_version=0)
-    resp = await test_client.get(
-        "/api/schedule/sessions",
-        cookies={"access_token": pending_token},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    scheduled = [s for s in body if s["status"] == "scheduled"]
-    assert len(scheduled) == 0
 
 
 @pytest.mark.asyncio
@@ -562,7 +515,7 @@ async def test_delete_season_preserves_completed_sessions(test_client, test_sett
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
 
     season_resp = await test_client.post(
-        "/api/schedule/seasons",
+        SEASONS_URL,
         json={
             "name": "Fall 2026",
             "start_date": "2026-09-03",
@@ -587,7 +540,7 @@ async def test_delete_season_preserves_completed_sessions(test_client, test_sett
         session.commit()
 
     resp = await test_client.delete(
-        f"/api/schedule/seasons/{season_id}",
+        f"/api/nets/t/schedule/seasons/{season_id}",
         cookies={"access_token": token},
     )
     assert resp.status_code == 204

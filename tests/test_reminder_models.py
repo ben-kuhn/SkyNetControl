@@ -28,8 +28,15 @@ def db():
 
 
 @pytest.fixture
-def season_and_session(db):
+def net_id(db):
+    from tests.conftest import make_test_net
+    return make_test_net(db).id
+
+
+@pytest.fixture
+def season_and_session(db, net_id):
     season = NetSeason(
+        net_id=net_id,
         name="Test Season",
         start_date=date(2026, 4, 1),
         end_date=date(2026, 6, 30),
