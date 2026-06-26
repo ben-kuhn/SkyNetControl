@@ -55,6 +55,19 @@ If your turn ends without a follow-up after a tool failure, the session goes sil
 
 Corollary: don't batch a long-running or flaky Bash call (e.g. `review-package` on a large diff, or a long subagent dispatch) in parallel with unrelated tool calls. A transport failure on the slow one gets buried among the successes. Run it on its own so the error is impossible to miss.
 
+## Subagent dispatch — keep prompts SHORT, use files
+
+When dispatching subagents (especially in the SDD workflow), the dispatch prompt itself MUST be short and reference files:
+
+- **Task brief** → file path (via the SDD skill's `scripts/task-brief PLAN_FILE N`).
+- **Report file** → file path; subagent writes its full report there and returns only short status.
+- **Review package** → file path (via `scripts/review-package BASE HEAD`).
+- **Carry-forward context** from earlier tasks → keep to a few lines or link to the SDD ledger.
+
+Massive inline prompts (pasted plan text, accumulated history, full diffs) have repeatedly caused silent transport failures on this repo — the session hangs with no output and no waiting prompt. Anything pasted inline also stays resident in the controller's context and is re-read every turn.
+
+A correct dispatch is: one-line scene-setting, brief-file path, report-file path + contract, a few lines of unavoidable interface decisions from prior tasks, and global constraints. Nothing else. Never paste the plan text, prior task summaries, or full diffs.
+
 ## Permissions
 
 The user prefers commands that don't trigger permission prompts. When a dedicated tool can do the job, use it instead of Bash:
