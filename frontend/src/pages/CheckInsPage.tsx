@@ -507,7 +507,7 @@ function EditCheckinModal({
   );
 
   const formViewColumn = checkin?.form_view_html && (
-    <div className="flex flex-col gap-2 min-h-0">
+    <div className="flex flex-col gap-2 min-h-0 lg:col-span-2">
       <div className="text-xs font-medium text-text-secondary">Form view</div>
       <iframe
         sandbox=""
@@ -552,7 +552,7 @@ function EditCheckinModal({
     <Modal open={open} onClose={onClose} title="Edit Check-in" size={modalSize} footer={footer}>
       {hasFormView ? (
         <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {formViewColumn}
             {fieldsColumn}
           </div>
