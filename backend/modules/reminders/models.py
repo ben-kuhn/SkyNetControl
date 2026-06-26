@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,9 +31,11 @@ class ReminderStatus(str, enum.Enum):
 
 class ReminderTemplate(Base):
     __tablename__ = "reminder_templates"
+    __table_args__ = (UniqueConstraint("net_id", "name", name="uq_reminder_templates_net_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     template_type: Mapped[TemplateType] = mapped_column(Enum(TemplateType), nullable=False)
     subject_template: Mapped[str] = mapped_column(Text, nullable=False)
     body_template: Mapped[str] = mapped_column(Text, nullable=False)

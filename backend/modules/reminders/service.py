@@ -34,9 +34,10 @@ def _session_type_to_template_type(session_type: SessionType) -> TemplateType:
     return TemplateType.REGULAR_CHECKIN
 
 
-def _clear_default(db: Session, template_type: TemplateType) -> None:
-    """Clear is_default on all existing templates of the given type."""
+def _clear_default(db: Session, net_id: int, template_type: TemplateType) -> None:
+    """Clear is_default on all existing templates of *net_id* and *template_type*."""
     db.query(ReminderTemplate).filter(
+        ReminderTemplate.net_id == net_id,
         ReminderTemplate.template_type == template_type,
         ReminderTemplate.is_default.is_(True),
     ).update({"is_default": False})
@@ -49,6 +50,7 @@ def _clear_default(db: Session, template_type: TemplateType) -> None:
 
 def create_template(
     db: Session,
+    net_id: int,
     name: str,
     template_type: TemplateType,
     subject_template: str,
@@ -57,9 +59,10 @@ def create_template(
     is_default: bool = False,
 ) -> ReminderTemplate:
     if is_default:
-        _clear_default(db, template_type)
+        _clear_default(db, net_id, template_type)
 
     tmpl = ReminderTemplate(
+        net_id=net_id,
         name=name,
         template_type=template_type,
         subject_template=subject_template,
@@ -73,17 +76,24 @@ def create_template(
     return tmpl
 
 
-def get_template(db: Session, template_id: int) -> ReminderTemplate | None:
-    return db.get(ReminderTemplate, template_id)
+def get_template(db: Session, template_id: int, net_id: int | None = None) -> ReminderTemplate | None:
+    """Return a ReminderTemplate by id, optionally verifying it belongs to *net_id*."""
+    tmpl = db.get(ReminderTemplate, template_id)
+    if tmpl is None:
+        return None
+    if net_id is not None and tmpl.net_id != net_id:
+        return None
+    return tmpl
 
 
-def list_templates(db: Session) -> list[ReminderTemplate]:
-    return db.query(ReminderTemplate).order_by(ReminderTemplate.name).all()
+def list_templates(db: Session, net_id: int) -> list[ReminderTemplate]:
+    return db.query(ReminderTemplate).filter(ReminderTemplate.net_id == net_id).order_by(ReminderTemplate.name).all()
 
 
 def update_template(
     db: Session,
     template_id: int,
+    net_id: int | None = None,
     name: str | None = None,
     template_type: TemplateType | None = None,
     subject_template: str | None = None,
@@ -91,13 +101,13 @@ def update_template(
     lead_time_days: int | None = None,
     is_default: bool | None = None,
 ) -> ReminderTemplate | None:
-    tmpl = db.get(ReminderTemplate, template_id)
+    tmpl = get_template(db, template_id, net_id=net_id)
     if tmpl is None:
         return None
 
     if is_default is True:
         effective_type = template_type if template_type is not None else tmpl.template_type
-        _clear_default(db, effective_type)
+        _clear_default(db, tmpl.net_id, effective_type)
 
     if name is not None:
         tmpl.name = name
@@ -117,8 +127,8 @@ def update_template(
     return tmpl
 
 
-def delete_template(db: Session, template_id: int) -> bool:
-    tmpl = db.get(ReminderTemplate, template_id)
+def delete_template(db: Session, template_id: int, net_id: int | None = None) -> bool:
+    tmpl = get_template(db, template_id, net_id=net_id)
     if tmpl is None:
         return False
     if tmpl.is_default:
@@ -244,10 +254,21 @@ def render_reminder(
 # ---------------------------------------------------------------------------
 
 
+def _get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
+    """Resolve the net_id for a session by joining through its season."""
+    if net_session.season_id is None:
+        return None
+    from backend.modules.schedule.models import NetSeason
+
+    season = db.get(NetSeason, net_session.season_id)
+    return season.net_id if season else None
+
+
 def generate_draft(
     db: Session,
     session_id: int,
     template_id: int | None = None,
+    net_id: int | None = None,
 ) -> ReminderLog | None:
     """Create a DRAFT ReminderLog for the given session. Idempotent."""
     # Idempotency: return existing log if one already exists for this session
@@ -259,18 +280,20 @@ def generate_draft(
     if net_session is None:
         return None
 
+    # Resolve net_id from session if not provided
+    resolved_net_id = net_id if net_id is not None else _get_net_id_for_session(db, net_session)
+
     if template_id is not None:
         template = db.get(ReminderTemplate, template_id)
     else:
         tmpl_type = _session_type_to_template_type(net_session.session_type)
-        template = (
-            db.query(ReminderTemplate)
-            .filter(
-                ReminderTemplate.template_type == tmpl_type,
-                ReminderTemplate.is_default.is_(True),
-            )
-            .first()
+        q = db.query(ReminderTemplate).filter(
+            ReminderTemplate.template_type == tmpl_type,
+            ReminderTemplate.is_default.is_(True),
         )
+        if resolved_net_id is not None:
+            q = q.filter(ReminderTemplate.net_id == resolved_net_id)
+        template = q.first()
 
     if template is None:
         return None
@@ -292,14 +315,26 @@ def generate_draft(
     return log
 
 
-def generate_due_drafts(db: Session) -> list[ReminderLog]:
-    """Generate drafts for all SCHEDULED sessions that are within their lead time."""
+def generate_due_drafts(db: Session, net_id: int | None = None) -> list[ReminderLog]:
+    """Generate drafts for all SCHEDULED sessions that are within their lead time.
+
+    If *net_id* is supplied only sessions belonging to that net are processed and
+    only that net's default templates are used.  When *net_id* is ``None`` all
+    nets are processed (background task / cron use-case).
+    """
     today = _today()
 
-    # Get all default templates to determine lead times per type
-    default_templates: dict[TemplateType, ReminderTemplate] = {}
-    for tmpl in db.query(ReminderTemplate).filter(ReminderTemplate.is_default.is_(True)).all():
-        default_templates[tmpl.template_type] = tmpl
+    # Build a mapping of (net_id, template_type) → default template
+    default_templates_q = db.query(ReminderTemplate).filter(ReminderTemplate.is_default.is_(True))
+    if net_id is not None:
+        default_templates_q = default_templates_q.filter(ReminderTemplate.net_id == net_id)
+    # key: (net_id, template_type)
+    net_type_default: dict[tuple[int, TemplateType], ReminderTemplate] = {
+        (t.net_id, t.template_type): t for t in default_templates_q.all()
+    }
+
+    if not net_type_default:
+        return []
 
     # Find all SCHEDULED sessions that don't yet have a ReminderLog
     existing_session_ids = {row[0] for row in db.query(ReminderLog.session_id).all()}
@@ -311,14 +346,23 @@ def generate_due_drafts(db: Session) -> list[ReminderLog]:
         if session.id in existing_session_ids:
             continue
 
+        # Resolve which net this session belongs to
+        session_net_id = _get_net_id_for_session(db, session)
+        if session_net_id is None:
+            continue
+
+        # If caller scoped to a specific net, skip sessions from other nets
+        if net_id is not None and session_net_id != net_id:
+            continue
+
         tmpl_type = _session_type_to_template_type(session.session_type)
-        template = default_templates.get(tmpl_type)
+        template = net_type_default.get((session_net_id, tmpl_type))
         if template is None:
             continue
 
         days_until = (session.start_date - today).days
         if days_until <= template.lead_time_days:
-            log = generate_draft(db, session.id, template_id=template.id)
+            log = generate_draft(db, session.id, template_id=template.id, net_id=session_net_id)
             if log is not None:
                 drafts.append(log)
                 recipient = resolve_session_recipient(db, session)
@@ -442,15 +486,16 @@ def regenerate_draft(db: Session, reminder_id: int) -> ReminderLog | None:
     if log.template_id is not None:
         template = db.get(ReminderTemplate, log.template_id)
     if template is None:
+        # Fall back to net's default template, scoped by the session's net
+        session_net_id = _get_net_id_for_session(db, net_session)
         tmpl_type = _session_type_to_template_type(net_session.session_type)
-        template = (
-            db.query(ReminderTemplate)
-            .filter(
-                ReminderTemplate.template_type == tmpl_type,
-                ReminderTemplate.is_default.is_(True),
-            )
-            .first()
+        q = db.query(ReminderTemplate).filter(
+            ReminderTemplate.template_type == tmpl_type,
+            ReminderTemplate.is_default.is_(True),
         )
+        if session_net_id is not None:
+            q = q.filter(ReminderTemplate.net_id == session_net_id)
+        template = q.first()
     if template is None:
         return None
 

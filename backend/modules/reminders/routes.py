@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_net_member
-from backend.auth.models import User
+from backend.auth.dependencies import NetContext, get_db_session, require_net_role
+from backend.modules.nets.models import NetRole
 from backend.modules.reminders.models import ReminderLog, ReminderStatus, ReminderTemplate, TemplateType
 from backend.modules.reminders.service import (
     approve_reminder,
@@ -11,15 +11,19 @@ from backend.modules.reminders.service import (
     delete_template,
     generate_draft,
     generate_due_drafts,
+    get_template,
     list_templates,
     mark_sent,
     regenerate_draft,
     skip_reminder,
     update_draft,
     update_template,
+    _get_net_id_for_session,
 )
+from backend.modules.schedule.models import NetSession, NetSeason
 
-reminders_router = APIRouter(tags=["reminders"])
+# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
+reminders_router = APIRouter(prefix="/api/nets/{net_slug}/reminders", tags=["reminders"])
 
 
 # --- Pydantic schemas ---
@@ -54,6 +58,7 @@ class DraftUpdate(BaseModel):
 def _template_to_response(template: ReminderTemplate) -> dict:
     return {
         "id": template.id,
+        "net_id": template.net_id,
         "name": template.name,
         "template_type": template.template_type.value,
         "subject_template": template.subject_template,
@@ -78,17 +83,26 @@ def _reminder_to_response(log: ReminderLog) -> dict:
     }
 
 
+def _verify_log_net(db: Session, log: ReminderLog, net_id: int) -> bool:
+    """Return True iff log's session belongs to *net_id*."""
+    net_session = db.get(NetSession, log.session_id)
+    if net_session is None:
+        return False
+    return _get_net_id_for_session(db, net_session) == net_id
+
+
 # --- Template routes ---
 
 
 @reminders_router.post("/templates", status_code=201)
 async def create_template_route(
     body: TemplateCreate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = create_template(
         db,
+        net_id=ctx.net.id,
         name=body.name,
         template_type=body.template_type,
         subject_template=body.subject_template,
@@ -101,16 +115,16 @@ async def create_template_route(
 
 @reminders_router.get("/templates")
 async def list_templates_route(
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    templates = list_templates(db)
+    templates = list_templates(db, net_id=ctx.net.id)
     return [_template_to_response(t) for t in templates]
 
 
 @reminders_router.get("/template-defaults")
 async def template_defaults_route(
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
 ):
     """Return the shipped seed templates so the "+ New template" UI can
     pre-fill from pristine originals, even after operators have edited
@@ -124,12 +138,13 @@ async def template_defaults_route(
 async def update_template_route(
     template_id: int,
     body: TemplateUpdate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     template = update_template(
         db,
         template_id,
+        net_id=ctx.net.id,
         name=body.name,
         template_type=body.template_type,
         subject_template=body.subject_template,
@@ -145,17 +160,15 @@ async def update_template_route(
 @reminders_router.delete("/templates/{template_id}", status_code=204)
 async def delete_template_route(
     template_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    from backend.modules.reminders.service import get_template
-
-    template = get_template(db, template_id)
+    template = get_template(db, template_id, net_id=ctx.net.id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
     if template.is_default:
         raise HTTPException(status_code=400, detail="Cannot delete the default template")
-    delete_template(db, template_id)
+    delete_template(db, template_id, net_id=ctx.net.id)
 
 
 # --- Generation routes ---
@@ -163,10 +176,10 @@ async def delete_template_route(
 
 @reminders_router.post("/generate")
 async def generate_due_drafts_route(
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    reminders = generate_due_drafts(db)
+    reminders = generate_due_drafts(db, net_id=ctx.net.id)
     return {
         "generated": len(reminders),
         "reminders": [_reminder_to_response(r) for r in reminders],
@@ -176,10 +189,17 @@ async def generate_due_drafts_route(
 @reminders_router.post("/generate/{session_id}")
 async def generate_draft_route(
     session_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = generate_draft(db, session_id)
+    # Cross-net: verify session belongs to this net
+    net_session = db.get(NetSession, session_id)
+    if net_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if _get_net_id_for_session(db, net_session) != ctx.net.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    log = generate_draft(db, session_id, net_id=ctx.net.id)
     if log is None:
         raise HTTPException(status_code=404, detail="Session not found or no default template")
 
@@ -189,20 +209,17 @@ async def generate_draft_route(
         create_notification,
         resolve_session_recipient,
     )
-    from backend.modules.schedule.models import NetSession
 
-    net_session = db.get(NetSession, session_id)
-    if net_session is not None:
-        recipient = resolve_session_recipient(db, net_session)
-        if recipient is not None:
-            create_notification(
-                db,
-                recipient_callsign=recipient,
-                kind=NotificationKind.REMINDER_DRAFT,
-                message=f"Reminder draft ready for {_format_session_date(net_session)}",
-                link_url="/reminders",
-                session_id=net_session.id,
-            )
+    recipient = resolve_session_recipient(db, net_session)
+    if recipient is not None:
+        create_notification(
+            db,
+            recipient_callsign=recipient,
+            kind=NotificationKind.REMINDER_DRAFT,
+            message=f"Reminder draft ready for {_format_session_date(net_session)}",
+            link_url="/reminders",
+            session_id=net_session.id,
+        )
 
     return _reminder_to_response(log)
 
@@ -213,10 +230,15 @@ async def generate_draft_route(
 @reminders_router.get("/")
 async def list_reminders_route(
     status: str | None = Query(default=None),
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    query = db.query(ReminderLog)
+    query = (
+        db.query(ReminderLog)
+        .join(NetSession, ReminderLog.session_id == NetSession.id)
+        .join(NetSeason, NetSession.season_id == NetSeason.id)
+        .filter(NetSeason.net_id == ctx.net.id)
+    )
     if status is not None:
         try:
             status_enum = ReminderStatus(status)
@@ -230,9 +252,14 @@ async def list_reminders_route(
 @reminders_router.get("/session/{session_id}")
 async def get_reminder_for_session_route(
     session_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
+    # Cross-net: verify session belongs to this net
+    net_session = db.get(NetSession, session_id)
+    if net_session is None or _get_net_id_for_session(db, net_session) != ctx.net.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     log = db.query(ReminderLog).filter(ReminderLog.session_id == session_id).first()
     if log is None:
         raise HTTPException(status_code=404, detail="Reminder not found for session")
@@ -246,66 +273,78 @@ async def get_reminder_for_session_route(
 async def update_draft_route(
     reminder_id: int,
     body: DraftUpdate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = update_draft(
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    result = update_draft(
         db,
         reminder_id,
         content_subject=body.content_subject,
         content_body=body.content_body,
     )
-    if log is None:
+    if result is None:
         raise HTTPException(status_code=409, detail="Reminder not in draft status")
-    return _reminder_to_response(log)
+    return _reminder_to_response(result)
 
 
 @reminders_router.post("/{reminder_id}/approve")
 async def approve_reminder_route(
     reminder_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = approve_reminder(db, reminder_id, approver_callsign=user.callsign)
-    if log is None:
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    result = approve_reminder(db, reminder_id, approver_callsign=ctx.user.callsign)
+    if result is None:
         raise HTTPException(status_code=409, detail="Reminder not in draft status")
-    return _reminder_to_response(log)
+    return _reminder_to_response(result)
 
 
 @reminders_router.post("/{reminder_id}/send")
 async def mark_sent_route(
     reminder_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = mark_sent(db, reminder_id)
-    if log is None:
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    result = mark_sent(db, reminder_id)
+    if result is None:
         raise HTTPException(status_code=409, detail="Reminder not in approved status")
-    return _reminder_to_response(log)
+    return _reminder_to_response(result)
 
 
 @reminders_router.post("/{reminder_id}/skip")
 async def skip_reminder_route(
     reminder_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = skip_reminder(db, reminder_id)
-    if log is None:
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    result = skip_reminder(db, reminder_id)
+    if result is None:
         raise HTTPException(status_code=409, detail="Reminder not in skippable status")
-    return _reminder_to_response(log)
+    return _reminder_to_response(result)
 
 
 @reminders_router.post("/{reminder_id}/regenerate")
 async def regenerate_reminder_route(
     reminder_id: int,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    log = regenerate_draft(db, reminder_id)
-    if log is None:
-        existing = db.get(ReminderLog, reminder_id)
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Reminder not found")
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    result = regenerate_draft(db, reminder_id)
+    if result is None:
         raise HTTPException(status_code=409, detail="Reminder not in draft status")
-    return _reminder_to_response(log)
+    return _reminder_to_response(result)

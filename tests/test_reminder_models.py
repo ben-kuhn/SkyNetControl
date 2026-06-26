@@ -58,8 +58,9 @@ def season_and_session(db, net_id):
     return season, net_session
 
 
-def test_create_reminder_template(db: Session):
+def test_create_reminder_template(db: Session, net_id):
     template = ReminderTemplate(
+        net_id=net_id,
         name="Regular Check-in Reminder",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Reminder: Weekly Net Check-in",
@@ -72,6 +73,7 @@ def test_create_reminder_template(db: Session):
 
     fetched = db.get(ReminderTemplate, template.id)
     assert fetched is not None
+    assert fetched.net_id == net_id
     assert fetched.name == "Regular Check-in Reminder"
     assert fetched.template_type == TemplateType.REGULAR_CHECKIN
     assert fetched.subject_template == "Reminder: Weekly Net Check-in"
@@ -80,8 +82,12 @@ def test_create_reminder_template(db: Session):
     assert fetched.is_default is True
 
 
-def test_template_name_is_unique(db: Session):
+def test_template_name_unique_per_net(db: Session, net_id):
+    """Same name in the same net is rejected; same name in different nets is OK."""
+    from tests.conftest import make_test_net
+
     template1 = ReminderTemplate(
+        net_id=net_id,
         name="Unique Name",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Subject 1",
@@ -92,7 +98,9 @@ def test_template_name_is_unique(db: Session):
     db.add(template1)
     db.commit()
 
+    # Same name, same net → should fail
     template2 = ReminderTemplate(
+        net_id=net_id,
         name="Unique Name",
         template_type=TemplateType.ACTIVITY,
         subject_template="Subject 2",
@@ -106,10 +114,42 @@ def test_template_name_is_unique(db: Session):
         db.commit()
 
 
-def test_create_reminder_log(db: Session, season_and_session):
+def test_template_name_allowed_in_different_nets(db: Session, net_id):
+    """Same template name is allowed across different nets."""
+    from tests.conftest import make_test_net
+
+    net2 = make_test_net(db, slug="net2", name="Net 2")
+
+    t1 = ReminderTemplate(
+        net_id=net_id,
+        name="Shared Name",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="S1",
+        body_template="B1",
+        lead_time_days=2,
+        is_default=False,
+    )
+    t2 = ReminderTemplate(
+        net_id=net2.id,
+        name="Shared Name",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="S2",
+        body_template="B2",
+        lead_time_days=2,
+        is_default=False,
+    )
+    db.add_all([t1, t2])
+    db.commit()  # should not raise
+
+    assert t1.id is not None
+    assert t2.id is not None
+
+
+def test_create_reminder_log(db: Session, season_and_session, net_id):
     _, net_session = season_and_session
 
     template = ReminderTemplate(
+        net_id=net_id,
         name="Test Template",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Subject",
@@ -171,10 +211,11 @@ def test_reminder_log_session_id_is_unique(db: Session, season_and_session):
         db.commit()
 
 
-def test_reminder_log_relationships(db: Session, season_and_session):
+def test_reminder_log_relationships(db: Session, season_and_session, net_id):
     season, net_session = season_and_session
 
     template = ReminderTemplate(
+        net_id=net_id,
         name="Template for Relationship Test",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Subject",

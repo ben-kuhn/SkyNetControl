@@ -194,6 +194,7 @@ export interface Reminder {
 
 export interface ReminderTemplate {
   id: number;
+  net_id: number;
   name: string;
   template_type: ReminderTemplateType;
   subject_template: string;

@@ -92,24 +92,27 @@ def season_and_sessions(db, net_id):
 # --- Template CRUD tests ---
 
 
-def test_create_template(db: Session):
+def test_create_template(db: Session, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Regular Reminder",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net Reminder",
         body_template="Don't forget to check in!",
     )
     assert tmpl.id is not None
+    assert tmpl.net_id == net_id
     assert tmpl.name == "Regular Reminder"
     assert tmpl.template_type == TemplateType.REGULAR_CHECKIN
     assert tmpl.lead_time_days == 2
     assert tmpl.is_default is False
 
 
-def test_create_default_template_clears_previous(db: Session):
+def test_create_default_template_clears_previous(db: Session, net_id):
     first = create_template(
         db,
+        net_id=net_id,
         name="First Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Subject",
@@ -120,6 +123,7 @@ def test_create_default_template_clears_previous(db: Session):
 
     second = create_template(
         db,
+        net_id=net_id,
         name="Second Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Subject 2",
@@ -131,22 +135,39 @@ def test_create_default_template_clears_previous(db: Session):
     assert second.is_default is True
 
 
-def test_list_templates(db: Session):
-    create_template(db, name="Zeta", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B")
+def test_list_templates(db: Session, net_id):
+    create_template(db, net_id=net_id, name="Zeta", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B")
     create_template(
-        db, name="Alpha", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
+        db, net_id=net_id, name="Alpha", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
     )
-    create_template(db, name="Mu", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B")
+    create_template(db, net_id=net_id, name="Mu", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B")
 
-    templates = list_templates(db)
+    templates = list_templates(db, net_id=net_id)
     names = [t.name for t in templates]
     assert names == sorted(names)
     assert len(templates) == 3
 
 
-def test_get_template(db: Session):
+def test_list_templates_isolated_per_net(db: Session, net_id):
+    """Templates from a different net are not visible."""
+    from tests.conftest import make_test_net
+
+    net2 = make_test_net(db, slug="net2", name="Net 2")
+    create_template(db, net_id=net_id, name="Net1 Template", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B")
+    create_template(db, net_id=net2.id, name="Net2 Template", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B")
+
+    net1_templates = list_templates(db, net_id=net_id)
+    net2_templates = list_templates(db, net_id=net2.id)
+
+    assert len(net1_templates) == 1
+    assert net1_templates[0].name == "Net1 Template"
+    assert len(net2_templates) == 1
+    assert net2_templates[0].name == "Net2 Template"
+
+
+def test_get_template(db: Session, net_id):
     tmpl = create_template(
-        db, name="Fetch Me", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B"
+        db, net_id=net_id, name="Fetch Me", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B"
     )
     fetched = get_template(db, tmpl.id)
     assert fetched is not None
@@ -156,54 +177,95 @@ def test_get_template(db: Session):
     assert missing is None
 
 
-def test_update_template(db: Session):
+def test_get_template_cross_net_returns_none(db: Session, net_id):
+    """get_template with net_id returns None for templates in another net."""
+    from tests.conftest import make_test_net
+
+    net2 = make_test_net(db, slug="net2", name="Net 2")
+    tmpl = create_template(
+        db, net_id=net_id, name="Net1 Only", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
+    )
+    assert get_template(db, tmpl.id, net_id=net_id) is not None
+    assert get_template(db, tmpl.id, net_id=net2.id) is None
+
+
+def test_update_template(db: Session, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Original Name",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Old Subject",
         body_template="Old Body",
     )
-    updated = update_template(db, tmpl.id, name="Updated Name", body_template="New Body")
+    updated = update_template(db, tmpl.id, net_id=net_id, name="Updated Name", body_template="New Body")
     assert updated is not None
     assert updated.name == "Updated Name"
     assert updated.body_template == "New Body"
     assert updated.subject_template == "Old Subject"
 
 
-def test_update_template_sets_default(db: Session):
+def test_update_template_cross_net_returns_none(db: Session, net_id):
+    """update_template with wrong net_id returns None (cross-net protection)."""
+    from tests.conftest import make_test_net
+
+    net2 = make_test_net(db, slug="net2", name="Net 2")
+    tmpl = create_template(
+        db, net_id=net_id, name="Net1 Tmpl", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
+    )
+    result = update_template(db, tmpl.id, net_id=net2.id, name="Should Not Update")
+    assert result is None
+    db.refresh(tmpl)
+    assert tmpl.name == "Net1 Tmpl"
+
+
+def test_update_template_sets_default(db: Session, net_id):
     first = create_template(
-        db, name="First", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B", is_default=True
+        db, net_id=net_id, name="First", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B", is_default=True
     )
     second = create_template(
-        db, name="Second", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B"
+        db, net_id=net_id, name="Second", template_type=TemplateType.ACTIVITY, subject_template="S", body_template="B"
     )
-    update_template(db, second.id, is_default=True)
+    update_template(db, second.id, net_id=net_id, is_default=True)
     db.refresh(first)
     db.refresh(second)
     assert first.is_default is False
     assert second.is_default is True
 
 
-def test_delete_template(db: Session):
+def test_delete_template(db: Session, net_id):
     tmpl = create_template(
-        db, name="To Delete", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
+        db, net_id=net_id, name="To Delete", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
     )
-    result = delete_template(db, tmpl.id)
+    result = delete_template(db, tmpl.id, net_id=net_id)
     assert result is True
     assert get_template(db, tmpl.id) is None
 
 
-def test_cannot_delete_default_template(db: Session):
+def test_delete_template_cross_net_returns_false(db: Session, net_id):
+    """delete_template with wrong net_id refuses to delete."""
+    from tests.conftest import make_test_net
+
+    net2 = make_test_net(db, slug="net2", name="Net 2")
+    tmpl = create_template(
+        db, net_id=net_id, name="Net1 Tmpl", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S", body_template="B"
+    )
+    result = delete_template(db, tmpl.id, net_id=net2.id)
+    assert result is False
+    assert get_template(db, tmpl.id) is not None
+
+
+def test_cannot_delete_default_template(db: Session, net_id):
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Default Template",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="S",
         body_template="B",
         is_default=True,
     )
-    result = delete_template(db, tmpl.id)
+    result = delete_template(db, tmpl.id, net_id=net_id)
     assert result is False
     assert get_template(db, tmpl.id) is not None
 
@@ -333,10 +395,11 @@ def test_render_reminder_bad_syntax(db: Session):
 # --- Draft generation and status transition tests ---
 
 
-def test_generate_draft(db: Session, season_and_sessions):
+def test_generate_draft(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     tmpl = create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -344,7 +407,7 @@ def test_generate_draft(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
     assert log.template_id == tmpl.id
     assert log.status == ReminderStatus.DRAFT
@@ -353,10 +416,11 @@ def test_generate_draft(db: Session, season_and_sessions):
     assert "April 10, 2026" in log.content_body
 
 
-def test_generate_draft_is_idempotent(db: Session, season_and_sessions):
+def test_generate_draft_is_idempotent(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -364,18 +428,19 @@ def test_generate_draft_is_idempotent(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log1 = generate_draft(db, session1.id)
-    log2 = generate_draft(db, session1.id)
+    log1 = generate_draft(db, session1.id, net_id=net_id)
+    log2 = generate_draft(db, session1.id, net_id=net_id)
     assert log1 is not None
     assert log2 is not None
     assert log1.id == log2.id
 
 
-def test_generate_draft_with_explicit_template(db: Session, season_and_sessions):
+def test_generate_draft_with_explicit_template(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     # Create a default template and a separate explicit one
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Default Subject",
@@ -385,6 +450,7 @@ def test_generate_draft_with_explicit_template(db: Session, season_and_sessions)
     )
     explicit_tmpl = create_template(
         db,
+        net_id=net_id,
         name="Explicit Template",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Explicit: {{ date }}",
@@ -392,18 +458,19 @@ def test_generate_draft_with_explicit_template(db: Session, season_and_sessions)
         lead_time_days=3,
         is_default=False,
     )
-    log = generate_draft(db, session1.id, template_id=explicit_tmpl.id)
+    log = generate_draft(db, session1.id, template_id=explicit_tmpl.id, net_id=net_id)
     assert log is not None
     assert log.template_id == explicit_tmpl.id
     assert "Explicit" in log.content_subject
 
 
-def test_generate_due_drafts(db: Session, season_and_sessions):
+def test_generate_due_drafts(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     # session1 is April 10, session2 is April 17
     # With today=April 8, lead_time=3: session1 (2 days away) is due, session2 (9 days away) is not
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -413,6 +480,7 @@ def test_generate_due_drafts(db: Session, season_and_sessions):
     )
     create_template(
         db,
+        net_id=net_id,
         name="Activity Default",
         template_type=TemplateType.ACTIVITY,
         subject_template="Activity: {{ activity_title }}",
@@ -421,13 +489,56 @@ def test_generate_due_drafts(db: Session, season_and_sessions):
         is_default=True,
     )
     with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
-        drafts = generate_due_drafts(db)
+        drafts = generate_due_drafts(db, net_id=net_id)
 
     assert len(drafts) == 1
     assert drafts[0].session_id == session1.id
 
 
-def test_generate_due_drafts_skips_completed_sessions(db: Session, season_and_sessions):
+def test_generate_due_drafts_cross_net_isolation(db: Session, net_id, season_and_sessions):
+    """generate_due_drafts(net_id=X) should not produce drafts for sessions in other nets."""
+    from tests.conftest import make_test_net
+
+    season, session1, session2, activity = season_and_sessions
+
+    # Set up net2 with its own season + session
+    net2 = make_test_net(db, slug="net2", name="Net 2")
+    season2 = NetSeason(
+        net_id=net2.id,
+        name="Net2 Season",
+        start_date=date(2026, 4, 1),
+        end_date=date(2026, 6, 30),
+        day_of_week=3,
+        time=time(18, 0),
+    )
+    db.add(season2)
+    db.flush()
+    session_net2 = NetSession(
+        season_id=season2.id,
+        start_date=date(2026, 4, 10),
+        end_date=date(2026, 4, 10),
+        grace_period_hours=24.0,
+        session_type=SessionType.REGULAR_CHECKIN,
+        net_control_callsign="W0NC",
+    )
+    db.add(session_net2)
+    db.flush()
+
+    # Both nets get default templates
+    create_template(db, net_id=net_id, name="Net1 Default", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S1", body_template="B1", lead_time_days=3, is_default=True)
+    create_template(db, net_id=net2.id, name="Net2 Default", template_type=TemplateType.REGULAR_CHECKIN, subject_template="S2", body_template="B2", lead_time_days=3, is_default=True)
+    db.commit()
+
+    with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
+        drafts = generate_due_drafts(db, net_id=net_id)
+
+    # Only net1's session should be drafted, not net2's
+    drafted_ids = {d.session_id for d in drafts}
+    assert session1.id in drafted_ids
+    assert session_net2.id not in drafted_ids
+
+
+def test_generate_due_drafts_skips_completed_sessions(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     # Mark session1 as completed
     session1.status = SessionStatus.COMPLETED
@@ -435,6 +546,7 @@ def test_generate_due_drafts_skips_completed_sessions(db: Session, season_and_se
 
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -443,16 +555,17 @@ def test_generate_due_drafts_skips_completed_sessions(db: Session, season_and_se
         is_default=True,
     )
     with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
-        drafts = generate_due_drafts(db)
+        drafts = generate_due_drafts(db, net_id=net_id)
 
     session_ids = [d.session_id for d in drafts]
     assert session1.id not in session_ids
 
 
-def test_approve_reminder(db: Session, season_and_sessions):
+def test_approve_reminder(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -460,7 +573,7 @@ def test_approve_reminder(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
 
     approved = approve_reminder(db, log.id, approver_callsign="W0NE")
@@ -470,10 +583,11 @@ def test_approve_reminder(db: Session, season_and_sessions):
     assert approved.approved_at is not None
 
 
-def test_approve_non_draft_returns_none(db: Session, season_and_sessions):
+def test_approve_non_draft_returns_none(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -481,7 +595,7 @@ def test_approve_non_draft_returns_none(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
     approve_reminder(db, log.id, approver_callsign="W0NE")
 
@@ -490,10 +604,11 @@ def test_approve_non_draft_returns_none(db: Session, season_and_sessions):
     assert result is None
 
 
-def test_mark_sent(db: Session, season_and_sessions):
+def test_mark_sent(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -501,7 +616,7 @@ def test_mark_sent(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
     approve_reminder(db, log.id, approver_callsign="W0NE")
 
@@ -515,10 +630,11 @@ def test_mark_sent(db: Session, season_and_sessions):
     assert sent.sent_at is not None
 
 
-def test_mark_sent_non_approved_returns_none(db: Session, season_and_sessions):
+def test_mark_sent_non_approved_returns_none(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -526,7 +642,7 @@ def test_mark_sent_non_approved_returns_none(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
 
     # Trying to mark as sent while still DRAFT should return None
@@ -534,10 +650,11 @@ def test_mark_sent_non_approved_returns_none(db: Session, season_and_sessions):
     assert result is None
 
 
-def test_skip_reminder_from_draft(db: Session, season_and_sessions):
+def test_skip_reminder_from_draft(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -545,7 +662,7 @@ def test_skip_reminder_from_draft(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
 
     skipped = skip_reminder(db, log.id)
@@ -553,10 +670,11 @@ def test_skip_reminder_from_draft(db: Session, season_and_sessions):
     assert skipped.status == ReminderStatus.SKIPPED
 
 
-def test_skip_reminder_from_approved(db: Session, season_and_sessions):
+def test_skip_reminder_from_approved(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -564,7 +682,7 @@ def test_skip_reminder_from_approved(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
     approve_reminder(db, log.id, approver_callsign="W0NE")
 
@@ -573,10 +691,11 @@ def test_skip_reminder_from_approved(db: Session, season_and_sessions):
     assert skipped.status == ReminderStatus.SKIPPED
 
 
-def test_update_draft(db: Session, season_and_sessions):
+def test_update_draft(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -584,7 +703,7 @@ def test_update_draft(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
 
     updated = update_draft(db, log.id, content_subject="New Subject", content_body="New Body")
@@ -594,10 +713,11 @@ def test_update_draft(db: Session, season_and_sessions):
     assert updated.status == ReminderStatus.DRAFT
 
 
-def test_update_draft_non_draft_returns_none(db: Session, season_and_sessions):
+def test_update_draft_non_draft_returns_none(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net on {{ date }}",
@@ -605,7 +725,7 @@ def test_update_draft_non_draft_returns_none(db: Session, season_and_sessions):
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     assert log is not None
     approve_reminder(db, log.id, approver_callsign="W0NE")
 
@@ -617,13 +737,14 @@ def test_update_draft_non_draft_returns_none(db: Session, season_and_sessions):
 # --- Regenerate draft tests ---
 
 
-def test_regenerate_draft_rewrites_subject_and_body(db: Session, season_and_sessions):
+def test_regenerate_draft_rewrites_subject_and_body(db: Session, net_id, season_and_sessions):
     """regenerate_draft re-renders against the current session and template."""
     from backend.modules.reminders.service import regenerate_draft
 
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Activity Default",
         template_type=TemplateType.ACTIVITY,
         subject_template="{{ activity_title }} — {{ date }}",
@@ -631,7 +752,7 @@ def test_regenerate_draft_rewrites_subject_and_body(db: Session, season_and_sess
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session2.id)
+    log = generate_draft(db, session2.id, net_id=net_id)
     assert log is not None
 
     log.content_subject = "Edited subject"
@@ -646,13 +767,14 @@ def test_regenerate_draft_rewrites_subject_and_body(db: Session, season_and_sess
     assert "Tune to 146.520" in result.content_body
 
 
-def test_regenerate_draft_picks_up_activity_change(db: Session, season_and_sessions):
+def test_regenerate_draft_picks_up_activity_change(db: Session, net_id, season_and_sessions):
     """If the session's activity changes after generation, regenerate reflects it."""
     from backend.modules.reminders.service import regenerate_draft
 
     season, session1, session2, activity = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Activity Default",
         template_type=TemplateType.ACTIVITY,
         subject_template="{{ activity_title }} — {{ date }}",
@@ -660,7 +782,7 @@ def test_regenerate_draft_picks_up_activity_change(db: Session, season_and_sessi
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session2.id)
+    log = generate_draft(db, session2.id, net_id=net_id)
     assert log is not None
     assert "Simplex Exercise" in log.content_subject
 
@@ -680,13 +802,14 @@ def test_regenerate_draft_picks_up_activity_change(db: Session, season_and_sessi
     assert "Bring a directional antenna" in result.content_body
 
 
-def test_regenerate_draft_returns_none_when_not_draft(db: Session, season_and_sessions):
+def test_regenerate_draft_returns_none_when_not_draft(db: Session, net_id, season_and_sessions):
     """Approved/sent/skipped reminders can't be regenerated."""
     from backend.modules.reminders.service import regenerate_draft
 
     season, session1, _, _ = season_and_sessions
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net {{ date }}",
@@ -694,7 +817,7 @@ def test_regenerate_draft_returns_none_when_not_draft(db: Session, season_and_se
         lead_time_days=3,
         is_default=True,
     )
-    log = generate_draft(db, session1.id)
+    log = generate_draft(db, session1.id, net_id=net_id)
     approve_reminder(db, log.id, approver_callsign="W0NE")
 
     result = regenerate_draft(db, log.id)
@@ -707,7 +830,7 @@ def test_regenerate_draft_returns_none_when_missing(db: Session):
     assert regenerate_draft(db, 999) is None
 
 
-def test_generate_due_drafts_creates_notification(db, season_and_sessions):
+def test_generate_due_drafts_creates_notification(db, net_id, season_and_sessions):
     """When the daily task generates a draft, the session's NCS gets a notification."""
     from datetime import date
     from unittest.mock import patch
@@ -720,6 +843,7 @@ def test_generate_due_drafts_creates_notification(db, season_and_sessions):
 
     create_template(
         db,
+        net_id=net_id,
         name="Regular Default",
         template_type=TemplateType.REGULAR_CHECKIN,
         subject_template="Net {{ date }}",
@@ -730,7 +854,7 @@ def test_generate_due_drafts_creates_notification(db, season_and_sessions):
 
     # Force _today() such that lead-time is met for session1 (2026-04-10)
     with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 8)):
-        generate_due_drafts(db)
+        generate_due_drafts(db, net_id=net_id)
 
     rows = (
         db.query(Notification)

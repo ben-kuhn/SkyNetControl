@@ -10,7 +10,7 @@ behaviour every time we edited the constants.
 A snapshot test (`test_seeds_match_migrations`) keeps the two in
 sync: if either set of bodies drifts, that test fails.
 
-Exposed via `GET /api/reminders/template-defaults` so the
+Exposed via `GET /api/nets/{net_slug}/reminders/template-defaults` so the
 "+ New template" UI can pre-fill from the shipped originals even
 after operators have edited their own defaults.
 """
@@ -57,3 +57,35 @@ ACTIVITY: SeedReminderTemplate = {
 }
 
 SEED_REMINDER_TEMPLATES: list[SeedReminderTemplate] = [REGULAR_CHECKIN, ACTIVITY]
+
+
+def seed_net_reminder_templates(db, net_id: int) -> None:
+    """Insert the default reminder template set for *net_id*.
+
+    Called by ``backend.modules.nets.seeds.seed_default_net_content`` when a new
+    net is created.  Idempotent: skips templates whose (net_id, name) pair already
+    exists so it is safe to call more than once.
+    """
+    from sqlalchemy.orm import Session as _Session
+    from backend.modules.reminders.models import ReminderTemplate, TemplateType
+
+    assert isinstance(db, _Session)
+    for i, seed in enumerate(SEED_REMINDER_TEMPLATES):
+        existing = (
+            db.query(ReminderTemplate)
+            .filter(ReminderTemplate.net_id == net_id, ReminderTemplate.name == seed["name"])
+            .one_or_none()
+        )
+        if existing is not None:
+            continue
+        tmpl = ReminderTemplate(
+            net_id=net_id,
+            name=seed["name"],
+            template_type=TemplateType(seed["template_type"]),
+            subject_template=seed["subject_template"],
+            body_template=seed["body_template"],
+            lead_time_days=seed["lead_time_days"],
+            is_default=(i == 0),  # first seed (regular_checkin) is the default
+        )
+        db.add(tmpl)
+    db.flush()
