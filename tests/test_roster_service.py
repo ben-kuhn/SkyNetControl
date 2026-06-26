@@ -70,6 +70,7 @@ def season_and_sessions(db, net_id):
     db.flush()
 
     activity = Activity(
+        net_id=net_id,
         title="Simplex Exercise",
         description="Local simplex drill",
         instructions="Tune to 146.520 and call CQ.",

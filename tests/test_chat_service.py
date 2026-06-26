@@ -25,6 +25,8 @@ def db():
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     with factory() as session:
+        from tests.conftest import make_test_net
+        make_test_net(session)
         yield session
     engine.dispose()
 
@@ -76,8 +78,11 @@ def test_send_message_passes_history(db: Session):
 
 
 def test_link_chat_to_activity(db: Session):
+    from backend.modules.nets.models import Net
+    net_id = db.query(Net).filter(Net.slug == "t").one().id
     chat = create_chat_session(db)
     activity = Activity(
+        net_id=net_id,
         title="Linked Activity",
         description="d",
         instructions="i",

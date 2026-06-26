@@ -67,6 +67,7 @@ def season_and_sessions(db, net_id):
     db.flush()
 
     activity = Activity(
+        net_id=net_id,
         title="Simplex Exercise",
         description="Local simplex communication exercise",
         instructions="Tune to 146.520 MHz and call CQ.",
@@ -787,6 +788,7 @@ def test_regenerate_draft_picks_up_activity_change(db: Session, net_id, season_a
     assert "Simplex Exercise" in log.content_subject
 
     new_activity = Activity(
+        net_id=net_id,
         title="Direction Finding",
         description="DF drill",
         instructions="Bring a directional antenna and a portable rig.",

@@ -258,6 +258,7 @@ export interface ActivityTag {
 
 export interface Activity {
   id: number;
+  net_id: number;
   title: string;
   description: string;
   instructions: string;

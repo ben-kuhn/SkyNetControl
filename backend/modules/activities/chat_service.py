@@ -37,8 +37,21 @@ def create_chat_session(db: Session) -> ChatSession:
     return chat
 
 
-def get_chat_session(db: Session, chat_session_id: int) -> ChatSession | None:
-    return db.get(ChatSession, chat_session_id)
+def get_chat_session(db: Session, chat_session_id: int, net_id: int | None = None) -> ChatSession | None:
+    """Return a ChatSession by id, optionally verifying it belongs to *net_id* via its linked activity.
+
+    If net_id is provided:
+    - A session with no linked activity is considered unscoped and accessible within the net.
+    - A session whose linked activity belongs to a different net returns None (cross-net isolation).
+    """
+    chat = db.get(ChatSession, chat_session_id)
+    if chat is None:
+        return None
+    if net_id is not None and chat.activity_id is not None:
+        # Chat is linked to an activity — verify the activity is in the expected net.
+        if chat.activity is None or chat.activity.net_id != net_id:
+            return None
+    return chat
 
 
 def get_chat_history(db: Session, chat_session_id: int) -> list[ChatMessage]:

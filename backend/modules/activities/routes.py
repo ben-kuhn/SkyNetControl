@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user, get_db_session, require_admin, require_net_member
-from backend.auth.models import User
+from backend.auth.dependencies import NetContext, get_db_session, require_net_role
+from backend.modules.nets.models import NetRole
 from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.chat_service import (
     create_chat_session,
@@ -14,18 +14,20 @@ from backend.modules.activities.chat_service import (
     link_chat_to_activity,
     send_message,
 )
-from backend.modules.activities.models import Activity, ActivityTag, ChatMessage, ChatSession
+from backend.modules.activities.models import Activity, ChatMessage, ChatSession
 from backend.modules.activities.service import (
     create_activity,
     delete_activity,
     get_activity,
     list_activities,
+    list_tags,
     update_activity,
 )
 
 logger = logging.getLogger(__name__)
 
-activities_router = APIRouter(tags=["activities"])
+# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
+activities_router = APIRouter(prefix="/api/nets/{net_slug}/activities", tags=["activities"])
 
 
 # --- Pydantic schemas ---
@@ -45,19 +47,13 @@ class ActivityUpdate(BaseModel):
     tag_names: list[str] | None = None
 
 
-class TagResponse(BaseModel):
-    id: int
-    name: str
-
-    model_config = {"from_attributes": True}
-
-
 # --- Helpers ---
 
 
 def _activity_to_response(activity: Activity) -> dict:
     return {
         "id": activity.id,
+        "net_id": activity.net_id,
         "title": activity.title,
         "description": activity.description,
         "instructions": activity.instructions,
@@ -74,11 +70,12 @@ def _activity_to_response(activity: Activity) -> dict:
 @activities_router.post("/", status_code=201)
 async def create_activity_route(
     body: ActivityCreate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     activity = create_activity(
         db,
+        net_id=ctx.net.id,
         title=body.title,
         description=body.description,
         instructions=body.instructions,
@@ -89,29 +86,29 @@ async def create_activity_route(
 
 @activities_router.get("/")
 async def list_activities_route(
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    activities = list_activities(db)
+    activities = list_activities(db, net_id=ctx.net.id)
     return [_activity_to_response(a) for a in activities]
 
 
 @activities_router.get("/tags")
 async def list_tags_route(
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    tags = db.query(ActivityTag).order_by(ActivityTag.name).all()
+    tags = list_tags(db, net_id=ctx.net.id)
     return [{"id": t.id, "name": t.name} for t in tags]
 
 
 @activities_router.get("/{activity_id}")
 async def get_activity_route(
     activity_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    activity = get_activity(db, activity_id)
+    activity = get_activity(db, activity_id, net_id=ctx.net.id)
     if activity is None:
         raise HTTPException(status_code=404, detail="Activity not found")
     return _activity_to_response(activity)
@@ -121,12 +118,13 @@ async def get_activity_route(
 async def update_activity_route(
     activity_id: int,
     body: ActivityUpdate,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     activity = update_activity(
         db,
         activity_id,
+        net_id=ctx.net.id,
         title=body.title,
         description=body.description,
         instructions=body.instructions,
@@ -140,15 +138,15 @@ async def update_activity_route(
 @activities_router.delete("/{activity_id}", status_code=204)
 async def delete_activity_route(
     activity_id: int,
-    user: User = Depends(require_admin),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    activity = get_activity(db, activity_id)
+    activity = get_activity(db, activity_id, net_id=ctx.net.id)
     if activity is None:
         raise HTTPException(status_code=404, detail="Activity not found")
     if activity.is_default:
         raise HTTPException(status_code=403, detail="Cannot delete the default activity")
-    delete_activity(db, activity_id)
+    delete_activity(db, activity_id, net_id=ctx.net.id)
 
 
 # --- Chat schemas ---
@@ -200,7 +198,7 @@ def _message_to_response(msg: ChatMessage) -> dict:
 
 @activities_router.post("/chat/sessions", status_code=201)
 async def create_chat_session_route(
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     chat = create_chat_session(db)
@@ -210,10 +208,11 @@ async def create_chat_session_route(
 @activities_router.get("/chat/sessions/{chat_session_id}")
 async def get_chat_session_route(
     chat_session_id: int,
-    user: User = Depends(get_current_user),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
     db: Session = Depends(get_db_session),
 ):
-    chat = get_chat_session(db, chat_session_id)
+    # net_id guard: cross-net session access returns 404
+    chat = get_chat_session(db, chat_session_id, net_id=ctx.net.id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
     messages = get_chat_history(db, chat_session_id)
@@ -224,10 +223,10 @@ async def get_chat_session_route(
 async def send_chat_message_route(
     chat_session_id: int,
     body: ChatMessageRequest,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    chat = get_chat_session(db, chat_session_id)
+    chat = get_chat_session(db, chat_session_id, net_id=ctx.net.id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
@@ -256,15 +255,16 @@ async def send_chat_message_route(
 async def approve_chat_route(
     chat_session_id: int,
     body: ChatApproveRequest,
-    user: User = Depends(require_net_member),
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    chat = get_chat_session(db, chat_session_id)
+    chat = get_chat_session(db, chat_session_id, net_id=ctx.net.id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
     activity = create_activity(
         db,
+        net_id=ctx.net.id,
         title=body.title,
         description=body.description,
         instructions=body.instructions,

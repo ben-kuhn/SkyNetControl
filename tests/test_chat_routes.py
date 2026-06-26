@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,12 +7,13 @@ from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
 from backend.auth.models import User
-from backend.auth.service import create_access_token
 from backend.config_mgmt.models import AppConfig
-from backend.modules.activities.routes import activities_router
+from backend.modules.nets.models import Net, NetMembership, NetRole
 from backend.config import Settings
 from tests.conftest import make_test_token
 
+NET_SLUG = "t"
+BASE = f"/api/nets/{NET_SLUG}/activities"
 
 
 @pytest.fixture
@@ -41,37 +41,47 @@ def db_setup():
             name="Admin",
             is_admin=True,
         )
-        session.add(admin)
+        net = Net(slug=NET_SLUG, name="Test Net")
+        session.add_all([admin, net])
+        session.flush()
+
+        # Admin is global admin, no net membership needed
         # Seed Claude API key in AppConfig
         config = AppConfig(key="claude_api_key", value="test-key-123")
         session.add(config)
         session.commit()
-    return factory
+    return {"engine": engine, "factory": factory}
 
 
 @pytest.fixture
-def test_app(test_settings, db_setup):
-    app = FastAPI()
-    app.state.session_factory = db_setup
-    app.state.settings = test_settings
-    app.include_router(activities_router, prefix="/api/activities")
-    return app
+def app(test_settings, db_setup):
+    from backend.app import create_app
+
+    application = create_app(settings=test_settings)
+    application.state.engine = db_setup["engine"]
+    application.state.session_factory = db_setup["factory"]
+    Base.metadata.create_all(db_setup["engine"])
+    return application
 
 
 @pytest.fixture
-async def test_client(test_app):
-    transport = ASGITransport(app=test_app)
+async def test_client(app):
+    transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
-@pytest.mark.asyncio
-async def test_create_chat_session(test_client, test_settings):
+@pytest.fixture
+async def admin_client(app, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-    response = await test_client.post(
-        "/api/activities/chat/sessions",
-        cookies={"access_token": token},
-    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={"access_token": token}) as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_create_chat_session(admin_client):
+    response = await admin_client.post(BASE + "/chat/sessions")
     assert response.status_code == 201
     data = response.json()
     assert data["id"] is not None
@@ -80,14 +90,8 @@ async def test_create_chat_session(test_client, test_settings):
 
 
 @pytest.mark.asyncio
-async def test_send_chat_message(test_client, test_settings):
-    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-
-    # Create session
-    create_resp = await test_client.post(
-        "/api/activities/chat/sessions",
-        cookies={"access_token": token},
-    )
+async def test_send_chat_message(admin_client):
+    create_resp = await admin_client.post(BASE + "/chat/sessions")
     chat_id = create_resp.json()["id"]
 
     mock_response = MagicMock()
@@ -95,10 +99,9 @@ async def test_send_chat_message(test_client, test_settings):
 
     with patch("backend.modules.activities.chat_service._call_claude") as mock_claude:
         mock_claude.return_value = mock_response
-        response = await test_client.post(
-            f"/api/activities/chat/sessions/{chat_id}/messages",
+        response = await admin_client.post(
+            f"{BASE}/chat/sessions/{chat_id}/messages",
             json={"content": "I want an HF activity"},
-            cookies={"access_token": token},
         )
 
     assert response.status_code == 200
@@ -108,13 +111,8 @@ async def test_send_chat_message(test_client, test_settings):
 
 
 @pytest.mark.asyncio
-async def test_get_chat_session_with_messages(test_client, test_settings):
-    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-
-    create_resp = await test_client.post(
-        "/api/activities/chat/sessions",
-        cookies={"access_token": token},
-    )
+async def test_get_chat_session_with_messages(admin_client):
+    create_resp = await admin_client.post(BASE + "/chat/sessions")
     chat_id = create_resp.json()["id"]
 
     mock_response = MagicMock()
@@ -122,40 +120,30 @@ async def test_get_chat_session_with_messages(test_client, test_settings):
 
     with patch("backend.modules.activities.chat_service._call_claude") as mock_claude:
         mock_claude.return_value = mock_response
-        await test_client.post(
-            f"/api/activities/chat/sessions/{chat_id}/messages",
+        await admin_client.post(
+            f"{BASE}/chat/sessions/{chat_id}/messages",
             json={"content": "Hello"},
-            cookies={"access_token": token},
         )
 
-    response = await test_client.get(
-        f"/api/activities/chat/sessions/{chat_id}",
-        cookies={"access_token": token},
-    )
+    response = await admin_client.get(f"{BASE}/chat/sessions/{chat_id}")
     assert response.status_code == 200
     data = response.json()
     assert len(data["messages"]) == 2
 
 
 @pytest.mark.asyncio
-async def test_approve_chat_creates_activity(test_client, test_settings):
-    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-
-    create_resp = await test_client.post(
-        "/api/activities/chat/sessions",
-        cookies={"access_token": token},
-    )
+async def test_approve_chat_creates_activity(admin_client):
+    create_resp = await admin_client.post(BASE + "/chat/sessions")
     chat_id = create_resp.json()["id"]
 
-    response = await test_client.post(
-        f"/api/activities/chat/sessions/{chat_id}/approve",
+    response = await admin_client.post(
+        f"{BASE}/chat/sessions/{chat_id}/approve",
         json={
             "title": "Emergency Prep",
             "description": "Practice emergency comms",
             "instructions": "Set up your go-kit",
             "tag_names": ["emergency-prep"],
         },
-        cookies={"access_token": token},
     )
     assert response.status_code == 201
     data = response.json()
@@ -163,33 +151,24 @@ async def test_approve_chat_creates_activity(test_client, test_settings):
     assert data["id"] is not None
 
     # Verify chat session is linked to activity
-    chat_resp = await test_client.get(
-        f"/api/activities/chat/sessions/{chat_id}",
-        cookies={"access_token": token},
-    )
+    chat_resp = await admin_client.get(f"{BASE}/chat/sessions/{chat_id}")
     assert chat_resp.json()["activity_id"] == data["id"]
 
 
 @pytest.mark.asyncio
-async def test_send_message_without_api_key(test_client, test_settings, db_setup):
+async def test_send_message_without_api_key(admin_client, db_setup):
     # Remove the API key from config
-    with db_setup() as session:
+    with db_setup["factory"]() as session:
         config = session.get(AppConfig, "claude_api_key")
         if config:
             session.delete(config)
             session.commit()
 
-    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
-
-    create_resp = await test_client.post(
-        "/api/activities/chat/sessions",
-        cookies={"access_token": token},
-    )
+    create_resp = await admin_client.post(BASE + "/chat/sessions")
     chat_id = create_resp.json()["id"]
 
-    response = await test_client.post(
-        f"/api/activities/chat/sessions/{chat_id}/messages",
+    response = await admin_client.post(
+        f"{BASE}/chat/sessions/{chat_id}/messages",
         json={"content": "Hello"},
-        cookies={"access_token": token},
     )
     assert response.status_code == 503

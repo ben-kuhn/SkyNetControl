@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +20,7 @@ class Activity(Base):
     __tablename__ = "activities"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
@@ -42,9 +44,11 @@ class Activity(Base):
 
 class ActivityTag(Base):
     __tablename__ = "activity_tags"
+    __table_args__ = (UniqueConstraint("net_id", "name", name="uq_activity_tags_net_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     activities: Mapped[list["Activity"]] = relationship(
         secondary="activity_tag_assignments",
