@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_db_session, require_net_member, require_not_pending
+from backend.auth.dependencies import NetContext, get_db_session, require_net_role
 from backend.integrations.delivery.service import get_delivery_status, retry_failed
+from backend.modules.nets.models import NetRole
 
 delivery_router = APIRouter()
 
@@ -12,7 +13,7 @@ def list_delivery_attempts(
     content_type: str,
     content_id: int,
     db: Session = Depends(get_db_session),
-    _user=Depends(require_not_pending),
+    _ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
 ):
     logs = get_delivery_status(db, content_type, content_id)
     return [
@@ -33,7 +34,7 @@ def retry_delivery(
     content_type: str,
     content_id: int,
     db: Session = Depends(get_db_session),
-    _user=Depends(require_net_member),
+    _ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
 ):
     success = retry_failed(db, content_type, content_id)
     return {"retried": success}

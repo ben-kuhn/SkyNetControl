@@ -17,6 +17,9 @@ from backend.integrations.delivery.routes import delivery_router
 from backend.config import Settings
 
 
+NET_SLUG = "t"
+BASE = f"/api/nets/{NET_SLUG}/delivery"
+
 
 @pytest.fixture
 def test_settings():
@@ -46,6 +49,8 @@ def db_setup():
                 is_admin=True,
             )
         )
+        from backend.modules.nets.models import Net
+        session.add(Net(slug=NET_SLUG, name="Test Net"))
         session.commit()
     return factory
 
@@ -55,7 +60,7 @@ def app(test_settings, db_setup):
     application = FastAPI()
     application.state.session_factory = db_setup
     application.state.settings = test_settings
-    application.include_router(delivery_router, prefix="/api/delivery")
+    application.include_router(delivery_router, prefix="/api/nets/{net_slug}/delivery")
     return application
 
 
@@ -87,7 +92,7 @@ async def test_get_delivery_status(client, test_settings, db_setup):
         session.commit()
 
     resp = await client.get(
-        "/api/delivery/reminder/1",
+        f"{BASE}/reminder/1",
         headers=_auth_headers(test_settings),
     )
     assert resp.status_code == 200
@@ -100,7 +105,7 @@ async def test_get_delivery_status(client, test_settings, db_setup):
 @pytest.mark.anyio
 async def test_get_delivery_status_empty(client, test_settings):
     resp = await client.get(
-        "/api/delivery/reminder/999",
+        f"{BASE}/reminder/999",
         headers=_auth_headers(test_settings),
     )
     assert resp.status_code == 200
@@ -132,7 +137,7 @@ async def test_retry_delivery(client, test_settings, db_setup):
         mock_get.return_value = mock_backend
 
         resp = await client.post(
-            "/api/delivery/reminder/1/retry",
+            f"{BASE}/reminder/1/retry",
             headers=_auth_headers(test_settings),
         )
 
@@ -142,5 +147,5 @@ async def test_retry_delivery(client, test_settings, db_setup):
 
 @pytest.mark.anyio
 async def test_retry_requires_auth(client):
-    resp = await client.post("/api/delivery/reminder/1/retry")
+    resp = await client.post(f"{BASE}/reminder/1/retry")
     assert resp.status_code == 401

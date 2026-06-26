@@ -16,6 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.db.base import Base
 
 
+
 class MessageType(str, enum.Enum):
     FORM = "form"
     PLAIN_TEXT = "plain_text"
@@ -76,6 +77,7 @@ class CheckIn(Base):
 class Member(Base):
     __tablename__ = "members"
 
+    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), primary_key=True)
     callsign: Mapped[str] = mapped_column(String(20), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     first_check_in_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

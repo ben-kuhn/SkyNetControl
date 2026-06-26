@@ -1,25 +1,38 @@
+// TODO(Task 13): replace DEFAULT_NET_SLUG with useCurrentNet() hook once
+// the CurrentNetContext is available. Task 14 will wire slug into the API calls.
+const DEFAULT_NET_SLUG = "default-net";
+
 import type { CheckIn, CallbookResult, Session } from "../types";
 import { apiFetch } from "./client";
 
-export async function fetchSessionCheckins(sessionId: number): Promise<CheckIn[]> {
-  return apiFetch<CheckIn[]>(`/checkins/session/${sessionId}`);
+export async function fetchSessionCheckins(
+  sessionId: number,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<CheckIn[]> {
+  return apiFetch<CheckIn[]>(`/nets/${netSlug}/checkins/session/${sessionId}`);
 }
 
-export async function scanMailbox(sessionId: number): Promise<{ imported: number; checkins: CheckIn[] }> {
-  return apiFetch(`/checkins/scan/${sessionId}`, { method: "POST" });
+export async function scanMailbox(
+  sessionId: number,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<{ imported: number; checkins: CheckIn[] }> {
+  return apiFetch(`/nets/${netSlug}/checkins/scan/${sessionId}`, { method: "POST" });
 }
 
-export async function createManualCheckin(data: {
-  session_id: number;
-  callsign: string;
-  name: string;
-  mode: string;
-  city?: string;
-  county?: string;
-  state?: string;
-  comments?: string;
-}): Promise<CheckIn> {
-  return apiFetch<CheckIn>("/checkins/manual", {
+export async function createManualCheckin(
+  data: {
+    session_id: number;
+    callsign: string;
+    name: string;
+    mode: string;
+    city?: string;
+    county?: string;
+    state?: string;
+    comments?: string;
+  },
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<CheckIn> {
+  return apiFetch<CheckIn>(`/nets/${netSlug}/checkins/manual`, {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -28,39 +41,55 @@ export async function createManualCheckin(data: {
 export async function updateCheckin(
   checkinId: number,
   data: Partial<Pick<CheckIn, "name" | "callsign" | "city" | "county" | "state" | "mode" | "comments" | "parse_status">>,
+  netSlug: string = DEFAULT_NET_SLUG,
 ): Promise<CheckIn> {
-  return apiFetch<CheckIn>(`/checkins/${checkinId}`, {
+  return apiFetch<CheckIn>(`/nets/${netSlug}/checkins/${checkinId}`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 }
 
-export async function deleteCheckin(checkinId: number): Promise<void> {
-  await apiFetch<void>(`/checkins/${checkinId}`, { method: "DELETE" });
+export async function deleteCheckin(
+  checkinId: number,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<void> {
+  await apiFetch<void>(`/nets/${netSlug}/checkins/${checkinId}`, { method: "DELETE" });
 }
 
-export async function reparseCheckin(checkinId: number): Promise<CheckIn> {
-  return apiFetch<CheckIn>(`/checkins/${checkinId}/reparse`, { method: "POST" });
+export async function reparseCheckin(
+  checkinId: number,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<CheckIn> {
+  return apiFetch<CheckIn>(`/nets/${netSlug}/checkins/${checkinId}/reparse`, { method: "POST" });
 }
 
 export async function reparseSession(
   sessionId: number,
+  netSlug: string = DEFAULT_NET_SLUG,
 ): Promise<{ updated: number; imported: number }> {
-  return apiFetch(`/checkins/session/${sessionId}/reparse`, { method: "POST" });
+  return apiFetch(`/nets/${netSlug}/checkins/session/${sessionId}/reparse`, { method: "POST" });
 }
 
-export async function approveSession(sessionId: number): Promise<{ session_status: string; members_updated: number }> {
-  return apiFetch(`/checkins/approve/${sessionId}`, { method: "POST" });
+export async function approveSession(
+  sessionId: number,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<{ session_status: string; members_updated: number }> {
+  return apiFetch(`/nets/${netSlug}/checkins/approve/${sessionId}`, { method: "POST" });
 }
 
-export async function lookupCallsign(callsign: string): Promise<CallbookResult> {
-  return apiFetch<CallbookResult>(`/checkins/lookup/${callsign}`);
+export async function lookupCallsign(
+  callsign: string,
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<CallbookResult> {
+  return apiFetch<CallbookResult>(`/nets/${netSlug}/checkins/lookup/${callsign}`);
 }
 
-export async function fetchRecentSessions(): Promise<Session[]> {
-  return apiFetch<Session[]>("/schedule/sessions");
+export async function fetchRecentSessions(
+  netSlug: string = DEFAULT_NET_SLUG,
+): Promise<Session[]> {
+  return apiFetch<Session[]>(`/nets/${netSlug}/schedule/sessions`);
 }
 
-export async function fetchModes(): Promise<string[]> {
-  return apiFetch<string[]>("/checkins/modes");
+export async function fetchModes(netSlug: string = DEFAULT_NET_SLUG): Promise<string[]> {
+  return apiFetch<string[]>(`/nets/${netSlug}/checkins/modes`);
 }

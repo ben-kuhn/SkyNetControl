@@ -18,6 +18,9 @@ from backend.modules.checkins.routes import checkins_router
 from tests.conftest import make_test_token
 
 
+NET_SLUG = "default"
+BASE = f"/api/nets/{NET_SLUG}/checkins"
+
 
 @pytest.fixture
 def test_settings():
@@ -43,7 +46,7 @@ def db_setup():
         session.add(User(callsign="W0NC", oidc_subject="auth0|nc", name="Net Control"))
         session.add(User(callsign="KD0TST", oidc_subject="auth0|viewer", name="Viewer"))
         session.add(User(callsign="W0NOMEMBER", oidc_subject="auth0|nomember", name="No Member"))
-        net = Net(slug="default", name="Default Net")
+        net = Net(slug=NET_SLUG, name="Default Net")
         session.add(net)
         session.flush()
         session.add(NetMembership(user_callsign="W0NC", net_id=net.id, role=NetRole.NET_CONTROL))
@@ -57,7 +60,8 @@ def test_app(test_settings, db_setup):
     app = FastAPI()
     app.state.session_factory = db_setup
     app.state.settings = test_settings
-    app.include_router(checkins_router, prefix="/api/checkins")
+    # Router carries its own prefix: /api/nets/{net_slug}/checkins
+    app.include_router(checkins_router)
     return app
 
 
@@ -87,7 +91,7 @@ async def test_lookup_success(client, test_settings):
     with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), patch(
         "backend.modules.checkins.routes.lookup_callsign", return_value=mock_result
     ):
-        resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
+        resp = await client.get(f"{BASE}/lookup/W0ABC", cookies={"access_token": token})
 
     assert resp.status_code == 200
     assert resp.json()["name"] == "John Smith"
@@ -100,7 +104,7 @@ async def test_lookup_not_found(client, test_settings):
     with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), patch(
         "backend.modules.checkins.routes.lookup_callsign", return_value=None
     ):
-        resp = await client.get("/api/checkins/lookup/XXXXXX", cookies={"access_token": token})
+        resp = await client.get(f"{BASE}/lookup/XXXXXX", cookies={"access_token": token})
 
     assert resp.status_code == 404
 
@@ -111,7 +115,7 @@ async def test_lookup_503_when_not_configured(client, test_settings):
     not the 404 'not found' that masks the real cause (backlog item 4)."""
     token = make_test_token("W0NC", test_settings, token_version=0)
 
-    resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
+    resp = await client.get(f"{BASE}/lookup/W0ABC", cookies={"access_token": token})
 
     assert resp.status_code == 503
     assert "Config" in resp.json()["detail"]
@@ -119,7 +123,7 @@ async def test_lookup_503_when_not_configured(client, test_settings):
 
 @pytest.mark.asyncio
 async def test_lookup_viewer_member_allowed(client, test_settings):
-    """VIEWER-role net members can now access callbook lookup (require_net_member allows all members)."""
+    """VIEWER-role members cannot access lookup (it requires NET_CONTROL)."""
     token = make_test_token("KD0TST", test_settings, token_version=0)
 
     mock_result = {
@@ -129,16 +133,17 @@ async def test_lookup_viewer_member_allowed(client, test_settings):
     }
     with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), \
          patch("backend.modules.checkins.routes.lookup_callsign", return_value=mock_result):
-        resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
+        resp = await client.get(f"{BASE}/lookup/W0ABC", cookies={"access_token": token})
 
-    assert resp.status_code == 200
+    # lookup now requires NET_CONTROL, so VIEWER gets 403
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_lookup_non_member_denied(client, test_settings):
     """Users with no net membership cannot access callbook lookup."""
     token = make_test_token("W0NOMEMBER", test_settings, token_version=0)
-    resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
+    resp = await client.get(f"{BASE}/lookup/W0ABC", cookies={"access_token": token})
     assert resp.status_code == 403
 
 
@@ -161,7 +166,7 @@ async def test_lookup_admin_allowed(client, test_settings):
     with patch("backend.modules.checkins.routes.is_callbook_configured", return_value=True), patch(
         "backend.modules.checkins.routes.lookup_callsign", return_value=mock_result
     ):
-        resp = await client.get("/api/checkins/lookup/W0ABC", cookies={"access_token": token})
+        resp = await client.get(f"{BASE}/lookup/W0ABC", cookies={"access_token": token})
 
     assert resp.status_code == 200
     assert resp.json()["cached"] is True

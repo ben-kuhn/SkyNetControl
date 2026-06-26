@@ -193,7 +193,13 @@ def rich_db():
         )
         session.add(checkin)
 
+        from backend.modules.nets.models import Net
+        net = Net(slug="t", name="Test Net")
+        session.add(net)
+        session.flush()
+
         member = Member(
+            net_id=net.id,
             callsign="KD0TST",
             name="Test User",
             first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -278,10 +284,12 @@ def test_anonymize_user_replaces_member_record(rich_db):
     anon_id = result["anonymous_id"]
 
     with rich_db() as db:
-        assert db.get(Member, "KD0TST") is None
-        anon_member = db.get(Member, anon_id)
-        assert anon_member is not None
-        assert anon_member.name == "Deleted User"
+        # Check no member rows remain under the original callsign
+        assert db.query(Member).filter(Member.callsign == "KD0TST").count() == 0
+        # The anonymized member exists under the new anon_id
+        anon_members = db.query(Member).filter(Member.callsign == anon_id).all()
+        assert len(anon_members) == 1
+        assert anon_members[0].name == "Deleted User"
 
 
 def test_anonymize_user_updates_audit_log(rich_db):

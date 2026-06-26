@@ -70,10 +70,12 @@ def anonymize_user(
             }
         )
 
-    # 4. Anonymize member record (callsign is PK, so delete + re-insert)
-    member = db.get(Member, callsign)
-    if member:
+    # 4. Anonymize member records (composite PK net_id+callsign; user may have
+    #    records across multiple nets — anonymize all of them).
+    members = db.query(Member).filter(Member.callsign == callsign).all()
+    for member in members:
         new_member = Member(
+            net_id=member.net_id,
             callsign=anon_id,
             name="Deleted User",
             first_check_in_date=member.first_check_in_date,
@@ -160,9 +162,12 @@ def export_user_data(db: Session, callsign: str) -> dict:
             for m in msgs
         ]
 
-    member = db.get(Member, callsign)
+    # Member record may exist in multiple nets; aggregate for export.
+    members = db.query(Member).filter(Member.callsign == callsign).all()
     member_data = None
-    if member:
+    if members:
+        # Return the member record with the most check-ins, or the first one
+        member = max(members, key=lambda m: m.total_check_ins)
         member_data = {
             "callsign": member.callsign,
             "name": member.name,

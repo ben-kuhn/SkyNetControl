@@ -93,10 +93,11 @@ def test_classify_timing_late(season_and_session):
     assert classify_timing(net_session, received) == TimingStatus.LATE
 
 
-def test_is_new_member(db):
-    assert is_new_member(db, "W0NEW") is True
+def test_is_new_member(db, net_id):
+    assert is_new_member(db, net_id, "W0NEW") is True
 
     member = Member(
+        net_id=net_id,
         callsign="W0OLD",
         name="Old Timer",
         first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -106,10 +107,10 @@ def test_is_new_member(db):
     db.add(member)
     db.commit()
 
-    assert is_new_member(db, "W0OLD") is False
+    assert is_new_member(db, net_id, "W0OLD") is False
 
 
-def test_process_raw_message_form(db, season_and_session):
+def test_process_raw_message_form(db, net_id, season_and_session):
     _, net_session = season_and_session
     raw = RawMessage(
         message_id="FORM001",
@@ -130,7 +131,7 @@ def test_process_raw_message_form(db, season_and_session):
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin is not None
     assert checkin.callsign == "W0ABC"
     assert checkin.name == "John Smith"
@@ -141,7 +142,7 @@ def test_process_raw_message_form(db, season_and_session):
     assert raw.parsed is True
 
 
-def test_sender_callsign_overrides_body_when_different(db, season_and_session):
+def test_sender_callsign_overrides_body_when_different(db, net_id, season_and_session):
     """Sender (From: header) is authoritative for the callsign — body's
     callsign drops to a comment if it disagrees (backlog item 5)."""
     _, net_session = season_and_session
@@ -163,14 +164,14 @@ def test_sender_callsign_overrides_body_when_different(db, season_and_session):
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.callsign == "W0SENDER"
     assert "W0BODY" in (checkin.comments or "")
     assert "Hello net" in (checkin.comments or "")
     assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
 
 
-def test_sender_callsign_used_when_body_matches(db, season_and_session):
+def test_sender_callsign_used_when_body_matches(db, net_id, season_and_session):
     """No mismatch comment when body and sender agree."""
     _, net_session = season_and_session
     raw = RawMessage(
@@ -191,13 +192,13 @@ def test_sender_callsign_used_when_body_matches(db, season_and_session):
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.callsign == "W0ABC"
     assert "mismatch" not in (checkin.comments or "").lower()
     assert checkin.parse_status == ParseStatus.AUTO
 
 
-def test_sender_callsign_used_when_from_is_bare_callsign(db, season_and_session):
+def test_sender_callsign_used_when_from_is_bare_callsign(db, net_id, season_and_session):
     """PAT writes inbound B2F mail with `From: W9GM` (no @domain). The bare
     local-part is the sender's Winlink account and must win over the body's
     parsed callsign — historically the @-required check dropped it on the
@@ -219,11 +220,11 @@ def test_sender_callsign_used_when_from_is_bare_callsign(db, season_and_session)
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.callsign == "W9GM"
 
 
-def test_falls_back_to_body_when_sender_unparseable(db, season_and_session):
+def test_falls_back_to_body_when_sender_unparseable(db, net_id, season_and_session):
     """If the From: envelope has no @, fall back to the body's callsign and
     flag for review — better than dropping the message entirely."""
     _, net_session = season_and_session
@@ -244,12 +245,12 @@ def test_falls_back_to_body_when_sender_unparseable(db, season_and_session):
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin.callsign == "W0BODY"
     assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
 
 
-def test_process_raw_message_low_confidence(db, season_and_session):
+def test_process_raw_message_low_confidence(db, net_id, season_and_session):
     _, net_session = season_and_session
     raw = RawMessage(
         message_id="LOW001",
@@ -262,7 +263,7 @@ def test_process_raw_message_low_confidence(db, season_and_session):
     db.add(raw)
     db.commit()
 
-    checkin = process_raw_message(db, raw, net_session)
+    checkin = process_raw_message(db, raw, net_session, net_id=net_id)
     assert checkin is not None
     assert checkin.parse_status == ParseStatus.MANUAL_REVIEW
 
@@ -565,7 +566,7 @@ def test_update_checkin(db, season_and_session):
     assert updated.parse_status == ParseStatus.AUTO
 
 
-def test_approve_session_checkins(db, season_and_session):
+def test_approve_session_checkins(db, net_id, season_and_session):
     _, net_session = season_and_session
     checkin = CheckIn(
         session_id=net_session.id,
@@ -579,21 +580,22 @@ def test_approve_session_checkins(db, season_and_session):
     db.add(checkin)
     db.commit()
 
-    approve_session_checkins(db, net_session.id)
+    approve_session_checkins(db, net_session.id, net_id=net_id)
 
     db.refresh(net_session)
     assert net_session.status == SessionStatus.COMPLETED
 
-    member = db.get(Member, "W0NEW")
+    member = db.get(Member, (net_id, "W0NEW"))
     assert member is not None
     assert member.name == "New Person"
     assert member.total_check_ins == 1
 
 
-def test_approve_updates_existing_member(db, season_and_session):
+def test_approve_updates_existing_member(db, net_id, season_and_session):
     _, net_session = season_and_session
 
     member = Member(
+        net_id=net_id,
         callsign="W0OLD",
         name="Old Timer",
         first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -615,7 +617,7 @@ def test_approve_updates_existing_member(db, season_and_session):
     db.add(checkin)
     db.commit()
 
-    approve_session_checkins(db, net_session.id)
+    approve_session_checkins(db, net_session.id, net_id=net_id)
 
     db.refresh(member)
     assert member.total_check_ins == 11

@@ -22,6 +22,9 @@ from backend.config import Settings
 from tests.conftest import make_test_token
 
 
+NET_SLUG = "default"
+BASE = f"/api/nets/{NET_SLUG}/checkins"
+
 
 @pytest.fixture
 def test_settings():
@@ -52,19 +55,17 @@ def db_setup():
             callsign="W0NC",
             oidc_subject="auth0|nc",
             name="Net Control",
-            
         )
         viewer = User(
             callsign="KD0TST",
             oidc_subject="auth0|viewer",
             name="Viewer",
-            
         )
         nomember = User(callsign="W0NOMEMBER", oidc_subject="auth0|nomember", name="No Member")
         session.add_all([admin, nc, viewer, nomember])
 
         from backend.modules.nets.models import Net, NetMembership, NetRole
-        net = Net(slug="default", name="Default Net")
+        net = Net(slug=NET_SLUG, name="Default Net")
         session.add(net)
         session.flush()
         session.add(NetMembership(user_callsign="W0NC", net_id=net.id, role=NetRole.NET_CONTROL))
@@ -100,7 +101,8 @@ def test_app(test_settings, db_setup):
     app = FastAPI()
     app.state.session_factory = db_setup
     app.state.settings = test_settings
-    app.include_router(checkins_router, prefix="/api/checkins")
+    # Router carries its own prefix: /api/nets/{net_slug}/checkins
+    app.include_router(checkins_router)
     return app
 
 
@@ -129,7 +131,7 @@ async def test_scan_mailbox(test_client, test_settings):
     with patch("backend.modules.checkins.routes.read_mailbox") as mock_read:
         mock_read.return_value = mock_messages
         response = await test_client.post(
-            "/api/checkins/scan/1",
+            f"{BASE}/scan/1",
             cookies={"access_token": token},
         )
 
@@ -156,7 +158,7 @@ async def test_get_checkins_for_session(test_client, test_settings, db_setup):
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
-        "/api/checkins/session/1",
+        f"{BASE}/session/1",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -169,7 +171,7 @@ async def test_get_checkins_for_session(test_client, test_settings, db_setup):
 async def test_create_manual_checkin(test_client, test_settings):
     token = make_test_token("W0NC", test_settings, token_version=0)
     response = await test_client.post(
-        "/api/checkins/manual",
+        f"{BASE}/manual",
         json={
             "session_id": 1,
             "callsign": "W0MAN",
@@ -203,7 +205,7 @@ async def test_update_checkin(test_client, test_settings, db_setup):
 
     token = make_test_token("W0NC", test_settings, token_version=0)
     response = await test_client.patch(
-        f"/api/checkins/{checkin_id}",
+        f"{BASE}/{checkin_id}",
         json={"name": "John Smith", "city": "Denver"},
         cookies={"access_token": token},
     )
@@ -229,7 +231,7 @@ async def test_delete_checkin(test_client, test_settings, db_setup):
 
     token = make_test_token("W0NC", test_settings, token_version=0)
     resp = await test_client.delete(
-        f"/api/checkins/{checkin_id}",
+        f"{BASE}/{checkin_id}",
         cookies={"access_token": token},
     )
     assert resp.status_code == 204
@@ -237,7 +239,7 @@ async def test_delete_checkin(test_client, test_settings, db_setup):
     # Second delete is a 404, not a 500 — operator can press delete
     # twice on a flaky network without breaking the page.
     resp2 = await test_client.delete(
-        f"/api/checkins/{checkin_id}",
+        f"{BASE}/{checkin_id}",
         cookies={"access_token": token},
     )
     assert resp2.status_code == 404
@@ -261,7 +263,7 @@ async def test_delete_checkin_non_member_denied(test_client, test_settings, db_s
 
     token = make_test_token("W0NOMEMBER", test_settings, token_version=0)
     resp = await test_client.delete(
-        f"/api/checkins/{checkin_id}",
+        f"{BASE}/{checkin_id}",
         cookies={"access_token": token},
     )
     assert resp.status_code == 403
@@ -284,7 +286,7 @@ async def test_approve_session(test_client, test_settings, db_setup):
 
     token = make_test_token("W0NC", test_settings, token_version=0)
     response = await test_client.post(
-        "/api/checkins/approve/1",
+        f"{BASE}/approve/1",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -295,22 +297,23 @@ async def test_approve_session(test_client, test_settings, db_setup):
 
 @pytest.mark.asyncio
 async def test_member_can_read_and_scan(test_client, test_settings):
-    """Net members (including viewers) can read checkins and trigger scan."""
+    """Net members (including viewers) can read checkins; scan requires NET_CONTROL."""
     viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
 
     response = await test_client.get(
-        "/api/checkins/session/1",
+        f"{BASE}/session/1",
         cookies={"access_token": viewer_token},
     )
     assert response.status_code == 200
 
+    # Scan now requires NET_CONTROL — viewer should get 403
     with patch("backend.modules.checkins.routes.read_mailbox") as mock_read:
         mock_read.return_value = []
         response = await test_client.post(
-            "/api/checkins/scan/1",
+            f"{BASE}/scan/1",
             cookies={"access_token": viewer_token},
         )
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -321,7 +324,7 @@ async def test_non_member_cannot_scan(test_client, test_settings):
     with patch("backend.modules.checkins.routes.read_mailbox") as mock_read:
         mock_read.return_value = []
         response = await test_client.post(
-            "/api/checkins/scan/1",
+            f"{BASE}/scan/1",
             cookies={"access_token": non_member_token},
         )
     assert response.status_code == 403
@@ -332,7 +335,9 @@ async def test_get_members(test_client, test_settings, db_setup):
     from backend.modules.checkins.models import Member
 
     with db_setup() as session:
+        net = session.query(__import__("backend.modules.nets.models", fromlist=["Net"]).Net).filter_by(slug=NET_SLUG).one()
         member = Member(
+            net_id=net.id,
             callsign="W0ABC",
             name="John Smith",
             first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -344,7 +349,7 @@ async def test_get_members(test_client, test_settings, db_setup):
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
-        "/api/checkins/members",
+        f"{BASE}/members",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -356,10 +361,10 @@ async def test_get_members(test_client, test_settings, db_setup):
 
 @pytest.mark.asyncio
 async def test_get_modes_returns_default(test_client, test_settings):
-    """Any authenticated user can fetch the modes list."""
+    """Any authenticated viewer can fetch the modes list."""
     viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
-        "/api/checkins/modes",
+        f"{BASE}/modes",
         cookies={"access_token": viewer_token},
     )
     assert resp.status_code == 200
@@ -392,7 +397,7 @@ async def test_get_checkins_by_callsign_returns_history(test_client, test_settin
 
     viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
-        "/api/checkins/by-callsign/w0ne",  # case-insensitive
+        f"{BASE}/by-callsign/w0ne",  # case-insensitive
         cookies={"access_token": viewer_token},
     )
     assert resp.status_code == 200
@@ -408,7 +413,7 @@ async def test_get_checkins_by_callsign_empty(test_client, test_settings):
     """Unknown callsign returns 200 with empty list, not 404."""
     viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
     resp = await test_client.get(
-        "/api/checkins/by-callsign/NOBODY",
+        f"{BASE}/by-callsign/NOBODY",
         cookies={"access_token": viewer_token},
     )
     assert resp.status_code == 200
@@ -418,13 +423,13 @@ async def test_get_checkins_by_callsign_empty(test_client, test_settings):
 @pytest.mark.asyncio
 async def test_get_checkins_by_callsign_requires_auth(test_client):
     """Endpoint requires authentication."""
-    resp = await test_client.get("/api/checkins/by-callsign/W0NE")
+    resp = await test_client.get(f"{BASE}/by-callsign/W0NE")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_get_session_checkins_public_completed(test_client, test_settings, db_setup):
-    """Anonymous viewers can fetch check-ins for a COMPLETED session."""
+    """Authenticated viewers can fetch check-ins for a COMPLETED session."""
     from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
     from backend.modules.schedule.models import SessionStatus
 
@@ -444,29 +449,16 @@ async def test_get_session_checkins_public_completed(test_client, test_settings,
         session.commit()
         net_session_id = net_session.id
 
-    resp = await test_client.get(f"/api/checkins/session/{net_session_id}")
+    # Now requires auth (VIEWER role)
+    viewer_token = make_test_token("KD0TST", test_settings, token_version=0)
+    resp = await test_client.get(
+        f"{BASE}/session/{net_session_id}",
+        cookies={"access_token": viewer_token},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 1
     assert body[0]["callsign"] == "W0NE"
-
-
-@pytest.mark.asyncio
-async def test_get_session_checkins_public_not_completed_returns_404(test_client, db_setup):
-    """Anonymous viewers cannot fetch check-ins for a non-COMPLETED session."""
-    with db_setup() as session:
-        net_session = session.query(NetSession).first()
-        net_session_id = net_session.id
-
-    resp = await test_client.get(f"/api/checkins/session/{net_session_id}")
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_get_session_checkins_public_unknown_session_returns_404(test_client):
-    """Anonymous viewers see 404 for unknown sessions (same as not-completed)."""
-    resp = await test_client.get("/api/checkins/session/99999")
-    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -478,35 +470,11 @@ async def test_get_session_checkins_authenticated_sees_non_completed(test_client
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
-        f"/api/checkins/session/{net_session_id}",
+        f"{BASE}/session/{net_session_id}",
         cookies={"access_token": token},
     )
     assert resp.status_code == 200
     assert resp.json() == []
-
-
-@pytest.mark.asyncio
-async def test_get_session_checkins_pending_user_sees_only_completed(test_client, test_settings, db_setup):
-    """Audit M3: PENDING users are treated like anonymous viewers."""
-    # Seed a PENDING user and try to read a non-COMPLETED session.
-    with db_setup() as session:
-        pending = User(
-            callsign="PENDING-x",
-            oidc_subject="auth0|pending",
-            name="Pending",
-            is_pending=True,
-        )
-        session.add(pending)
-        session.commit()
-        net_session = session.query(NetSession).first()
-        net_session_id = net_session.id
-
-    token = make_test_token("PENDING-x", test_settings, is_pending=True, token_version=0)
-    resp = await test_client.get(
-        f"/api/checkins/session/{net_session_id}",
-        cookies={"access_token": token},
-    )
-    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -540,7 +508,7 @@ async def test_list_checkins_includes_raw_message(test_client, test_settings, db
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
-        "/api/checkins/session/1",
+        f"{BASE}/session/1",
         cookies={"access_token": token},
     )
     assert response.status_code == 200
@@ -570,7 +538,7 @@ async def test_list_checkins_raw_message_null_for_manual(test_client, test_setti
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.get(
-        "/api/checkins/session/1",
+        f"{BASE}/session/1",
         cookies={"access_token": token},
     )
     rows = response.json()
@@ -630,7 +598,7 @@ async def test_winlink_form_checkin_response_includes_form_view_html(
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
-        "/api/checkins/session/1",
+        f"{BASE}/session/1",
         cookies={"access_token": token},
     )
     assert resp.status_code == 200
@@ -671,7 +639,7 @@ async def test_non_winlink_checkin_response_has_null_form_view_html(
 
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     resp = await test_client.get(
-        "/api/checkins/session/1",
+        f"{BASE}/session/1",
         cookies={"access_token": token},
     )
     assert resp.status_code == 200

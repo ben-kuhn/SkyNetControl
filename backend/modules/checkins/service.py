@@ -23,7 +23,7 @@ from backend.integrations.geocoder.models import (  # noqa: F401
 )
 from backend.modules.checkins.message_parser import parse_message
 from backend.config_mgmt.service import get_checkin_modes
-from backend.modules.schedule.models import NetSession, SessionStatus
+from backend.modules.schedule.models import NetSession, NetSeason, SessionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +104,17 @@ def classify_timing(net_session: NetSession, received_at: datetime) -> TimingSta
         return TimingStatus.LATE
 
 
-def is_new_member(db: Session, callsign: str) -> bool:
-    """Check if this callsign has never checked in before."""
-    return db.get(Member, callsign) is None
+def get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
+    """Resolve the net_id for a session by joining through its season."""
+    if net_session.season_id is None:
+        return None
+    season = db.get(NetSeason, net_session.season_id)
+    return season.net_id if season else None
+
+
+def is_new_member(db: Session, net_id: int, callsign: str) -> bool:
+    """Check if this callsign has never checked in before (within the net)."""
+    return db.get(Member, (net_id, callsign)) is None
 
 
 def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSession) -> dict:
@@ -114,6 +122,9 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
     return the field values for the corresponding CheckIn. Mutates ``raw``
     to record the detected message_type and the parsed flag, but does not
     touch the CheckIn table — callers compose the new/updated row.
+
+    Net-scoped state (``is_new_member``) is computed by the caller, not here,
+    so this helper stays usable from reparse paths that don't need it.
     """
     from backend.modules.checkins.message_parser import CALLSIGN_RE
     from backend.modules.checkins.mode_normalize import normalize_mode
@@ -218,10 +229,10 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
     }
 
 
-def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession) -> CheckIn:
+def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession, net_id: int) -> CheckIn:
     """Parse a RawMessage and create a CheckIn record."""
     f = _compute_checkin_fields(db, raw, net_session)
-    new_member = is_new_member(db, f["callsign"]) if f["callsign"] else False
+    new_member = is_new_member(db, net_id, f["callsign"]) if f["callsign"] else False
     checkin = CheckIn(
         session_id=net_session.id,
         raw_message_id=raw.id,
@@ -303,9 +314,10 @@ def reparse_session(db: Session, net_session: NetSession) -> dict:
         .filter(~RawMessage.id.in_(referenced_ids))
         .all()
     )
+    net_id = get_net_id_for_session(db, net_session) or 0
     imported = 0
     for raw in orphans:
-        process_raw_message(db, raw, net_session)
+        process_raw_message(db, raw, net_session, net_id=net_id)
         imported += 1
 
     db.commit()
@@ -316,8 +328,13 @@ def scan_and_import_messages(
     db: Session,
     raw_messages: list[dict],
     net_session: NetSession,
+    net_id: int | None = None,
 ) -> list[CheckIn]:
     """Import raw message dicts, deduplicate by callsign (keep latest), skip existing."""
+    # Resolve net_id if not provided
+    if net_id is None:
+        net_id = get_net_id_for_session(db, net_session)
+
     all_msg_ids = [msg["message_id"] for msg in raw_messages]
     existing_ids = set(
         row[0] for row in db.query(RawMessage.message_id).filter(RawMessage.message_id.in_(all_msg_ids)).all()
@@ -350,7 +367,7 @@ def scan_and_import_messages(
         db.add(raw)
         db.flush()
 
-        checkin = process_raw_message(db, raw, net_session)
+        checkin = process_raw_message(db, raw, net_session, net_id=net_id or 0)
         if checkin.callsign:
             if checkin.callsign in parsed_checkins:
                 old = parsed_checkins[checkin.callsign]
@@ -401,12 +418,13 @@ def create_manual_checkin(
     callsign: str,
     name: str,
     mode: str,
+    net_id: int | None = None,
     city: str | None = None,
     county: str | None = None,
     state: str | None = None,
     comments: str | None = None,
 ) -> CheckIn:
-    new_member = is_new_member(db, callsign.upper())
+    new_member = is_new_member(db, net_id or 0, callsign.upper())
     checkin = CheckIn(
         session_id=session_id,
         callsign=callsign.upper(),
@@ -437,10 +455,19 @@ def update_checkin(
     mode: str | None = None,
     comments: str | None = None,
     parse_status: ParseStatus | None = None,
+    net_id: int | None = None,
 ) -> CheckIn | None:
     checkin = db.get(CheckIn, checkin_id)
     if checkin is None:
         return None
+
+    # Cross-net isolation: verify this checkin belongs to the requested net
+    if net_id is not None:
+        session_obj = db.get(NetSession, checkin.session_id)
+        if session_obj is not None:
+            session_net_id = get_net_id_for_session(db, session_obj)
+            if session_net_id != net_id:
+                return None
 
     if name is not None:
         checkin.name = name
@@ -464,44 +491,67 @@ def update_checkin(
     return checkin
 
 
-def delete_checkin(db: Session, checkin_id: int) -> bool:
+def delete_checkin(db: Session, checkin_id: int, net_id: int | None = None) -> bool:
     """Remove a check-in row outright. Returns True on success, False if
     no such row. Used by operators to scrub a misparsed/spam entry — the
     underlying RawMessage is kept so a re-scan or manual re-import is
     possible without re-importing the mailbox.
+
+    If net_id is provided, also returns False (not 404-leaking) if the
+    checkin belongs to a different net.
     """
     checkin = db.get(CheckIn, checkin_id)
     if checkin is None:
         return False
+
+    # Cross-net isolation
+    if net_id is not None:
+        session_obj = db.get(NetSession, checkin.session_id)
+        if session_obj is not None:
+            session_net_id = get_net_id_for_session(db, session_obj)
+            if session_net_id != net_id:
+                return False
+
     db.delete(checkin)
     db.commit()
     return True
 
 
-def approve_session_checkins(db: Session, session_id: int) -> None:
+def approve_session_checkins(db: Session, session_id: int, net_id: int | None = None) -> None:
     """Approve all check-ins for a session: update Member records, mark session completed."""
     checkins = get_checkins_for_session(db, session_id)
     now = datetime.now(timezone.utc)
+
+    # Resolve net_id if not provided
+    if net_id is None:
+        net_session = db.get(NetSession, session_id)
+        if net_session is not None:
+            net_id = get_net_id_for_session(db, net_session)
 
     for checkin in checkins:
         if not checkin.callsign:
             continue
 
-        member = db.get(Member, checkin.callsign)
-        if member is None:
-            member = Member(
-                callsign=checkin.callsign,
-                name=checkin.name,
-                first_check_in_date=now,
-                last_check_in_date=now,
-                total_check_ins=1,
-            )
-            db.add(member)
+        if net_id is not None:
+            member = db.get(Member, (net_id, checkin.callsign))
+            if member is None:
+                member = Member(
+                    net_id=net_id,
+                    callsign=checkin.callsign,
+                    name=checkin.name,
+                    first_check_in_date=now,
+                    last_check_in_date=now,
+                    total_check_ins=1,
+                )
+                db.add(member)
+            else:
+                member.last_check_in_date = now
+                member.total_check_ins += 1
+                if checkin.name:
+                    member.name = checkin.name
         else:
-            member.last_check_in_date = now
-            member.total_check_ins += 1
-            if checkin.name:
-                member.name = checkin.name
+            # Fallback: no net_id known, skip member upsert
+            logger.warning("approve_session_checkins: no net_id for session %d, skipping member upsert", session_id)
 
     net_session = db.get(NetSession, session_id)
     if net_session is not None:
@@ -510,14 +560,21 @@ def approve_session_checkins(db: Session, session_id: int) -> None:
     db.commit()
 
 
-def get_checkins_by_callsign(db: Session, callsign: str) -> list[tuple[CheckIn, date]]:
-    """All check-ins for a callsign with their session date, newest first."""
+def get_checkins_by_callsign(db: Session, callsign: str, net_id: int | None = None) -> list[tuple[CheckIn, date]]:
+    """All check-ins for a callsign with their session date, newest first.
+
+    When net_id is provided, only returns check-ins for sessions belonging to that net.
+    """
     normalized = callsign.upper()
-    return (
+    query = (
         db.query(CheckIn, NetSession.start_date)
         .join(NetSession, CheckIn.session_id == NetSession.id)
         .options(selectinload(CheckIn.raw_message))
         .filter(CheckIn.callsign == normalized)
-        .order_by(NetSession.start_date.desc(), CheckIn.id.desc())
+    )
+    if net_id is not None:
+        query = query.join(NetSeason, NetSession.season_id == NetSeason.id).filter(NetSeason.net_id == net_id)
+    return (
+        query.order_by(NetSession.start_date.desc(), CheckIn.id.desc())
         .all()
     )

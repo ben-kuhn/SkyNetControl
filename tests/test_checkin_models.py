@@ -180,8 +180,9 @@ def test_checkin_with_raw_message(db: Session, net_id):
     assert fetched.raw_message.message_id == "MSG001"
 
 
-def test_create_member(db: Session):
+def test_create_member(db: Session, net_id):
     member = Member(
+        net_id=net_id,
         callsign="W0ABC",
         name="John Smith",
         first_check_in_date=datetime(2026, 1, 15, tzinfo=timezone.utc),
@@ -191,30 +192,47 @@ def test_create_member(db: Session):
     db.add(member)
     db.commit()
 
-    fetched = db.get(Member, "W0ABC")
+    fetched = db.get(Member, (net_id, "W0ABC"))
     assert fetched is not None
     assert fetched.name == "John Smith"
     assert fetched.total_check_ins == 12
 
 
-def test_member_callsign_is_pk(db: Session):
-    member1 = Member(
+def test_member_composite_pk(db: Session, net_id):
+    """Same callsign in different nets is allowed; same callsign in same net raises."""
+    from tests.conftest import make_test_net
+    net2 = make_test_net(db, slug="t2", name="Net 2")
+
+    m1 = Member(
+        net_id=net_id,
         callsign="W0ABC",
         name="John",
         first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
         last_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
         total_check_ins=1,
     )
-    member2 = Member(
+    # Same callsign, different net — should be allowed
+    m2 = Member(
+        net_id=net2.id,
         callsign="W0ABC",
-        name="John Updated",
+        name="John",
         first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
         last_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        total_check_ins=2,
+        total_check_ins=1,
     )
-    db.add(member1)
+    db.add_all([m1, m2])
     db.commit()
-    db.add(member2)
+
+    # Same callsign, same net — must raise
+    m3 = Member(
+        net_id=net_id,
+        callsign="W0ABC",
+        name="Duplicate",
+        first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        last_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        total_check_ins=1,
+    )
+    db.add(m3)
     with pytest.raises(Exception):
         db.commit()
 

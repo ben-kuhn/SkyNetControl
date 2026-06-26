@@ -12,9 +12,20 @@ from backend.modules.schedule.models import NetSession, SessionStatus
 logger = logging.getLogger(__name__)
 
 
-def find_active_session(db: Session, now: datetime) -> NetSession | None:
-    """Find a SCHEDULED session whose window (start - grace through end + grace) contains `now`."""
-    sessions = db.query(NetSession).filter(NetSession.status == SessionStatus.SCHEDULED).all()
+def find_active_session(db: Session, now: datetime, net_id: int | None = None) -> NetSession | None:
+    """Find a SCHEDULED session whose window (start - grace through end + grace) contains `now`.
+
+    When net_id is provided, only considers sessions belonging to that net.
+    """
+    from backend.modules.schedule.models import NetSeason
+
+    query = db.query(NetSession).filter(NetSession.status == SessionStatus.SCHEDULED)
+    if net_id is not None:
+        query = (
+            query.join(NetSeason, NetSession.season_id == NetSeason.id)
+            .filter(NetSeason.net_id == net_id)
+        )
+    sessions = query.all()
 
     for session in sessions:
         session_start = datetime.combine(session.start_date, datetime.min.time(), tzinfo=timezone.utc)
@@ -49,7 +60,12 @@ scanner_state = ScannerState()
 
 
 def run_scan(db: Session, now: datetime) -> int | None:
-    """Run a single scan cycle. Returns count of imported check-ins, or None if skipped."""
+    """Run a single scan cycle against the default net (global app_config).
+
+    Returns count of imported check-ins, or None if skipped.
+    This is the legacy single-net path used by the scanner trigger route and tests.
+    For multi-net scanning, use scan_all_enabled().
+    """
     net_address = get_config_value(db, "net_address", "")
     mailbox_path = get_config_value(db, "pat_mailbox_path", "")
 
@@ -75,6 +91,57 @@ def run_scan(db: Session, now: datetime) -> int | None:
     return len(checkins)
 
 
+def scan_one(db: Session, net_id: int, mailbox: str, now: datetime) -> int:
+    """Scan a single net's mailbox. Returns count of imported check-ins."""
+    from backend.modules.nets.config_service import get_net_config
+
+    net_address = get_net_config(db, net_id, "net_address", "")
+    if not net_address:
+        # Fall back to global config for backward compat during migration
+        net_address = get_config_value(db, "net_address", "")
+
+    if not net_address:
+        logger.info("Scanner skipped for net_id=%d: net_address not configured", net_id)
+        return 0
+
+    session = find_active_session(db, now, net_id=net_id)
+    if session is None:
+        logger.debug("Scanner skipped for net_id=%d: no active session window", net_id)
+        return 0
+
+    inbox_path = os.path.join(mailbox, "in")
+    messages = read_mailbox(inbox_path, net_address)
+    checkins = scan_and_import_messages(db, messages, session, net_id=net_id)
+
+    count = len(checkins)
+    scanner_state.last_scan_time = now
+    scanner_state.last_scan_count = count
+    scanner_state.active_session_id = session.id
+
+    logger.info("Scanner completed for net_id=%d: %d new check-ins imported", net_id, count)
+    return count
+
+
+def scan_all_enabled(db: Session, now: datetime) -> int:
+    """Scan all nets that have scanner.enabled=true in their net_config.
+
+    Returns total count of imported check-ins across all nets.
+    """
+    from backend.modules.nets.models import Net
+    from backend.modules.nets.config_service import get_net_config
+
+    nets = db.query(Net).all()
+    total = 0
+    for net in nets:
+        if get_net_config(db, net.id, "scanner.enabled", "false") != "true":
+            continue
+        mailbox = get_net_config(db, net.id, "pat_mailbox_path")
+        if not mailbox:
+            continue
+        total += scan_one(db, net.id, mailbox, now)
+    return total
+
+
 async def scanner_loop(session_factory, get_interval_minutes):
     """Background loop that runs scans on a schedule."""
     import asyncio
@@ -89,7 +156,14 @@ async def scanner_loop(session_factory, get_interval_minutes):
             try:
                 with session_factory() as db:
                     now = datetime.now(tz=timezone.utc)
-                    run_scan(db, now)
+                    # Try per-net scanning first; fall back to global config
+                    # for installations that haven't migrated to net_config yet.
+                    # TODO(Task 14/15): remove the global fallback once all
+                    # installations have per-net scanner config.
+                    total = scan_all_enabled(db, now)
+                    if total == 0:
+                        # No nets have per-net scanner.enabled; try global config
+                        run_scan(db, now)
             except Exception:
                 logger.exception("Scanner error during scan cycle")
 
