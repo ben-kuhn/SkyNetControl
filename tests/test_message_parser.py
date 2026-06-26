@@ -208,6 +208,38 @@ def test_parse_plain_text_mode_match_requires_word_boundary():
     assert result["comments"] == "Packetone test"
 
 
+def test_parse_plain_text_callsign_first_ordering():
+    """`Callsign, Name, City, County, State, Mode, gateway` — operator put the
+    callsign in segment[0]. The strict `[name][callsign]...` shape would bail
+    to the degraded path; swap and parse instead.
+    Also peels a trailing callsign-with-suffix (e.g. `W4DIG-11`) into comments
+    so `VARA UHF` lands in mode rather than being swallowed by location.
+    """
+    body = "N4RJB, RICHARD, PUNTA GORDA, CHARLOTTE, FL, VARA UHF, W4DIG-11"
+    result = parse_plain_text_message(body, known_modes={"VARA UHF"})
+    assert result["callsign"] == "N4RJB"
+    assert result["name"] == "RICHARD"
+    assert result["city"] == "PUNTA GORDA"
+    assert result["county"] == "CHARLOTTE"
+    assert result["state"] == "FL"
+    assert result["mode"] == "VARA UHF"
+    assert result["comments"] == "via W4DIG-11"
+    assert result["confidence"] == "medium"
+
+
+def test_parse_plain_text_trailing_gateway_callsign_segment():
+    """Same trailing-gateway peel, but in the canonical `Name, Callsign, ...` order."""
+    body = "Ben, KU0HN, Lewiston, Winona, MN, VHF Packet, W0NE-7"
+    result = parse_plain_text_message(body, known_modes={"VHF Packet"})
+    assert result["callsign"] == "KU0HN"
+    assert result["name"] == "Ben"
+    assert result["city"] == "Lewiston"
+    assert result["county"] == "Winona"
+    assert result["state"] == "MN"
+    assert result["mode"] == "VHF Packet"
+    assert result["comments"] == "via W0NE-7"
+
+
 def test_parse_plain_text_canonical_mode_casing_preserved():
     """The stored mode value uses the casing from the known_modes set."""
     body = "Ben, KU0HN, Lewiston, MN, vhf packet"

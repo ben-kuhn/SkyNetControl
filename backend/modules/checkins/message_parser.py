@@ -412,14 +412,36 @@ def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> 
     if len(segments) < 4:
         return _degraded_extract(text)
 
-    normalized_callsign = _normalize_callsign(segments[1])
-    if CALLSIGN_RE.fullmatch(normalized_callsign) is None:
+    # Canonical ordering is `Name, Callsign, ...` but operators sometimes
+    # write `Callsign, Name, ...`. Accept whichever of the first two
+    # segments looks like a callsign, preferring position [1].
+    seg1_callsign = _normalize_callsign(segments[1])
+    seg0_callsign = _normalize_callsign(segments[0])
+    if CALLSIGN_RE.fullmatch(seg1_callsign) is not None:
+        name = segments[0]
+        callsign = seg1_callsign
+    elif CALLSIGN_RE.fullmatch(seg0_callsign) is not None:
+        name = segments[1]
+        callsign = seg0_callsign
+    else:
         return _degraded_extract(text)
 
-    name = segments[0]
-    callsign = normalized_callsign
-    location_segments = segments[2:-1]
-    trailing = segments[-1]
+    # If the last segment is itself a (suffixed) callsign, it's almost
+    # certainly a relay/gateway note rather than a mode — peel it into a
+    # `via XXXX-NN` comment so the real mode (now segment[-2]) gets matched.
+    trailing_callsign = _normalize_callsign(segments[-1])
+    extra_comment: str | None = None
+    if (
+        len(segments) >= 5
+        and CALLSIGN_RE.fullmatch(trailing_callsign) is not None
+        and trailing_callsign != callsign
+    ):
+        extra_comment = f"via {segments[-1]}"
+        trailing = segments[-2]
+        location_segments = segments[2:-2]
+    else:
+        location_segments = segments[2:-1]
+        trailing = segments[-1]
 
     city, county, state = _assign_location(location_segments)
     mode, comments = _match_known_mode(trailing, known_modes)
@@ -437,6 +459,9 @@ def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> 
         if normalized in CANONICAL_MODES:
             mode = normalized
             comments = None
+
+    if extra_comment:
+        comments = f"{comments} {extra_comment}".strip() if comments else extra_comment
 
     if callsign and name and mode:
         confidence = "medium"
