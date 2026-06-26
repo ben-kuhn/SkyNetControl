@@ -10,13 +10,13 @@ export function VersionLabel() {
   const [info, setInfo] = useState<{ version: string; sha: string } | null>(null);
 
   useEffect(() => {
-    if (user?.role !== "admin") return;
+    if (!user?.is_admin) return;
     fetchVersion()
       .then((v) => setInfo({ version: v.version, sha: v.git_sha }))
       .catch(() => {});
-  }, [user?.role]);
+  }, [user?.is_admin]);
 
-  if (user?.role !== "admin" || !info) return null;
+  if (!user?.is_admin || !info) return null;
 
   return (
     <div className="font-mono text-[0.625rem] text-text-muted px-2 leading-tight">

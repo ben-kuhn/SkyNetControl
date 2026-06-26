@@ -1,26 +1,47 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useParams } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { NotificationBell } from "../components/NotificationBell";
 import { VersionLabel } from "../components/VersionLabel";
-import type { UserRole } from "../types";
+import type { NetRole } from "../types";
 
 interface NavItem {
   label: string;
-  to: string;
-  minRole: UserRole[];
+  subpath: string | null;
+  absolutePath?: string;
+  minRole: NetRole | "admin" | null;
 }
 
-const navItems: NavItem[] = [
-  { label: "Schedule", to: "/schedule", minRole: ["pending", "viewer", "net_control", "admin"] },
-  { label: "Check-ins", to: "/checkins", minRole: ["viewer", "net_control", "admin"] },
-  { label: "Members", to: "/members", minRole: ["viewer", "net_control", "admin"] },
-  { label: "Reminders", to: "/reminders", minRole: ["net_control", "admin"] },
-  { label: "Roster", to: "/roster", minRole: ["net_control", "admin"] },
-  { label: "Activities", to: "/activities", minRole: ["net_control", "admin"] },
-  { label: "Users", to: "/users", minRole: ["admin"] },
-  { label: "Config", to: "/config", minRole: ["admin"] },
+const netNavItems: NavItem[] = [
+  { label: "Schedule",   subpath: "schedule",   minRole: "viewer" },
+  { label: "Check-ins",  subpath: "checkins",   minRole: null },
+  { label: "Members",    subpath: "members",    minRole: "viewer" },
+  { label: "Reminders",  subpath: "reminders",  minRole: "net_control" },
+  { label: "Roster",     subpath: "roster",     minRole: "net_control" },
+  { label: "Activities", subpath: "activities", minRole: "net_control" },
+  { label: "Settings",   subpath: "settings",   minRole: "net_control" },
 ];
+
+const globalNavItems: NavItem[] = [
+  { label: "Users",  subpath: null, absolutePath: "/users",  minRole: "admin" },
+  { label: "Config", subpath: null, absolutePath: "/config", minRole: "admin" },
+  { label: "Nets",   subpath: null, absolutePath: "/nets",   minRole: "admin" },
+];
+
+const ROLE_RANK: Record<NetRole | "admin", number> = {
+  viewer: 1,
+  net_control: 2,
+  admin: 99,
+};
+
+function meetsRole(
+  userRole: NetRole | "admin" | null,
+  required: NetRole | "admin" | null,
+): boolean {
+  if (required === null) return true;
+  if (userRole === null) return false;
+  return ROLE_RANK[userRole] >= ROLE_RANK[required];
+}
 
 interface MobileMenuProps {
   open: boolean;
@@ -29,12 +50,32 @@ interface MobileMenuProps {
 
 export function MobileMenu({ open, onClose }: MobileMenuProps) {
   const { user, logout } = useAuth();
+  const { slug } = useParams<{ slug?: string }>();
 
   if (!open) return null;
 
-  const visibleItems = navItems.filter(
-    (item) => user && item.minRole.includes(user.role),
+  const netRole: NetRole | "admin" | null = user?.is_admin
+    ? "admin"
+    : (user?.nets.find((n) => n.slug === slug)?.role ?? null);
+
+  const visibleNetItems = slug
+    ? netNavItems.filter((item) => meetsRole(netRole, item.minRole))
+    : [];
+
+  const visibleGlobalItems = globalNavItems.filter((item) =>
+    meetsRole(netRole, item.minRole),
   );
+
+  const allItems = [
+    ...visibleNetItems.map((item) => ({
+      label: item.label,
+      to: `/nets/${slug}/${item.subpath}`,
+    })),
+    ...visibleGlobalItems.map((item) => ({
+      label: item.label,
+      to: item.absolutePath!,
+    })),
+  ];
 
   return (
     <div className="fixed inset-0 z-40 bg-bg-base md:hidden">
@@ -53,7 +94,7 @@ export function MobileMenu({ open, onClose }: MobileMenuProps) {
 
       {/* Nav links */}
       <nav className="px-4 py-4 flex flex-col gap-1">
-        {visibleItems.map((item) => (
+        {allItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

@@ -1,11 +1,24 @@
-export type UserRole = "pending" | "viewer" | "net_control" | "admin" | "deleted";
+/** Per-net role. Replaces the old monolithic UserRole for per-net access gating. */
+export type NetRole = "viewer" | "net_control";
+
+export interface NetSummary {
+  slug: string;
+  name: string;
+  is_public: boolean;
+}
+
+export interface NetMembershipSummary extends NetSummary {
+  role: NetRole;
+}
 
 export interface User {
   callsign: string;
   name: string;
-  role: UserRole;
+  is_admin: boolean;
+  is_pending: boolean;
   email: string | null;
   pending_callsign: string | null;
+  nets: NetMembershipSummary[];
 }
 
 export interface Provider {
@@ -163,7 +176,11 @@ export interface MemberCheckin extends CheckIn {
   session_date: string;
 }
 
-export const SCOPES: Record<string, { description: string; minRole: UserRole }> = {
+/** Minimum access level required for a PAT scope.
+ *  "net_control" and "viewer" map to NetRole; "admin" is the user-global flag. */
+export type ScopeMinRole = NetRole | "admin";
+
+export const SCOPES: Record<string, { description: string; minRole: ScopeMinRole }> = {
   "schedule:read":  { description: "View sessions",             minRole: "viewer" },
   "schedule:write": { description: "Create/edit/delete sessions", minRole: "net_control" },
   "checkins:read":  { description: "View check-in data",        minRole: "viewer" },

@@ -17,7 +17,7 @@ export function PendingPage() {
   }, [refreshUser]);
 
   useEffect(() => {
-    if (user && user.role !== "pending") {
+    if (user && !user.is_pending) {
       addToast("Your account has been approved!", "success");
       navigate("/schedule");
     }

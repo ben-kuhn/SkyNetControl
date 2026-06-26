@@ -5,21 +5,20 @@ import { fetchUsers, updateUserRole, approveCallsign, rejectCallsign } from "../
 import { exportUserData, anonymizeUser } from "../api/privacy";
 import { fetchAuditLog } from "../api/audit";
 import { Spinner } from "../components/Spinner";
-import type { User, UserRole, AuditEntry } from "../types";
+import type { User, AuditEntry } from "../types";
 
-const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: "pending", label: "pending" },
-  { value: "viewer", label: "viewer" },
-  { value: "net_control", label: "net control" },
-  { value: "admin", label: "admin" },
-];
+/** Derive a display role label from the new flag-based User shape. */
+function userRoleLabel(u: User): string {
+  if (u.is_admin) return "admin";
+  if (u.is_pending) return "pending";
+  return "member";
+}
 
-const roleBadgeClass: Record<UserRole, string> = {
+/** Badge CSS classes by derived role label. */
+const roleBadgeClass: Record<string, string> = {
   admin: "bg-accent/10 text-accent border-accent/25",
-  net_control: "bg-success/10 text-success border-success/25",
-  viewer: "bg-bg-elevated text-text-muted border-border",
+  member: "bg-bg-elevated text-text-muted border-border",
   pending: "bg-warning/10 text-warning border-warning/25",
-  deleted: "bg-bg-elevated text-text-muted border-border",
 };
 
 function formatAuditEntry(entry: AuditEntry): string {
@@ -70,16 +69,15 @@ export function UsersPage() {
   if (!currentUser) return null;
 
   const filteredUsers = users.filter((u) => {
-    if (u.role === "deleted") return false;
     const matchesSearch = u.callsign.toLowerCase().includes(search.toLowerCase());
-    const matchesRole = roleFilter === "all" || u.role === roleFilter;
+    const label = userRoleLabel(u);
+    const matchesRole = roleFilter === "all" || label === roleFilter;
     return matchesSearch && matchesRole;
   });
 
-  const pendingCount =
-    users.filter((u) => u.pending_callsign || u.role === "pending").length;
+  const pendingCount = users.filter((u) => u.pending_callsign || u.is_pending).length;
 
-  const handleRoleChange = async (callsign: string, newRole: UserRole) => {
+  const handleRoleChange = async (callsign: string, newRole: string) => {
     try {
       await updateUserRole(callsign, newRole);
       addToast(`Role updated to ${newRole.replace(/_/g, " ")}`, "success");
@@ -173,10 +171,9 @@ export function UsersPage() {
             onChange={(e) => setRoleFilter(e.target.value)}
             className="bg-bg-elevated border border-border rounded-md px-3 py-1.5 text-sm text-text-primary"
           >
-            <option value="all">All roles</option>
+            <option value="all">All</option>
             <option value="admin">Admin</option>
-            <option value="net_control">Net Control</option>
-            <option value="viewer">Viewer</option>
+            <option value="member">Member</option>
             <option value="pending">Pending</option>
           </select>
         </div>
@@ -204,91 +201,88 @@ export function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.map((u) => (
-              <tr
-                key={u.callsign}
-                className={`border-b border-border last:border-0 ${
-                  u.pending_callsign || u.role === "pending"
-                    ? "bg-warning/5"
-                    : ""
-                }`}
-              >
-                <td className="px-4 py-3">
-                  <span className="font-mono text-accent">{u.callsign}</span>
-                  {u.pending_callsign && (
-                    <div className="text-xs text-warning mt-0.5">
-                      → <span className="font-mono">{u.pending_callsign}</span>
-                    </div>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-text-primary">{u.name}</td>
-                <td className="px-4 py-3">
-                  {u.callsign === currentUser.callsign ? (
-                    <span
-                      className={`inline-block text-xs px-2 py-0.5 rounded border ${roleBadgeClass[u.role]}`}
-                    >
-                      {u.role.replace(/_/g, " ")}
-                    </span>
-                  ) : (
-                    <select
-                      value={u.role}
-                      onChange={(e) =>
-                        handleRoleChange(u.callsign, e.target.value as UserRole)
-                      }
-                      className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-xs text-text-primary"
-                    >
-                      {ROLE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-text-muted">{u.email || "—"}</td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-1">
+            {filteredUsers.map((u) => {
+              const roleLabel = userRoleLabel(u);
+              return (
+                <tr
+                  key={u.callsign}
+                  className={`border-b border-border last:border-0 ${
+                    u.pending_callsign || u.is_pending ? "bg-warning/5" : ""
+                  }`}
+                >
+                  <td className="px-4 py-3">
+                    <span className="font-mono text-accent">{u.callsign}</span>
                     {u.pending_callsign && (
-                      <>
-                        <button
-                          onClick={() => handleApprove(u.callsign)}
-                          className="text-xs px-2 py-1 rounded bg-success/10 text-success border border-success/25 hover:bg-success/20"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleReject(u.callsign)}
-                          className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
-                        >
-                          Reject
-                        </button>
-                      </>
+                      <div className="text-xs text-warning mt-0.5">
+                        → <span className="font-mono">{u.pending_callsign}</span>
+                      </div>
                     )}
-                    {u.callsign !== currentUser.callsign && (
-                      <>
-                        <button
-                          onClick={() => handleExportUser(u.callsign)}
-                          title="Export data"
-                          className="text-xs px-2 py-1 rounded bg-bg-elevated text-text-muted border border-border hover:bg-bg-base"
-                        >
-                          Export
-                        </button>
-                        <button
-                          onClick={() => setAnonymizeTarget(u.callsign)}
-                          title="Anonymize user"
-                          className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
-                        >
-                          Anonymize
-                        </button>
-                      </>
+                  </td>
+                  <td className="px-4 py-3 text-text-primary">{u.name}</td>
+                  <td className="px-4 py-3">
+                    {u.callsign === currentUser.callsign ? (
+                      <span
+                        className={`inline-block text-xs px-2 py-0.5 rounded border ${roleBadgeClass[roleLabel] ?? ""}`}
+                      >
+                        {roleLabel}
+                      </span>
+                    ) : (
+                      <select
+                        value={roleLabel}
+                        onChange={(e) => handleRoleChange(u.callsign, e.target.value)}
+                        className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-xs text-text-primary"
+                      >
+                        <option value="pending">pending</option>
+                        <option value="member">member</option>
+                        <option value="admin">admin</option>
+                      </select>
                     )}
-                    {!u.pending_callsign && u.callsign === currentUser.callsign && (
-                      <span className="text-text-muted">&mdash;</span>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-4 py-3 text-text-muted">{u.email || "—"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      {u.pending_callsign && (
+                        <>
+                          <button
+                            onClick={() => handleApprove(u.callsign)}
+                            className="text-xs px-2 py-1 rounded bg-success/10 text-success border border-success/25 hover:bg-success/20"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleReject(u.callsign)}
+                            className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      {u.callsign !== currentUser.callsign && (
+                        <>
+                          <button
+                            onClick={() => handleExportUser(u.callsign)}
+                            title="Export data"
+                            className="text-xs px-2 py-1 rounded bg-bg-elevated text-text-muted border border-border hover:bg-bg-base"
+                          >
+                            Export
+                          </button>
+                          <button
+                            onClick={() => setAnonymizeTarget(u.callsign)}
+                            title="Anonymize user"
+                            className="text-xs px-2 py-1 rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20"
+                          >
+                            Anonymize
+                          </button>
+                        </>
+                      )}
+                      {!u.pending_callsign && u.callsign === currentUser.callsign && (
+                        <span className="text-text-muted">&mdash;</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

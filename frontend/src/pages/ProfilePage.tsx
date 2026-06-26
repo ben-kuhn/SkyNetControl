@@ -8,21 +8,23 @@ import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Spinner";
 import { ApiError, SCOPES } from "../types";
-import type { Token, UserRole } from "../types";
+import type { ScopeMinRole, Token } from "../types";
 import { exportMyData, anonymizeMyAccount } from "../api/privacy";
 
 const CALLSIGN_PATTERN = /^[A-Z]{1,2}\d[A-Z]{1,4}$/;
 
-const ROLE_RANK: Record<UserRole, number> = {
-  deleted: -1,
-  pending: 0,
+// Local rank map for PAT scope UI — admin rank is higher than net_control.
+// "deleted"/"pending" are no longer user-visible roles; we represent
+// user state via is_admin/is_pending flags on the User object instead.
+const SCOPE_ROLE_RANK: Record<ScopeMinRole, number> = {
   viewer: 1,
   net_control: 2,
   admin: 3,
 };
 
-function canUseScope(userRole: UserRole, minRole: UserRole): boolean {
-  return ROLE_RANK[userRole] >= ROLE_RANK[minRole];
+/** Determine if the current user can select a PAT scope based on their access level. */
+function canUseScope(effectiveRole: ScopeMinRole, minRole: ScopeMinRole): boolean {
+  return SCOPE_ROLE_RANK[effectiveRole] >= SCOPE_ROLE_RANK[minRole];
 }
 
 export function ProfilePage() {
@@ -170,12 +172,22 @@ export function ProfilePage() {
     }
   };
 
-  const roleBadgeClass =
-    user.role === "admin"
-      ? "bg-accent/10 text-accent border-accent/25"
-      : user.role === "net_control"
+  // Derive display role from flags
+  const roleBadgeClass = user.is_admin
+    ? "bg-accent/10 text-accent border-accent/25"
+    : user.is_pending
+      ? "bg-warning/10 text-warning border-warning/25"
+      : user.nets.some((n) => n.role === "net_control")
         ? "bg-success/10 text-success border-success/25"
         : "bg-bg-elevated text-text-muted border-border";
+
+  const roleLabel = user.is_admin
+    ? "admin"
+    : user.is_pending
+      ? "pending"
+      : user.nets.some((n) => n.role === "net_control")
+        ? "net control"
+        : "member";
 
   return (
     <div className="max-w-lg">
@@ -187,7 +199,7 @@ export function ProfilePage() {
         <div className="text-text-secondary">{user.name}</div>
         {user.email && <div className="text-text-muted text-sm mt-1">{user.email}</div>}
         <span className={`inline-block mt-2 text-xs px-2 py-0.5 rounded border ${roleBadgeClass}`}>
-          {user.role.replace(/_/g, " ")}
+          {roleLabel}
         </span>
       </div>
 
@@ -264,7 +276,14 @@ export function ProfilePage() {
               <label className="block text-sm text-text-secondary mb-2">Scopes</label>
               <div className="space-y-1">
                 {Object.entries(SCOPES).map(([scope, { description, minRole }]) => {
-                  const allowed = canUseScope(user.role as UserRole, minRole);
+                  // Effective scope role: admins get full rank; net_control from any net;
+                  // otherwise viewer. Task 15 will refine this to be per-net-bound token.
+                  const effectiveRole: ScopeMinRole = user.is_admin
+                    ? "admin"
+                    : user.nets.some((n) => n.role === "net_control")
+                      ? "net_control"
+                      : "viewer";
+                  const allowed = canUseScope(effectiveRole, minRole);
                   return (
                     <label
                       key={scope}

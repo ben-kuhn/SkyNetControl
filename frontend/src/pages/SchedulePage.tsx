@@ -15,11 +15,11 @@ import { Spinner } from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../hooks/useAuth";
 import type {
+  NetRole,
   Season,
   Session,
   SessionStatus,
   SessionType,
-  UserRole,
 } from "../types";
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -36,11 +36,11 @@ const SESSION_STATUS_OPTIONS: { value: SessionStatus; label: string }[] = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
-function canEditSessions(role: UserRole | undefined): boolean {
+function canEditSessions(role: NetRole | "admin" | null | undefined): boolean {
   return role === "admin" || role === "net_control";
 }
 
-function canManageSeasons(role: UserRole | undefined): boolean {
+function canManageSeasons(role: NetRole | "admin" | null | undefined): boolean {
   return role === "admin";
 }
 
@@ -126,7 +126,8 @@ export function ScheduleList() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSessions({ status: "scheduled" })
+    // ScheduleList is used by PendingPage (no net context) — use default slug with scheduled filter
+    fetchSessions(undefined, { status: "scheduled" })
       .then(setSessions)
       .catch(() => setError("Failed to load sessions"))
       .finally(() => setLoading(false));
@@ -671,8 +672,11 @@ export function SchedulePage() {
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
 
-  const editSessions = canEditSessions(user?.role);
-  const manageSeasons = canManageSeasons(user?.role);
+  // Task 13: role-based gating now comes from CurrentNetContext (Task 14 wires slug).
+  // For now derive edit capability from is_admin flag (net_control wired in Task 14).
+  const effectiveRole: "admin" | null = user?.is_admin ? "admin" : null;
+  const editSessions = canEditSessions(effectiveRole);
+  const manageSeasons = canManageSeasons(effectiveRole);
 
   const loadData = useCallback(() => {
     setLoading(true);

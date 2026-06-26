@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useParams } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { Sidebar } from "./Sidebar";
 import { MobileMenu } from "./MobileMenu";
+import { NetPicker } from "../components/NetPicker";
 
 export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const { user } = useAuth();
+  const { slug } = useParams<{ slug?: string }>();
 
   return (
     <div className="min-h-screen bg-bg-base">
@@ -23,7 +25,11 @@ export function AppShell() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <span className="font-bold text-accent text-sm">SkyNetControl</span>
+        {slug ? (
+          <NetPicker />
+        ) : (
+          <span className="font-bold text-accent text-sm">SkyNetControl</span>
+        )}
         {user ? (
           <span className="font-mono text-xs text-text-muted">{user.callsign}</span>
         ) : (

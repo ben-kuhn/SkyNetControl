@@ -1,18 +1,18 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import { Spinner } from "./components/Spinner";
-import type { UserRole } from "./types";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  minRole?: UserRole[];
+  /** Require the user to be a global admin. */
+  adminOnly?: boolean;
   allowPending?: boolean;
   pendingOnly?: boolean;
 }
 
 export function ProtectedRoute({
   children,
-  minRole,
+  adminOnly = false,
   allowPending = false,
   pendingOnly = false,
 }: ProtectedRouteProps) {
@@ -31,10 +31,9 @@ export function ProtectedRoute({
   }
 
   // Treat anyone still carrying a PENDING-... placeholder callsign as
-  // needing registration, even if their role is already ADMIN (the
-  // first-signup case).
+  // needing registration, even if they're already an admin (the first-signup case).
   const hasPlaceholderCallsign = user.callsign.startsWith("PENDING-");
-  if (user.role === "pending" || hasPlaceholderCallsign) {
+  if (user.is_pending || hasPlaceholderCallsign) {
     if (pendingOnly && !hasPlaceholderCallsign) {
       return <Navigate to="/pending" replace />;
     }
@@ -46,16 +45,14 @@ export function ProtectedRoute({
     }
   }
 
-  // Non-pending user trying to access pending-only routes. Admins still
-  // carrying a PENDING- placeholder callsign are an exception — they're
-  // who /register is *for*.
-  if (pendingOnly && user.role !== "pending" && !hasPlaceholderCallsign) {
-    return <Navigate to="/schedule" replace />;
+  // Non-pending user trying to access pending-only routes
+  if (pendingOnly && !user.is_pending && !hasPlaceholderCallsign) {
+    return <Navigate to="/" replace />;
   }
 
-  // Role check
-  if (minRole && !minRole.includes(user.role)) {
-    return <Navigate to="/schedule" replace />;
+  // Admin-only check
+  if (adminOnly && !user.is_admin) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

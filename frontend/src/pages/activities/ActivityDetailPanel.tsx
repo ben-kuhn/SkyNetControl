@@ -70,11 +70,11 @@ export function ActivityDetailPanel({
     hasUnsavedRef.current = dirty;
   }, [mode, title, description, instructions, tagsText, activity, hasUnsavedRef]);
 
-  const canDelete = user?.role === "admin" && activity != null && !activity.is_default;
+  const canDelete = user?.is_admin === true && activity != null && !activity.is_default;
   const canEdit =
     activity == null ||
-    user?.role === "admin" ||
-    user?.role === "net_control";
+    user?.is_admin === true ||
+    user?.nets.some((n) => n.role === "net_control") === true;
 
   const parseTags = (s: string): string[] => {
     const seen = new Set<string>();
@@ -197,7 +197,7 @@ export function ActivityDetailPanel({
               title={
                 activity.is_default
                   ? "Cannot delete the default activity"
-                  : user?.role !== "admin"
+                  : !user?.is_admin
                     ? "Only admins can delete activities"
                     : "Delete"
               }

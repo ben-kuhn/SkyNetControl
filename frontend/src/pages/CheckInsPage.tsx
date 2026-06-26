@@ -7,7 +7,7 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
 import { CheckInMap } from "../components/CheckInMap";
-import type { CheckIn, CallbookResult, Session, UserRole } from "../types";
+import type { CheckIn, CallbookResult, Session } from "../types";
 import {
   fetchSessionCheckins,
   scanMailbox,
@@ -22,7 +22,9 @@ import {
   fetchModes,
 } from "../api/checkins";
 
-const canEdit = (role: UserRole) => role === "admin" || role === "net_control";
+// Task 13: role gating migrated to useCurrentNet (Task 14 wires per-net role).
+// For now: admins can edit; net_control wired in Task 14.
+const canEdit = (isAdmin: boolean) => isAdmin;
 
 const parseStatusBadge: Record<string, { label: string; cls: string }> = {
   auto: { label: "auto", cls: "bg-success/10 text-success border border-success/25" },
@@ -589,7 +591,7 @@ export function CheckInsPage() {
   const [modes, setModes] = useState<string[]>(["Voice", "Winlink", "CW", "Digital"]);
   const [notPublic, setNotPublic] = useState(false);
 
-  const userCanEdit = user ? canEdit(user.role) : false;
+  const userCanEdit = user ? canEdit(user.is_admin) : false;
 
   // Filter sessions: anonymous users can only see completed sessions
   const visibleSessions = useMemo(() => {
