@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 
 from backend.modules.schedule.models import NetSession, NetSeason, SessionType, SessionStatus
 from backend.config_mgmt.models import AppConfig
-from backend.integrations.scanner.service import run_scan, ScannerState
+from backend.integrations.scanner.service import run_scan, scan_all_enabled, ScannerState
 from backend.db.base import Base
 
 
@@ -94,3 +94,51 @@ def test_scanner_state():
     assert state.running is False
     assert state.last_scan_time is None
     assert state.last_scan_count is None
+
+
+# ---------------------------------------------------------------------------
+# scan_all_enabled return-value semantics
+# ---------------------------------------------------------------------------
+
+
+def test_scan_all_enabled_returns_none_when_no_nets_configured(db_session):
+    """When no nets have scanner.enabled=true, scan_all_enabled returns None
+    (sentinel meaning "nothing configured") so the caller knows to run the
+    legacy global-config fallback."""
+    # Ensure there are nets in the DB, but none with scanner.enabled=true
+    net = _ensure_net(db_session)
+    db_session.commit()
+
+    now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+    result = scan_all_enabled(db_session, now)
+    assert result is None, (
+        "scan_all_enabled should return None when no nets have scanner.enabled=true"
+    )
+
+
+def test_scan_all_enabled_returns_zero_not_none_when_net_configured_but_no_messages(db_session):
+    """When at least one net has scanner.enabled=true but imports zero messages,
+    scan_all_enabled returns 0 (int), NOT None. The scanner_loop must not fire
+    the legacy global-config fallback in this case."""
+    from backend.modules.nets.config_service import set_net_config
+
+    net = _ensure_net(db_session)
+    db_session.commit()
+
+    # Enable per-net scanner and provide a mailbox path
+    set_net_config(db_session, net.id, "scanner.enabled", "true")
+    set_net_config(db_session, net.id, "pat_mailbox_path", "/tmp/fake-mailbox")
+
+    now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+
+    # scan_one will be called; it returns 0 (no active session / no new messages)
+    with patch("backend.integrations.scanner.service.scan_one", return_value=0) as mock_scan_one:
+        result = scan_all_enabled(db_session, now)
+
+    mock_scan_one.assert_called_once_with(db_session, net.id, "/tmp/fake-mailbox", now)
+    assert result == 0, (
+        "scan_all_enabled should return 0 (int) when nets are configured but return no messages"
+    )
+    assert result is not None, (
+        "scan_all_enabled must NOT return None when a net with scanner.enabled=true exists"
+    )

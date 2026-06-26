@@ -122,22 +122,26 @@ def scan_one(db: Session, net_id: int, mailbox: str, now: datetime) -> int:
     return count
 
 
-def scan_all_enabled(db: Session, now: datetime) -> int:
+def scan_all_enabled(db: Session, now: datetime) -> int | None:
     """Scan all nets that have scanner.enabled=true in their net_config.
 
-    Returns total count of imported check-ins across all nets.
+    Returns total count of imported check-ins across all enabled nets, or
+    ``None`` when no nets have ``scanner.enabled=true`` (so the caller can
+    distinguish "nothing configured" from "configured, zero new messages").
     """
     from backend.modules.nets.models import Net
     from backend.modules.nets.config_service import get_net_config
 
     nets = db.query(Net).all()
-    total = 0
+    total: int | None = None
     for net in nets:
         if get_net_config(db, net.id, "scanner.enabled", "false") != "true":
             continue
         mailbox = get_net_config(db, net.id, "pat_mailbox_path")
         if not mailbox:
             continue
+        if total is None:
+            total = 0
         total += scan_one(db, net.id, mailbox, now)
     return total
 
@@ -160,8 +164,8 @@ async def scanner_loop(session_factory, get_interval_minutes):
                     # for installations that haven't migrated to net_config yet.
                     # TODO(Task 14/15): remove the global fallback once all
                     # installations have per-net scanner config.
-                    total = scan_all_enabled(db, now)
-                    if total == 0:
+                    result = scan_all_enabled(db, now)
+                    if result is None:
                         # No nets have per-net scanner.enabled; try global config
                         run_scan(db, now)
             except Exception:

@@ -608,6 +608,160 @@ async def test_winlink_form_checkin_response_includes_form_view_html(
     assert "KU0HN" in row["form_view_html"]
 
 
+# ---------------------------------------------------------------------------
+# Cross-net isolation tests
+# ---------------------------------------------------------------------------
+
+
+def _seed_other_net_session_and_checkin(db_setup):
+    """Create a second net 'other-net' with its own season, session, and checkin.
+
+    Returns ``(session_id, checkin_id)`` for cross-net access attempts.
+    """
+    from backend.modules.nets.models import Net
+
+    with db_setup() as session:
+        other_net = Net(slug="other-net", name="Other Net")
+        session.add(other_net)
+        session.flush()
+        season = NetSeason(
+            net_id=other_net.id,
+            name="Other Season",
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            day_of_week=2,
+        )
+        session.add(season)
+        session.flush()
+        net_session = NetSession(
+            season_id=season.id,
+            start_date=date(2026, 1, 7),
+            end_date=date(2026, 1, 7),
+            grace_period_hours=24.0,
+            session_type=SessionType.REGULAR_CHECKIN,
+        )
+        session.add(net_session)
+        session.flush()
+        checkin = CheckIn(
+            session_id=net_session.id,
+            callsign="W0OTHER",
+            name="Other Net Member",
+            mode="Winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        )
+        session.add(checkin)
+        session.commit()
+        return net_session.id, checkin.id
+
+
+@pytest.mark.asyncio
+async def test_get_session_checkins_rejects_cross_net(test_client, test_settings, db_setup):
+    """GET /session/{id} on the 'default' net must return 404 for a session that
+    belongs to a different net, hiding its existence (no 403 leakage)."""
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    other_session_id, _ = _seed_other_net_session_and_checkin(db_setup)
+
+    resp = await test_client.get(
+        f"{BASE}/session/{other_session_id}",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404, (
+        f"Expected 404 for cross-net session checkins access, got {resp.status_code}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_checkin_rejects_cross_net(test_client, test_settings, db_setup):
+    """PATCH /{checkin_id} on the 'default' net must return 404 for a checkin that
+    belongs to a different net, hiding its existence and preventing cross-net mutation."""
+    token = make_test_token("W0NC", test_settings, token_version=0)
+    _, other_checkin_id = _seed_other_net_session_and_checkin(db_setup)
+
+    resp = await test_client.patch(
+        f"{BASE}/{other_checkin_id}",
+        json={"name": "Should Not Update"},
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404, (
+        f"Expected 404 for cross-net checkin mutation, got {resp.status_code}"
+    )
+
+    # Verify the checkin was NOT mutated
+    with db_setup() as session:
+        checkin = session.query(CheckIn).filter_by(id=other_checkin_id).one()
+        assert checkin.name == "Other Net Member"
+
+
+@pytest.mark.asyncio
+async def test_get_members_isolates_by_net(test_client, test_settings, db_setup):
+    """GET /members on the 'default' net must NOT return members from other nets."""
+    from backend.modules.checkins.models import Member
+    from backend.modules.nets.models import Net
+
+    with db_setup() as session:
+        # Seed a member in a separate net
+        other_net = Net(slug="members-other-net", name="Members Other Net")
+        session.add(other_net)
+        session.flush()
+        other_member = Member(
+            net_id=other_net.id,
+            callsign="W0OTHER",
+            name="Other Net Member",
+            first_check_in_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            last_check_in_date=datetime(2026, 1, 7, tzinfo=timezone.utc),
+            total_check_ins=1,
+        )
+        session.add(other_member)
+        session.commit()
+
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+    response = await test_client.get(
+        f"{BASE}/members",
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    callsigns = [m["callsign"] for m in response.json()]
+    assert "W0OTHER" not in callsigns, (
+        "Members from a different net must not appear in this net's member list"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pending-user access control
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pending_user_blocked_from_checkins(test_client, test_settings, db_setup):
+    """A user with is_pending=True has no NetMembership and must be blocked
+    by require_net_role from accessing session checkins (403 expected)."""
+    from backend.auth.models import User
+
+    with db_setup() as session:
+        pending = User(
+            callsign="W0PEND",
+            oidc_subject="auth0|pending",
+            name="Pending User",
+            is_pending=True,
+        )
+        session.add(pending)
+        session.commit()
+
+    # Mint a token for the pending user; get_current_user allows this through
+    # (is_pending check only blocks PAT/Bearer tokens, not cookie JWTs).
+    # require_net_role then finds no NetMembership and raises 403.
+    pending_token = make_test_token("W0PEND", test_settings, is_pending=True, token_version=0)
+
+    resp = await test_client.get(
+        f"{BASE}/session/1",
+        cookies={"access_token": pending_token},
+    )
+    assert resp.status_code in (401, 403), (
+        f"Expected 401 or 403 for pending user, got {resp.status_code}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_non_winlink_checkin_response_has_null_form_view_html(
     test_client, test_settings, db_setup

@@ -229,10 +229,12 @@ def _compute_checkin_fields(db: Session, raw: RawMessage, net_session: NetSessio
     }
 
 
-def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession, net_id: int) -> CheckIn:
+def process_raw_message(db: Session, raw: RawMessage, net_session: NetSession, net_id: int | None) -> CheckIn:
     """Parse a RawMessage and create a CheckIn record."""
     f = _compute_checkin_fields(db, raw, net_session)
-    new_member = is_new_member(db, net_id, f["callsign"]) if f["callsign"] else False
+    new_member = (
+        is_new_member(db, net_id, f["callsign"]) if (f["callsign"] and net_id is not None) else False
+    )
     checkin = CheckIn(
         session_id=net_session.id,
         raw_message_id=raw.id,
@@ -314,7 +316,7 @@ def reparse_session(db: Session, net_session: NetSession) -> dict:
         .filter(~RawMessage.id.in_(referenced_ids))
         .all()
     )
-    net_id = get_net_id_for_session(db, net_session) or 0
+    net_id = get_net_id_for_session(db, net_session)
     imported = 0
     for raw in orphans:
         process_raw_message(db, raw, net_session, net_id=net_id)
@@ -352,6 +354,15 @@ def scan_and_import_messages(
 
     new_messages.sort(key=lambda m: m["received_at"])
 
+    if net_id is None:
+        # REAL_EVENT session with no season — net_id unresolvable.
+        # Checkins are still imported; is_new_member detection is skipped.
+        logger.warning(
+            "scan_and_import_messages: net_id unknown for session %d "
+            "(REAL_EVENT without season); new-member detection skipped",
+            net_session.id,
+        )
+
     parsed_checkins: dict[str, CheckIn] = {}
     for msg_dict in new_messages:
         raw = RawMessage(
@@ -367,7 +378,7 @@ def scan_and_import_messages(
         db.add(raw)
         db.flush()
 
-        checkin = process_raw_message(db, raw, net_session, net_id=net_id or 0)
+        checkin = process_raw_message(db, raw, net_session, net_id=net_id)
         if checkin.callsign:
             if checkin.callsign in parsed_checkins:
                 old = parsed_checkins[checkin.callsign]
@@ -424,7 +435,7 @@ def create_manual_checkin(
     state: str | None = None,
     comments: str | None = None,
 ) -> CheckIn:
-    new_member = is_new_member(db, net_id or 0, callsign.upper())
+    new_member = is_new_member(db, net_id, callsign.upper()) if net_id is not None else False
     checkin = CheckIn(
         session_id=session_id,
         callsign=callsign.upper(),
