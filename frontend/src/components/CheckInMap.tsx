@@ -2,8 +2,10 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { CheckIn } from "../types";
+import { useTheme } from "../hooks/useTheme";
 
-const TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+const TILE_URL_DARK = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+const TILE_URL_LIGHT = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>';
 
 const DEFAULT_CENTER: L.LatLngExpression = [39.8283, -98.5795]; // US center
@@ -19,8 +21,10 @@ interface Props {
 }
 
 export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Props) {
+  const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
   const markersRef = useRef<Map<number, L.CircleMarker>>(new Map());
 
   // Initialize map once
@@ -35,7 +39,8 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
       attributionControl: true,
     });
 
-    L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 18 }).addTo(map);
+    const initialUrl = theme === "light" ? TILE_URL_LIGHT : TILE_URL_DARK;
+    tileLayerRef.current = L.tileLayer(initialUrl, { attribution: TILE_ATTR, maxZoom: 18 }).addTo(map);
     mapRef.current = map;
 
     // If the container's parent settles to its real size *after* mount
@@ -52,8 +57,19 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
       ro.disconnect();
       map.remove();
       mapRef.current = null;
+      tileLayerRef.current = null;
     };
+    // Map init runs once; the theme effect below handles light/dark swaps
+    // via setUrl so we don't tear down and re-create the map on toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Swap the basemap tile URL whenever the UI theme flips.
+  useEffect(() => {
+    const layer = tileLayerRef.current;
+    if (!layer) return;
+    layer.setUrl(theme === "light" ? TILE_URL_LIGHT : TILE_URL_DARK);
+  }, [theme]);
 
   // Render markers when checkins change
   useEffect(() => {
