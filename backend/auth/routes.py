@@ -284,7 +284,24 @@ async def callback(
 
 
 @auth_router.get("/me")
-async def me(user: User = Depends(get_current_user)):
+async def me(user: User = Depends(get_current_user), db: Session = Depends(get_db_session)):
+    from backend.modules.nets.models import Net, NetMembership
+
+    memberships = (
+        db.query(NetMembership, Net)
+        .join(Net, Net.id == NetMembership.net_id)
+        .filter(NetMembership.user_callsign == user.callsign)
+        .all()
+    )
+    nets = [
+        {
+            "slug": net.slug,
+            "name": net.name,
+            "is_public": net.is_public,
+            "role": membership.role.value,
+        }
+        for membership, net in memberships
+    ]
     return {
         "callsign": user.callsign,
         "name": user.name,
@@ -292,6 +309,7 @@ async def me(user: User = Depends(get_current_user)):
         "is_pending": user.is_pending,
         "email": user.email,
         "pending_callsign": user.pending_callsign,
+        "nets": nets,
     }
 
 

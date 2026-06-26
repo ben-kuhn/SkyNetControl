@@ -12,6 +12,8 @@ from backend.auth.routes import auth_router
 from backend.auth.service import create_access_token
 from backend.config import Settings
 from backend.config_mgmt.oauth import OAuthProviderConfig, upsert_oauth_provider
+from backend.modules.nets.models import Net, NetMembership, NetRole  # noqa: F401 — ensures tables in Base.metadata
+from backend.modules.nets.service import add_member, create_net
 from tests.conftest import make_test_token
 
 
@@ -349,6 +351,49 @@ async def test_me_returns_user(test_client, test_settings, db_setup):
     assert data["name"] == "Admin"
     assert data["is_admin"] is True
     assert data["email"] == "admin@example.com"
+
+
+@pytest.mark.asyncio
+async def test_me_returns_nets(test_client, test_settings, db_setup):
+    """GET /auth/me includes the user's net memberships."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0NE", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        member = User(callsign="KD0TST", oidc_subject="auth0|member", name="Member")
+        session.add(member)
+        session.commit()
+        net = create_net(session, slug="test-net", name="Test Net", creator_callsign="W0NE")
+        add_member(session, net=net, callsign="KD0TST", role=NetRole.VIEWER)
+
+    # add_member bumps token_version to 1
+    token = make_test_token("KD0TST", test_settings, token_version=1)
+    response = await test_client.get("/api/auth/me", cookies={"access_token": token})
+    assert response.status_code == 200
+    data = response.json()
+    assert "nets" in data
+    assert len(data["nets"]) == 1
+    net_entry = data["nets"][0]
+    assert net_entry["slug"] == "test-net"
+    assert net_entry["name"] == "Test Net"
+    assert net_entry["role"] == "viewer"
+    assert "is_public" in net_entry
+
+
+@pytest.mark.asyncio
+async def test_me_admin_nets_only_explicit_memberships(test_client, test_settings, db_setup):
+    """Admin user's nets array only includes their explicit memberships (not all nets)."""
+    _, factory = db_setup
+    with factory() as session:
+        session.add(User(callsign="W0ADM", oidc_subject="auth0|admin", name="Admin", is_admin=True))
+        session.commit()
+        create_net(session, slug="admin-net", name="Admin Net", creator_callsign="W0ADM")
+        # admin is not an explicit member of this net
+
+    token = make_test_token("W0ADM", test_settings, is_admin=True, token_version=0)
+    response = await test_client.get("/api/auth/me", cookies={"access_token": token})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["nets"] == []  # admin sees all nets via /api/nets, but /me only lists explicit memberships
 
 
 @pytest.mark.asyncio

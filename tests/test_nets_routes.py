@@ -170,6 +170,33 @@ async def test_list_nets_outsider_sees_empty(client, test_settings):
     assert resp.json() == []
 
 
+@pytest.mark.asyncio
+async def test_list_nets_includes_role_for_member(client, test_settings, db_setup):
+    """GET /api/nets includes the user's role per net."""
+    with db_setup() as db:
+        net_a = create_net(db, slug="role-test", name="Role Test", creator_callsign="W0ADM")
+        add_member(db, net=net_a, callsign="KD0TST", role=NetRole.NET_CONTROL)
+    token = make_test_token("KD0TST", test_settings, token_version=1)
+    resp = await client.get("/api/nets", cookies={"access_token": token})
+    assert resp.status_code == 200
+    nets = resp.json()
+    assert len(nets) == 1
+    assert nets[0]["role"] == "net_control"
+
+
+@pytest.mark.asyncio
+async def test_list_nets_role_is_none_for_admin_without_membership(client, test_settings, db_setup):
+    """Admin with no explicit membership sees role=null for nets they own implicitly."""
+    with db_setup() as db:
+        create_net(db, slug="admin-only", name="Admin Only", creator_callsign="W0ADM")
+    token = _admin_token(test_settings)
+    resp = await client.get("/api/nets", cookies={"access_token": token})
+    assert resp.status_code == 200
+    nets = resp.json()
+    assert len(nets) == 1
+    assert nets[0]["role"] is None
+
+
 # ---------------------------------------------------------------------------
 # GET /api/nets/{net_slug}
 # ---------------------------------------------------------------------------

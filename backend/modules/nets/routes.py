@@ -32,6 +32,7 @@ class NetOut(BaseModel):
     slug: str
     name: str
     is_public: bool
+    role: NetRole | None = None
 
     model_config = {"from_attributes": True}
 
@@ -64,7 +65,24 @@ class MemberIn(BaseModel):
 
 @router.get("", response_model=list[NetOut])
 def list_nets(user: User = Depends(get_current_user), db: Session = Depends(get_db_session)):
-    return [NetOut.model_validate(n, from_attributes=True) for n in service.list_nets(db, user=user)]
+    from backend.modules.nets.models import NetMembership
+
+    nets = service.list_nets(db, user=user)
+    # Build a lookup of net_id → role for this user's memberships
+    net_ids = [n.id for n in nets]
+    memberships = (
+        db.query(NetMembership)
+        .filter(NetMembership.user_callsign == user.callsign, NetMembership.net_id.in_(net_ids))
+        .all()
+    )
+    role_by_net_id = {m.net_id: m.role for m in memberships}
+
+    result = []
+    for n in nets:
+        out = NetOut.model_validate(n, from_attributes=True)
+        out.role = role_by_net_id.get(n.id)  # None for admins with no explicit membership
+        result.append(out)
+    return result
 
 
 @router.post("", response_model=NetOut, status_code=201)
@@ -77,8 +95,13 @@ def create_net(body: NetIn, admin: User = Depends(require_admin), db: Session = 
 
 
 @router.get("/{net_slug}", response_model=NetOut)
-def get_net(ctx: NetContext = Depends(require_net_role(NetRole.VIEWER))):
-    return NetOut.model_validate(ctx.net, from_attributes=True)
+def get_net(ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)), db: Session = Depends(get_db_session)):
+    from backend.modules.nets.models import NetMembership
+
+    out = NetOut.model_validate(ctx.net, from_attributes=True)
+    membership = db.get(NetMembership, (ctx.user.callsign, ctx.net.id))
+    out.role = membership.role if membership else None
+    return out
 
 
 @router.patch("/{net_slug}", response_model=NetOut)
