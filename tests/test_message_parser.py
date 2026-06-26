@@ -410,3 +410,29 @@ def test_parse_winlink_form_pat_b2f_body_uses_xml_not_prose():
     # Without the fix this returns 'W0NE' from the Organization line.
     assert result["callsign"] == "W9GM"
     assert result["name"] == "Ken Weigel"
+
+
+def test_parse_winlink_form_ignores_location_source_variable():
+    """`location_source` / `locationsource` describe HOW the location was
+    determined (GPS, Form entry, ...), not the location itself. They contain
+    "location" as a substring so the combined-location fallback used to
+    swallow them as a city — e.g. an ICS-213 form ended up with city='FORM ENTRY'.
+    Comments re-parse should fill city from the comma-delimited comments instead.
+    """
+    from backend.modules.checkins.message_parser import parse_winlink_form_message
+    body = """<?xml version="1.0"?>
+<RMS_Express_Form>
+  <form_parameters><display_form>ICS213_Initial_Viewer.html</display_form></form_parameters>
+  <variables>
+    <msgsender>KU0HN</msgsender>
+    <fm_name>Ben Kuhn</fm_name>
+    <location_source>FORM ENTRY</location_source>
+    <locationsource>Form entry</locationsource>
+    <message>Ben, KU0HN, Lewiston, Winona, MN, VHF Packet via W0NE-7</message>
+  </variables>
+</RMS_Express_Form>
+"""
+    result = parse_winlink_form_message(body, known_modes={"VHF Packet"})
+    assert result["city"] == "Lewiston"
+    assert result["county"] == "Winona"
+    assert result["state"] == "MN"

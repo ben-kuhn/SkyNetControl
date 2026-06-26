@@ -184,6 +184,11 @@ _HEURISTIC_PATTERNS: dict[str, list[str]] = {
 }
 
 _LOCATION_VARIABLE_HINTS = ["location", "qth"]
+# Variable names that contain a location-hint substring but describe how the
+# location was determined rather than a place. PAT/Winlink Express emits
+# `<location_source>FORM ENTRY</location_source>`, which used to get swallowed
+# as a city by the combined-location fallback.
+_LOCATION_VARIABLE_EXCLUDES = ["source", "type"]
 
 
 def _parse_float_or_none(value: str) -> float | None:
@@ -318,6 +323,8 @@ def parse_winlink_form_message(body: str, known_modes: set[str] | None = None) -
     if fields["city"] is None and fields["county"] is None and fields["state"] is None:
         for var_name, var_value in variables.items():
             if not var_value:
+                continue
+            if any(skip in var_name for skip in _LOCATION_VARIABLE_EXCLUDES):
                 continue
             if any(hint in var_name for hint in _LOCATION_VARIABLE_HINTS):
                 parts = [p.strip() for p in var_value.split(",") if p.strip()]
