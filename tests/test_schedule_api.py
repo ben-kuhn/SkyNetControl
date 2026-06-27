@@ -40,7 +40,7 @@ def db_setup():
             oidc_subject="auth0|viewer",
             name="Viewer",
         )
-        net = Net(slug="t", name="Test Net")
+        net = Net(slug="t", name="Test Net", is_public=False)
         session.add_all([admin, viewer, net])
         session.flush()
         # Give admin NET_CONTROL membership (is_admin bypasses role checks,

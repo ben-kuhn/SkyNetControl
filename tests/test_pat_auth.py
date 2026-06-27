@@ -250,9 +250,10 @@ async def test_schedule_endpoint_requires_scope():
             is_admin=True,
         )
         session.add(admin)
-        # Create the default net so the slug resolves
+        # Create the default net so the slug resolves. Private so the
+        # unauthenticated assertion below exercises auth enforcement.
         from backend.modules.nets.models import Net as _Net
-        net = _Net(slug="default-net", name="Default Net")
+        net = _Net(slug="default-net", name="Default Net", is_public=False)
         session.add(net)
         session.commit()
         # Schedule is now under /api/nets/{slug}/schedule/ — access is controlled

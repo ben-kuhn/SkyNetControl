@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import (
     NetContext,
     get_db_session,
+    require_net_read,
     require_net_role,
 )
 from backend.config_mgmt.service import get_config_value, get_checkin_modes
@@ -144,7 +145,7 @@ def _get_net_config_value(db: Session, net_id: int, key: str, default: str = "")
 
 @checkins_router.get("/modes")
 async def get_modes_route(
-    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    ctx: NetContext = Depends(require_net_read()),
     db: Session = Depends(get_db_session),
 ):
     return get_checkin_modes(db)
@@ -188,7 +189,7 @@ async def scan_mailbox_route(
 @checkins_router.get("/session/{session_id}")
 async def get_session_checkins_route(
     session_id: int,
-    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    ctx: NetContext = Depends(require_net_read()),
     db: Session = Depends(get_db_session),
 ):
     net_session = db.get(NetSession, session_id)

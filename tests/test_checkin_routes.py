@@ -65,7 +65,9 @@ def db_setup():
         session.add_all([admin, nc, viewer, nomember])
 
         from backend.modules.nets.models import Net, NetMembership, NetRole
-        net = Net(slug=NET_SLUG, name="Default Net")
+        # Private — tests below exercise auth enforcement on read paths.
+        # Public-net read access is covered separately in test_multi_net_isolation.
+        net = Net(slug=NET_SLUG, name="Default Net", is_public=False)
         session.add(net)
         session.flush()
         session.add(NetMembership(user_callsign="W0NC", net_id=net.id, role=NetRole.NET_CONTROL))

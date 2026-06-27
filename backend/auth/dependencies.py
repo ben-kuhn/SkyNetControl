@@ -243,9 +243,11 @@ _NET_ROLE_RANK = {NetRole.VIEWER: 1, NetRole.NET_CONTROL: 2}
 
 @dataclass
 class NetContext:
-    user: User
+    # user may be None only when populated by ``require_net_read`` against a
+    # public net via an anonymous caller. ``require_net_role`` always sets a user.
+    user: User | None
     net: Net
-    role: NetRole | None  # None if access is via is_admin
+    role: NetRole | None  # None if access is via is_admin or anonymous public
 
 
 def require_net_role(min_role: NetRole) -> Callable:
@@ -274,6 +276,55 @@ def require_net_role(min_role: NetRole) -> Callable:
             return NetContext(user=user, net=net, role=None)
         m = db.get(NetMembership, (user.callsign, net.id))
         if m is None or _NET_ROLE_RANK[m.role] < min_rank:
+            raise HTTPException(status_code=403, detail="Insufficient permissions for net")
+        return NetContext(user=user, net=net, role=m.role)
+
+    return dep
+
+
+def require_net_read(min_role: NetRole = NetRole.VIEWER) -> Callable:
+    """Dependency for net-scoped GET endpoints that may also serve anonymous
+    callers when ``net.is_public`` is true.
+
+    Resolution order:
+      * Net resolved by slug; 404 if missing.
+      * If the caller presents a token, all the normal checks from
+        ``require_net_role`` apply (PAT scoping, admin bypass, role rank).
+      * If the caller is anonymous **and** the net is public, return a
+        ``NetContext`` with ``user=None``.
+      * Otherwise 401.
+
+    Use only on idempotent reads. Routes must not access ``ctx.user`` without
+    a None-check.
+    """
+    min_rank = _NET_ROLE_RANK[min_role]
+
+    def dep(
+        request: Request,
+        net_slug: str = Path(..., alias="net_slug"),
+        user: User | None = Depends(get_optional_user),
+        db: Session = Depends(get_db_session),
+    ) -> NetContext:
+        net = db.query(Net).filter(Net.slug == net_slug).one_or_none()
+        if net is None:
+            raise HTTPException(status_code=404, detail="Net not found")
+
+        if user is None:
+            if not net.is_public:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return NetContext(user=None, net=net, role=None)
+
+        token_net_id = getattr(request.state, "token_net_id", None)
+        if token_net_id is not None and token_net_id != net.id:
+            raise HTTPException(status_code=403, detail="Token scoped to a different net")
+        if user.is_admin:
+            return NetContext(user=user, net=net, role=None)
+        m = db.get(NetMembership, (user.callsign, net.id))
+        if m is None or _NET_ROLE_RANK[m.role] < min_rank:
+            # Authenticated-but-no-access on a public net still passes through
+            # so the same UI can be used by members and guests alike.
+            if net.is_public:
+                return NetContext(user=user, net=net, role=None)
             raise HTTPException(status_code=403, detail="Insufficient permissions for net")
         return NetContext(user=user, net=net, role=m.role)
 

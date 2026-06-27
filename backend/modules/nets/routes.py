@@ -12,6 +12,7 @@ from backend.auth.dependencies import (
     get_current_user,
     get_db_session,
     require_admin,
+    require_net_read,
     require_net_role,
 )
 from backend.auth.models import User
@@ -95,12 +96,13 @@ def create_net(body: NetIn, admin: User = Depends(require_admin), db: Session = 
 
 
 @router.get("/{net_slug}", response_model=NetOut)
-def get_net(ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)), db: Session = Depends(get_db_session)):
+def get_net(ctx: NetContext = Depends(require_net_read()), db: Session = Depends(get_db_session)):
     from backend.modules.nets.models import NetMembership
 
     out = NetOut.model_validate(ctx.net, from_attributes=True)
-    membership = db.get(NetMembership, (ctx.user.callsign, ctx.net.id))
-    out.role = membership.role if membership else None
+    if ctx.user is not None:
+        membership = db.get(NetMembership, (ctx.user.callsign, ctx.net.id))
+        out.role = membership.role if membership else None
     return out
 
 

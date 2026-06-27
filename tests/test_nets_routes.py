@@ -223,7 +223,10 @@ async def test_get_net_nonexistent_returns_404(client, test_settings):
 @pytest.mark.asyncio
 async def test_get_net_as_outsider_returns_403(client, test_settings, db_setup):
     with db_setup() as db:
-        create_net(db, slug="secret-net", name="Secret", creator_callsign="W0ADM")
+        net = create_net(db, slug="secret-net", name="Secret", creator_callsign="W0ADM")
+        # Private net — public nets allow read access to outsiders.
+        net.is_public = False
+        db.commit()
     token = _outsider_token(test_settings)
     resp = await client.get("/api/nets/secret-net", cookies={"access_token": token})
     assert resp.status_code == 403

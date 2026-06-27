@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import (
     NetContext,
     get_db_session,
+    require_net_read,
     require_net_role,
 )
 from backend.modules.nets.models import NetRole
@@ -255,7 +256,7 @@ async def create_session_route(
 async def list_sessions_route(
     season_id: int | None = Query(default=None),
     status: str | None = Query(default=None),
-    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    ctx: NetContext = Depends(require_net_read()),
     db: Session = Depends(get_db_session),
 ):
     status_enum = None
