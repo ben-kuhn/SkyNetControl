@@ -125,7 +125,7 @@ export function Sidebar() {
           <div className="flex items-center justify-between">
             <ThemeToggle />
             <div className="flex items-center gap-1">
-              <NotificationBell />
+              <NotificationBell slug={slug} />
               <NavLink
                 to="/profile"
                 className="font-mono text-sm text-text-secondary hover:text-accent transition-colors"

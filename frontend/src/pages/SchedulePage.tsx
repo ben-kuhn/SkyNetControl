@@ -13,7 +13,7 @@ import { Input } from "../components/Input";
 import { Modal } from "../components/Modal";
 import { Spinner } from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
-import { useAuth } from "../hooks/useAuth";
+import { useCurrentNet } from "../hooks/useCurrentNet";
 import type {
   NetRole,
   Season,
@@ -60,10 +60,12 @@ function SessionCard({
   session,
   canEdit,
   onEdit,
+  checkinsPath,
 }: {
   session: Session;
   canEdit: boolean;
   onEdit: () => void;
+  checkinsPath: string;
 }) {
   return (
     <div className="bg-bg-surface border border-border rounded-lg p-4">
@@ -102,7 +104,7 @@ function SessionCard({
         )}
         <span>Grace: {session.grace_period_hours}h</span>
         <Link
-          to={`/checkins?session=${session.id}`}
+          to={`${checkinsPath}?session=${session.id}`}
           className="text-accent hover:text-accent-hover transition-colors"
         >
           View check-ins
@@ -120,18 +122,32 @@ function SessionCard({
   );
 }
 
-export function ScheduleList() {
+/** ScheduleList is also used by PendingPage (outside CurrentNetProvider).
+ *  When slug is absent the fetch is skipped and a placeholder is shown. */
+export function ScheduleList({ slug }: { slug?: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // ScheduleList is used by PendingPage (no net context) — use default slug with scheduled filter
-    fetchSessions(undefined, { status: "scheduled" })
+    if (!slug) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchSessions(slug, { status: "scheduled" })
       .then(setSessions)
       .catch(() => setError("Failed to load sessions"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
+
+  if (!slug) {
+    return (
+      <p className="text-text-muted text-sm py-4">
+        No net selected.
+      </p>
+    );
+  }
 
   if (loading) {
     return (
@@ -156,7 +172,13 @@ export function ScheduleList() {
   return (
     <div className="flex flex-col gap-3">
       {sessions.map((session) => (
-        <SessionCard key={session.id} session={session} canEdit={false} onEdit={() => {}} />
+        <SessionCard
+          key={session.id}
+          session={session}
+          canEdit={false}
+          onEdit={() => {}}
+          checkinsPath={`/nets/${slug}/checkins`}
+        />
       ))}
     </div>
   );
@@ -166,10 +188,12 @@ function CreateSeasonModal({
   open,
   onClose,
   onCreated,
+  slug,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  slug: string;
 }) {
   const { addToast } = useToast();
   const emptyForm = {
@@ -207,7 +231,7 @@ function CreateSeasonModal({
         activity_cadence: Number(form.activity_cadence),
         default_net_control_callsign:
           form.default_net_control_callsign.trim() || null,
-      });
+      }, slug);
       addToast("Season created", "success");
       setForm(emptyForm);
       onCreated();
@@ -331,11 +355,13 @@ function CreateSessionModal({
   onClose,
   onCreated,
   seasons,
+  slug,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
   seasons: Season[];
+  slug: string;
 }) {
   const { addToast } = useToast();
   const emptyForm = {
@@ -368,7 +394,7 @@ function CreateSessionModal({
         season_id: form.season_id ? Number(form.season_id) : null,
         grace_period_hours: Number(form.grace_period_hours) || 24,
         net_control_callsign: form.net_control_callsign.trim() || null,
-      });
+      }, slug);
       addToast("Session created", "success");
       setForm(emptyForm);
       onCreated();
@@ -484,11 +510,13 @@ function EditSessionModal({
   onClose,
   session,
   onSaved,
+  slug,
 }: {
   open: boolean;
   onClose: () => void;
   session: Session | null;
   onSaved: () => void;
+  slug: string;
 }) {
   const { addToast } = useToast();
   const [form, setForm] = useState({
@@ -522,7 +550,7 @@ function EditSessionModal({
         net_control_callsign: form.net_control_callsign.trim() || null,
         grace_period_hours: Number(form.grace_period_hours) || 24,
         end_date: form.end_date || null,
-      });
+      }, slug);
       addToast("Session updated", "success");
       onSaved();
       onClose();
@@ -662,7 +690,7 @@ function SeasonRow({
 }
 
 export function SchedulePage() {
-  const { user } = useAuth();
+  const { slug, role } = useCurrentNet();
   const { addToast } = useToast();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -672,26 +700,23 @@ export function SchedulePage() {
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
 
-  // Task 13: role-based gating now comes from CurrentNetContext (Task 14 wires slug).
-  // For now derive edit capability from is_admin flag (net_control wired in Task 14).
-  const effectiveRole: "admin" | null = user?.is_admin ? "admin" : null;
-  const editSessions = canEditSessions(effectiveRole);
-  const manageSeasons = canManageSeasons(effectiveRole);
+  const editSessions = canEditSessions(role);
+  const manageSeasons = canManageSeasons(role);
 
   const loadData = useCallback(() => {
     setLoading(true);
     setError(null);
     const seasonsCall: Promise<Season[]> = editSessions
-      ? fetchSeasons()
+      ? fetchSeasons(slug)
       : Promise.resolve([]);
-    Promise.all([fetchSessions(), seasonsCall])
+    Promise.all([fetchSessions(slug), seasonsCall])
       .then(([s, seas]) => {
         setSessions(s);
         setSeasons(seas);
       })
       .catch(() => setError("Failed to load schedule"))
       .finally(() => setLoading(false));
-  }, [editSessions]);
+  }, [slug, editSessions]);
 
   useEffect(() => {
     loadData();
@@ -737,7 +762,7 @@ export function SchedulePage() {
       return;
     }
     try {
-      await deleteSeason(season.id);
+      await deleteSeason(season.id, slug);
       addToast("Season deleted", "success");
       loadData();
     } catch (err) {
@@ -795,6 +820,7 @@ export function SchedulePage() {
                     session={session}
                     canEdit={editSessions}
                     onEdit={() => setEditingSession(session)}
+                    checkinsPath={`/nets/${slug}/checkins`}
                   />
                 ))}
               </div>
@@ -813,6 +839,7 @@ export function SchedulePage() {
                     session={session}
                     canEdit={editSessions}
                     onEdit={() => setEditingSession(session)}
+                    checkinsPath={`/nets/${slug}/checkins`}
                   />
                 ))}
               </div>
@@ -849,18 +876,21 @@ export function SchedulePage() {
         open={showSeasonModal}
         onClose={() => setShowSeasonModal(false)}
         onCreated={loadData}
+        slug={slug}
       />
       <CreateSessionModal
         open={showSessionModal}
         onClose={() => setShowSessionModal(false)}
         onCreated={loadData}
         seasons={seasons}
+        slug={slug}
       />
       <EditSessionModal
         open={editingSession !== null}
         onClose={() => setEditingSession(null)}
         session={editingSession}
         onSaved={loadData}
+        slug={slug}
       />
     </div>
   );

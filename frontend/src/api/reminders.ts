@@ -1,20 +1,16 @@
-// TODO(Task 13): replace DEFAULT_NET_SLUG with useCurrentNet() hook once
-// the CurrentNetContext is available. Task 14 will wire slug into the API calls.
-const DEFAULT_NET_SLUG = "default-net";
-
 import { apiFetch } from "./client";
 import type { Reminder, ReminderTemplate, ReminderTemplateType } from "../types";
 
 // --- Reminders ---
 
-export async function fetchReminders(netSlug: string = DEFAULT_NET_SLUG): Promise<Reminder[]> {
+export async function fetchReminders(netSlug: string): Promise<Reminder[]> {
   return apiFetch<Reminder[]>(`/nets/${netSlug}/reminders/`);
 }
 
 export async function updateReminderDraft(
   id: number,
   body: { content_subject?: string; content_body?: string },
-  netSlug: string = DEFAULT_NET_SLUG,
+  netSlug: string,
 ): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}`, {
     method: "PATCH",
@@ -22,29 +18,29 @@ export async function updateReminderDraft(
   });
 }
 
-export async function approveReminder(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Reminder> {
+export async function approveReminder(id: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/approve`, { method: "POST" });
 }
 
-export async function sendReminder(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Reminder> {
+export async function sendReminder(id: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/send`, { method: "POST" });
 }
 
-export async function skipReminder(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Reminder> {
+export async function skipReminder(id: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/skip`, { method: "POST" });
 }
 
-export async function regenerateReminderDraft(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Reminder> {
+export async function regenerateReminderDraft(id: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/regenerate`, { method: "POST" });
 }
 
-export async function generateReminderDraft(sessionId: number, netSlug: string = DEFAULT_NET_SLUG): Promise<Reminder> {
+export async function generateReminderDraft(sessionId: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/generate/${sessionId}`, { method: "POST" });
 }
 
 // --- Templates ---
 
-export async function fetchReminderTemplates(netSlug: string = DEFAULT_NET_SLUG): Promise<ReminderTemplate[]> {
+export async function fetchReminderTemplates(netSlug: string): Promise<ReminderTemplate[]> {
   return apiFetch<ReminderTemplate[]>(`/nets/${netSlug}/reminders/templates`);
 }
 
@@ -59,7 +55,7 @@ export interface TemplateInput {
 
 export async function createReminderTemplate(
   input: TemplateInput,
-  netSlug: string = DEFAULT_NET_SLUG,
+  netSlug: string,
 ): Promise<ReminderTemplate> {
   return apiFetch<ReminderTemplate>(`/nets/${netSlug}/reminders/templates`, {
     method: "POST",
@@ -70,7 +66,7 @@ export async function createReminderTemplate(
 export async function updateReminderTemplate(
   id: number,
   input: Partial<TemplateInput>,
-  netSlug: string = DEFAULT_NET_SLUG,
+  netSlug: string,
 ): Promise<ReminderTemplate> {
   return apiFetch<ReminderTemplate>(`/nets/${netSlug}/reminders/templates/${id}`, {
     method: "PATCH",
@@ -78,7 +74,7 @@ export async function updateReminderTemplate(
   });
 }
 
-export async function deleteReminderTemplate(id: number, netSlug: string = DEFAULT_NET_SLUG): Promise<void> {
+export async function deleteReminderTemplate(id: number, netSlug: string): Promise<void> {
   await apiFetch<void>(`/nets/${netSlug}/reminders/templates/${id}`, { method: "DELETE" });
 }
 
@@ -91,7 +87,7 @@ export interface ReminderTemplateDefault {
 }
 
 export async function fetchReminderTemplateDefaults(
-  netSlug: string = DEFAULT_NET_SLUG,
+  netSlug: string,
 ): Promise<ReminderTemplateDefault[]> {
   return apiFetch<ReminderTemplateDefault[]>(`/nets/${netSlug}/reminders/template-defaults`);
 }

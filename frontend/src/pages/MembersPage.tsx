@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchMembers, fetchMemberHistory } from "../api/members";
+import { useCurrentNet } from "../hooks/useCurrentNet";
 import type { Member, MemberCheckin } from "../types";
 
 type SortKey = "callsign" | "name" | "first_check_in_date" | "last_check_in_date" | "total_check_ins";
@@ -11,6 +12,7 @@ function formatDate(iso: string): string {
 }
 
 export function MembersPage() {
+  const { slug } = useCurrentNet();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -20,14 +22,16 @@ export function MembersPage() {
   const [selectedCallsign, setSelectedCallsign] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchMembers()
+    setLoading(true);
+    setMembers([]);
+    fetchMembers(slug)
       .then((data) => {
         setMembers(data);
         setError(null);
       })
       .catch((e) => setError(e?.message ?? "Failed to load members"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   const filteredSorted = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -142,6 +146,7 @@ export function MembersPage() {
             <div className="flex-1 min-w-0">
               <MemberDetailPanel
                 member={selectedMember}
+                slug={slug}
                 onClose={() => setSelectedCallsign(null)}
               />
             </div>
@@ -152,7 +157,7 @@ export function MembersPage() {
   );
 }
 
-function MemberDetailPanel({ member, onClose }: { member: Member; onClose: () => void }) {
+function MemberDetailPanel({ member, slug, onClose }: { member: Member; slug: string; onClose: () => void }) {
   const navigate = useNavigate();
   const [history, setHistory] = useState<MemberCheckin[] | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -162,11 +167,11 @@ function MemberDetailPanel({ member, onClose }: { member: Member; onClose: () =>
     setHistoryLoading(true);
     setHistoryError(null);
     setHistory(null);
-    fetchMemberHistory(member.callsign)
+    fetchMemberHistory(member.callsign, slug)
       .then(setHistory)
       .catch((e) => setHistoryError(e?.message ?? "Failed to load history"))
       .finally(() => setHistoryLoading(false));
-  }, [member.callsign]);
+  }, [member.callsign, slug]);
 
   useEffect(() => {
     loadHistory();
@@ -227,7 +232,7 @@ function MemberDetailPanel({ member, onClose }: { member: Member; onClose: () =>
           {history.map((c) => (
             <li
               key={c.id}
-              onClick={() => navigate(`/checkins?session=${c.session_id}`)}
+              onClick={() => navigate(`/nets/${slug}/checkins?session=${c.session_id}`)}
               className="px-2.5 py-1.5 rounded cursor-pointer hover:bg-bg-elevated/50 text-sm flex items-baseline gap-3"
               title={c.comments ?? ""}
             >

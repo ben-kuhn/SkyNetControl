@@ -9,6 +9,7 @@ import {
   updateReminderDraft,
 } from "../../api/reminders";
 import { fetchSessions } from "../../api/schedule";
+import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { Reminder, ReminderStatus, Session } from "../../types";
 import { useToast } from "../../context/ToastContext";
 
@@ -39,6 +40,7 @@ function formatLongDate(iso: string): string {
 }
 
 export function DraftsTab() {
+  const { slug } = useCurrentNet();
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +54,7 @@ export function DraftsTab() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [rs, ss] = await Promise.all([fetchReminders(), fetchSessions()]);
+      const [rs, ss] = await Promise.all([fetchReminders(slug), fetchSessions(slug)]);
       setReminders(rs);
       setSessions(ss);
       setError(null);
@@ -61,7 +63,7 @@ export function DraftsTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
     loadAll();
@@ -181,6 +183,7 @@ export function DraftsTab() {
               <DetailPanel
                 reminder={selected}
                 session={sessionById.get(selected.session_id) ?? null}
+                slug={slug}
                 onClose={() => setSelectedId(null)}
                 onChanged={(updated) =>
                   setReminders((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
@@ -195,6 +198,7 @@ export function DraftsTab() {
       {showGenerateModal && (
         <GenerateModal
           sessions={sessions.filter((s) => s.status === "scheduled")}
+          slug={slug}
           onClose={() => setShowGenerateModal(false)}
           onGenerated={(generated) => {
             setReminders((prev) => {
@@ -215,6 +219,7 @@ export function DraftsTab() {
 function DetailPanel({
   reminder,
   session,
+  slug,
   onClose,
   onChanged,
   onError,
@@ -222,6 +227,7 @@ function DetailPanel({
 }: {
   reminder: Reminder;
   session: Session | null;
+  slug: string;
   onClose: () => void;
   onChanged: (r: Reminder) => void;
   onError: (msg: string) => void;
@@ -243,7 +249,7 @@ function DetailPanel({
       const updated = await updateReminderDraft(reminder.id, {
         content_subject: subject,
         content_body: body,
-      });
+      }, slug);
       onChanged(updated);
       onInfo("Draft saved.");
     } catch (e: any) {
@@ -253,7 +259,7 @@ function DetailPanel({
 
   const handleApprove = async () => {
     try {
-      const updated = await approveReminder(reminder.id);
+      const updated = await approveReminder(reminder.id, slug);
       onChanged(updated);
       onInfo("Reminder approved.");
     } catch (e: any) {
@@ -263,7 +269,7 @@ function DetailPanel({
 
   const handleSend = async () => {
     try {
-      const updated = await sendReminder(reminder.id);
+      const updated = await sendReminder(reminder.id, slug);
       onChanged(updated);
       onInfo("Reminder sent.");
     } catch (e: any) {
@@ -278,7 +284,7 @@ function DetailPanel({
   const handleSkip = async () => {
     if (!confirm("Skip this reminder?")) return;
     try {
-      const updated = await skipReminder(reminder.id);
+      const updated = await skipReminder(reminder.id, slug);
       onChanged(updated);
       onInfo("Reminder skipped.");
     } catch (e: any) {
@@ -291,7 +297,7 @@ function DetailPanel({
       return;
     }
     try {
-      const updated = await regenerateReminderDraft(reminder.id);
+      const updated = await regenerateReminderDraft(reminder.id, slug);
       onChanged(updated);
       onInfo("Reminder regenerated.");
     } catch (e: any) {
@@ -379,11 +385,13 @@ function DetailPanel({
 
 function GenerateModal({
   sessions,
+  slug,
   onClose,
   onGenerated,
   onError,
 }: {
   sessions: Session[];
+  slug: string;
   onClose: () => void;
   onGenerated: (r: Reminder) => void;
   onError: (msg: string) => void;
@@ -395,7 +403,7 @@ function GenerateModal({
     if (sessionId === "") return;
     setSubmitting(true);
     try {
-      const generated = await generateReminderDraft(Number(sessionId));
+      const generated = await generateReminderDraft(Number(sessionId), slug);
       onGenerated(generated);
     } catch (e: any) {
       onError(e?.detail ?? e?.message ?? "Generate failed");

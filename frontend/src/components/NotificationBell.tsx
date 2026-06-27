@@ -22,7 +22,12 @@ function relativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-export function NotificationBell() {
+interface NotificationBellProps {
+  /** Net slug — when absent the bell renders but does not fetch. */
+  slug?: string;
+}
+
+export function NotificationBell({ slug }: NotificationBellProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showRead, setShowRead] = useState(false);
   const [open, setOpen] = useState(false);
@@ -30,19 +35,21 @@ export function NotificationBell() {
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
+    if (!slug) return;
     try {
-      const data = await fetchNotifications(showRead);
+      const data = await fetchNotifications(showRead, slug);
       setNotifications(data);
     } catch {
       // swallow — bell is a background feature; toast would be noisy
     }
-  }, [showRead]);
+  }, [showRead, slug]);
 
   useEffect(() => {
+    if (!slug) return;
     load();
     const id = window.setInterval(load, POLL_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, slug]);
 
   // Close on outside click
   useEffect(() => {
@@ -69,10 +76,12 @@ export function NotificationBell() {
   );
 
   const handleClick = async (n: Notification) => {
-    try {
-      await markNotificationRead(n.id);
-    } catch {
-      // ignore
+    if (slug) {
+      try {
+        await markNotificationRead(n.id, slug);
+      } catch {
+        // ignore
+      }
     }
     setOpen(false);
     if (n.link_url) {
@@ -82,10 +91,12 @@ export function NotificationBell() {
   };
 
   const handleMarkAll = async () => {
-    try {
-      await markAllNotificationsRead();
-    } catch {
-      // ignore
+    if (slug) {
+      try {
+        await markAllNotificationsRead(slug);
+      } catch {
+        // ignore
+      }
     }
     load();
   };

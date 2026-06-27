@@ -10,6 +10,7 @@ import {
   updateRosterDraft,
 } from "../../api/roster";
 import { fetchSessions } from "../../api/schedule";
+import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { Roster, RosterStatus, Session } from "../../types";
 import { useToast } from "../../context/ToastContext";
 
@@ -40,6 +41,7 @@ function formatLongDate(iso: string): string {
 }
 
 export function DraftsTab() {
+  const { slug } = useCurrentNet();
   const [rosters, setRosters] = useState<Roster[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +56,7 @@ export function DraftsTab() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [rs, ss] = await Promise.all([fetchRosters(), fetchSessions()]);
+      const [rs, ss] = await Promise.all([fetchRosters(slug), fetchSessions(slug)]);
       setRosters(rs);
       setSessions(ss);
       setError(null);
@@ -63,7 +65,7 @@ export function DraftsTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
     loadAll();
@@ -90,7 +92,7 @@ export function DraftsTab() {
 
   const handlePreview = async (id: number) => {
     try {
-      const { text } = await previewRoster(id);
+      const { text } = await previewRoster(id, slug);
       setPreviewText(text);
     } catch (e: any) {
       addToast(e?.detail ?? e?.message ?? "Preview failed", "error");
@@ -193,6 +195,7 @@ export function DraftsTab() {
               <DetailPanel
                 roster={selected}
                 session={sessionById.get(selected.session_id) ?? null}
+                slug={slug}
                 onClose={() => setSelectedId(null)}
                 onChanged={(updated) =>
                   setRosters((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
@@ -213,6 +216,7 @@ export function DraftsTab() {
       {showGenerateModal && (
         <GenerateModal
           sessions={sessions.filter((s) => s.status === "completed")}
+          slug={slug}
           onClose={() => setShowGenerateModal(false)}
           onGenerated={(generated) => {
             setRosters((prev) => {
@@ -233,6 +237,7 @@ export function DraftsTab() {
 function DetailPanel({
   roster,
   session,
+  slug,
   onClose,
   onChanged,
   onPreview,
@@ -241,6 +246,7 @@ function DetailPanel({
 }: {
   roster: Roster;
   session: Session | null;
+  slug: string;
   onClose: () => void;
   onChanged: (r: Roster) => void;
   onPreview: () => void;
@@ -279,7 +285,7 @@ function DetailPanel({
         content_welcome: welcome,
         content_comments: comments,
         content_footer: footer,
-      });
+      }, slug);
       onChanged(updated);
       onInfo("Draft saved.");
     } catch (e: any) {
@@ -289,7 +295,7 @@ function DetailPanel({
 
   const handleApprove = async () => {
     try {
-      const updated = await approveRoster(roster.id);
+      const updated = await approveRoster(roster.id, slug);
       onChanged(updated);
       onInfo("Roster approved.");
     } catch (e: any) {
@@ -299,7 +305,7 @@ function DetailPanel({
 
   const handleSend = async () => {
     try {
-      const updated = await sendRoster(roster.id);
+      const updated = await sendRoster(roster.id, slug);
       onChanged(updated);
       onInfo("Roster sent.");
     } catch (e: any) {
@@ -314,7 +320,7 @@ function DetailPanel({
   const handleSkip = async () => {
     if (!confirm("Skip this roster?")) return;
     try {
-      const updated = await skipRoster(roster.id);
+      const updated = await skipRoster(roster.id, slug);
       onChanged(updated);
       onInfo("Roster skipped.");
     } catch (e: any) {
@@ -327,7 +333,7 @@ function DetailPanel({
       return;
     }
     try {
-      const updated = await regenerateRosterDraft(roster.id);
+      const updated = await regenerateRosterDraft(roster.id, slug);
       onChanged(updated);
       onInfo("Roster regenerated.");
     } catch (e: any) {
@@ -490,11 +496,13 @@ function PreviewModal({ text, onClose }: { text: string; onClose: () => void }) 
 
 function GenerateModal({
   sessions,
+  slug,
   onClose,
   onGenerated,
   onError,
 }: {
   sessions: Session[];
+  slug: string;
   onClose: () => void;
   onGenerated: (r: Roster) => void;
   onError: (msg: string) => void;
@@ -511,7 +519,7 @@ function GenerateModal({
     if (sessionId === "") return;
     setSubmitting(true);
     try {
-      const generated = await generateRosterDraft(Number(sessionId));
+      const generated = await generateRosterDraft(Number(sessionId), slug);
       onGenerated(generated);
     } catch (e: any) {
       onError(e?.detail ?? e?.message ?? "Generate failed");

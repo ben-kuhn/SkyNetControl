@@ -5,6 +5,7 @@ import {
   updateActivity,
   type ActivityInput,
 } from "../../api/activities";
+import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { Activity } from "../../types";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../hooks/useAuth";
@@ -45,6 +46,7 @@ export function ActivityDetailPanel({
   );
   const [submitting, setSubmitting] = useState(false);
 
+  const { slug, role } = useCurrentNet();
   const { user } = useAuth();
   const { addToast } = useToast();
 
@@ -70,9 +72,11 @@ export function ActivityDetailPanel({
     hasUnsavedRef.current = dirty;
   }, [mode, title, description, instructions, tagsText, activity, hasUnsavedRef]);
 
-  const canDelete = user?.is_admin === true && activity != null && !activity.is_default;
+  const canDelete = (role === "admin" || user?.is_admin === true) && activity != null && !activity.is_default;
   const canEdit =
     activity == null ||
+    role === "admin" ||
+    role === "net_control" ||
     user?.is_admin === true ||
     user?.nets.some((n) => n.role === "net_control") === true;
 
@@ -103,8 +107,8 @@ export function ActivityDetailPanel({
     };
     try {
       const saved = activity
-        ? await updateActivity(activity.id, input)
-        : await createActivity(input);
+        ? await updateActivity(activity.id, input, slug)
+        : await createActivity(input, slug);
       addToast(activity ? "Activity updated." : "Activity created.", "success");
       onSaved(saved);
       setMode("view");
@@ -119,7 +123,7 @@ export function ActivityDetailPanel({
     if (!activity || activity.is_default) return;
     if (!confirm(`Delete activity "${activity.title}"?`)) return;
     try {
-      await deleteActivity(activity.id);
+      await deleteActivity(activity.id, slug);
       addToast("Activity deleted.", "success");
       onDeleted(activity.id);
     } catch (e: any) {

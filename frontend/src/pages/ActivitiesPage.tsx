@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchActivities } from "../api/activities";
+import { useCurrentNet } from "../hooks/useCurrentNet";
 import type { Activity } from "../types";
 import { ActivityDetailPanel } from "./activities/ActivityDetailPanel";
 import { BrainstormPanel } from "./activities/BrainstormPanel";
@@ -17,6 +18,7 @@ function formatShortDate(iso: string | null): string {
 }
 
 export function ActivitiesPage() {
+  const { slug } = useCurrentNet();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,11 +29,13 @@ export function ActivitiesPage() {
   const detailUnsavedRef = useRef(false);
 
   useEffect(() => {
-    fetchActivities()
+    setLoading(true);
+    setActivities([]);
+    fetchActivities(slug)
       .then((data) => setActivities(data))
       .catch((e: any) => setError(e?.message ?? "Failed to load activities"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   const sorted = useMemo(() => {
     const cmp = (a: Activity, b: Activity): number => {

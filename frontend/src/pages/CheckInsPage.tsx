@@ -1,7 +1,7 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { AuthContext } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { useCurrentNet } from "../hooks/useCurrentNet";
 import { Spinner } from "../components/Spinner";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
@@ -21,10 +21,7 @@ import {
   fetchRecentSessions,
   fetchModes,
 } from "../api/checkins";
-
-// Task 13: role gating migrated to useCurrentNet (Task 14 wires per-net role).
-// For now: admins can edit; net_control wired in Task 14.
-const canEdit = (isAdmin: boolean) => isAdmin;
+import { useAuth } from "../hooks/useAuth";
 
 const parseStatusBadge: Record<string, { label: string; cls: string }> = {
   auto: { label: "auto", cls: "bg-success/10 text-success border border-success/25" },
@@ -48,10 +45,12 @@ function SessionSelector({
   sessions,
   selectedId,
   onChange,
+  slug,
 }: {
   sessions: Session[];
   selectedId: number | null;
   onChange: (id: number) => void;
+  slug: string;
 }) {
   return (
     <div className="flex items-center gap-3 mb-4 flex-wrap">
@@ -68,7 +67,7 @@ function SessionSelector({
           </option>
         ))}
       </select>
-      <Link to="/schedule" className="text-sm text-accent hover:text-accent-hover transition-colors">
+      <Link to={`/nets/${slug}/schedule`} className="text-sm text-accent hover:text-accent-hover transition-colors">
         Show more...
       </Link>
     </div>
@@ -250,10 +249,12 @@ function CallsignLookupField({
   value,
   onChange,
   onLookupResult,
+  slug,
 }: {
   value: string;
   onChange: (v: string) => void;
   onLookupResult: (result: CallbookResult) => void;
+  slug: string;
 }) {
   const [lookingUp, setLookingUp] = useState(false);
   const [lookupMsg, setLookupMsg] = useState("");
@@ -263,7 +264,7 @@ function CallsignLookupField({
     setLookingUp(true);
     setLookupMsg("");
     try {
-      const result = await lookupCallsign(value.trim());
+      const result = await lookupCallsign(value.trim(), slug);
       onLookupResult(result);
       setLookupMsg("");
     } catch (err: any) {
@@ -304,12 +305,14 @@ function AddCheckinModal({
   sessionId,
   onAdded,
   modes,
+  slug,
 }: {
   open: boolean;
   onClose: () => void;
   sessionId: number;
   onAdded: () => void;
   modes: string[];
+  slug: string;
 }) {
   const { addToast } = useToast();
   const emptyForm = { callsign: "", name: "", mode: "Voice", city: "", county: "", state: "", comments: "" };
@@ -344,7 +347,7 @@ function AddCheckinModal({
         county: form.county || undefined,
         state: form.state || undefined,
         comments: form.comments || undefined,
-      });
+      }, slug);
       addToast("Check-in added", "success");
       setForm(emptyForm);
       onAdded();
@@ -359,7 +362,7 @@ function AddCheckinModal({
   return (
     <Modal open={open} onClose={handleClose} title="Add Check-in">
       <div className="flex flex-col gap-3">
-        <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
+        <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} slug={slug} />
         <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-text-secondary">Mode</label>
@@ -393,11 +396,13 @@ function EditCheckinModal({
   onClose,
   checkin,
   onSaved,
+  slug,
 }: {
   open: boolean;
   onClose: () => void;
   checkin: CheckIn | null;
   onSaved: () => void;
+  slug: string;
 }) {
   const { addToast } = useToast();
   const [form, setForm] = useState({ callsign: "", name: "", mode: "", city: "", county: "", state: "", comments: "", parse_status: "auto" as CheckIn["parse_status"] });
@@ -442,7 +447,7 @@ function EditCheckinModal({
         state: form.state,
         comments: form.comments,
         parse_status: form.parse_status,
-      });
+      }, slug);
       addToast("Check-in updated", "success");
       onSaved();
       onClose();
@@ -457,7 +462,7 @@ function EditCheckinModal({
     if (!checkin) return;
     setReparsing(true);
     try {
-      const updated = await reparseCheckin(checkin.id);
+      const updated = await reparseCheckin(checkin.id, slug);
       setForm({
         callsign: updated.callsign,
         name: updated.name,
@@ -484,7 +489,7 @@ function EditCheckinModal({
 
   const fieldsColumn = (
     <div className="flex flex-col gap-3">
-      <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} />
+      <CallsignLookupField value={form.callsign} onChange={(v) => setForm((f) => ({ ...f, callsign: v }))} onLookupResult={handleLookupResult} slug={slug} />
       <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
       <Input label="Mode" value={form.mode} onChange={(e) => setForm((f) => ({ ...f, mode: e.target.value }))} />
       <div className="grid grid-cols-2 gap-3">
@@ -571,7 +576,8 @@ function EditCheckinModal({
 }
 
 export function CheckInsPage() {
-  const { user } = useContext(AuthContext);
+  const { slug, role } = useCurrentNet();
+  const { user } = useAuth();
   const { addToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -591,7 +597,7 @@ export function CheckInsPage() {
   const [modes, setModes] = useState<string[]>(["Voice", "Winlink", "CW", "Digital"]);
   const [notPublic, setNotPublic] = useState(false);
 
-  const userCanEdit = user ? canEdit(user.is_admin) : false;
+  const userCanEdit = role === "admin" || role === "net_control";
 
   // Filter sessions: anonymous users can only see completed sessions
   const visibleSessions = useMemo(() => {
@@ -602,7 +608,7 @@ export function CheckInsPage() {
   const initialSessionParam = searchParams.get("session");
 
   const loadSessions = useCallback(async (extraSessionId?: number) => {
-    const all = await fetchRecentSessions();
+    const all = await fetchRecentSessions(slug);
     const sorted = [...all].sort((a, b) => b.start_date.localeCompare(a.start_date));
 
     const now = new Date().toISOString().split("T")[0]!;
@@ -640,17 +646,21 @@ export function CheckInsPage() {
     const finalSessions = [...sessionMap.values()].sort((a, b) => b.start_date.localeCompare(a.start_date));
     setSessions(finalSessions);
     return { finalSessions, currentScheduled, nextScheduled };
-  }, [initialSessionParam]);
+  }, [slug, initialSessionParam]);
 
   useEffect(() => {
     if (!user) return;
-    fetchModes()
+    fetchModes(slug)
       .then(setModes)
       .catch(() => {});
-  }, [user]);
+  }, [user, slug]);
 
-  // Load sessions on mount
+  // Load sessions on mount and when slug changes
   useEffect(() => {
+    setLoading(true);
+    setSessions([]);
+    setSelectedSessionId(null);
+    setCheckins([]);
     loadSessions()
       .then(({ finalSessions, currentScheduled, nextScheduled }) => {
         let defaultId: number | null = null;
@@ -706,7 +716,7 @@ export function CheckInsPage() {
       })
       .catch(() => addToast("Failed to load sessions", "error"))
       .finally(() => setLoading(false));
-  }, [loadSessions, addToast, initialSessionParam, user]);
+  }, [slug, loadSessions, addToast, initialSessionParam, user]);
 
   // Load checkins when session changes
   const loadCheckins = useCallback(async () => {
@@ -718,7 +728,7 @@ export function CheckInsPage() {
     setCheckinsLoading(true);
     setNotPublic(false);
     try {
-      const data = await fetchSessionCheckins(selectedSessionId);
+      const data = await fetchSessionCheckins(selectedSessionId, slug);
       setCheckins(data);
     } catch (err: any) {
       if (err?.status === 404) {
@@ -730,7 +740,7 @@ export function CheckInsPage() {
     } finally {
       setCheckinsLoading(false);
     }
-  }, [selectedSessionId, addToast]);
+  }, [selectedSessionId, slug, addToast]);
 
   useEffect(() => {
     loadCheckins();
@@ -749,7 +759,7 @@ export function CheckInsPage() {
     if (!selectedSessionId) return;
     setScanning(true);
     try {
-      const result = await scanMailbox(selectedSessionId);
+      const result = await scanMailbox(selectedSessionId, slug);
       addToast(`Imported ${result.imported} check-in${result.imported !== 1 ? "s" : ""}`, "success");
       await loadCheckins();
     } catch {
@@ -767,7 +777,7 @@ export function CheckInsPage() {
     if (!ok) return;
     setReparsingSession(true);
     try {
-      const result = await reparseSession(selectedSessionId);
+      const result = await reparseSession(selectedSessionId, slug);
       const parts: string[] = [];
       if (result.updated) parts.push(`re-parsed ${result.updated}`);
       if (result.imported) parts.push(`reclaimed ${result.imported}`);
@@ -784,7 +794,7 @@ export function CheckInsPage() {
     if (!selectedSessionId) return;
     setApproving(true);
     try {
-      const result = await approveSession(selectedSessionId);
+      const result = await approveSession(selectedSessionId, slug);
       addToast(`Session approved. ${result.members_updated} member records updated.`, "success");
       await loadSessions(selectedSessionId);
       await loadCheckins();
@@ -811,7 +821,7 @@ export function CheckInsPage() {
     <div>
       <h1 className="text-xl font-bold text-text-primary mb-4">Check-ins</h1>
 
-      <SessionSelector sessions={visibleSessions} selectedId={selectedSessionId} onChange={handleSessionChange} />
+      <SessionSelector sessions={visibleSessions} selectedId={selectedSessionId} onChange={handleSessionChange} slug={slug} />
 
       {userCanEdit && selectedSessionId && (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -875,7 +885,7 @@ export function CheckInsPage() {
               onDelete={async (c) => {
                 if (!window.confirm(`Delete check-in for ${c.callsign}? This can't be undone.`)) return;
                 try {
-                  await deleteCheckin(c.id);
+                  await deleteCheckin(c.id, slug);
                   addToast(`Deleted check-in for ${c.callsign}`, "success");
                   loadCheckins();
                 } catch {
@@ -897,10 +907,10 @@ export function CheckInsPage() {
       )}
 
       {selectedSessionId && (
-        <AddCheckinModal open={showAddModal} onClose={() => setShowAddModal(false)} sessionId={selectedSessionId} onAdded={loadCheckins} modes={modes} />
+        <AddCheckinModal open={showAddModal} onClose={() => setShowAddModal(false)} sessionId={selectedSessionId} onAdded={loadCheckins} modes={modes} slug={slug} />
       )}
 
-      <EditCheckinModal open={editingCheckin !== null} onClose={() => setEditingCheckin(null)} checkin={editingCheckin} onSaved={loadCheckins} />
+      <EditCheckinModal open={editingCheckin !== null} onClose={() => setEditingCheckin(null)} checkin={editingCheckin} onSaved={loadCheckins} slug={slug} />
 
       <Modal open={showApproveConfirm} onClose={() => setShowApproveConfirm(false)} title="Approve Session">
         <p className="text-sm text-text-secondary mb-4">

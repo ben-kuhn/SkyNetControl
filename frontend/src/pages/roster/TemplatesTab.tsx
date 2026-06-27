@@ -8,6 +8,7 @@ import {
   type RosterTemplateDefault,
   type RosterTemplateInput,
 } from "../../api/roster";
+import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { RosterTemplate } from "../../types";
 import { useToast } from "../../context/ToastContext";
 
@@ -25,6 +26,7 @@ type ModalState =
   | { kind: "create"; seed: RosterTemplateDefault | null; clonedFrom: RosterTemplate | null };
 
 export function TemplatesTab() {
+  const { slug } = useCurrentNet();
   const [templates, setTemplates] = useState<RosterTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export function TemplatesTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await fetchRosterTemplates();
+      const data = await fetchRosterTemplates(slug);
       setTemplates(data);
       setError(null);
     } catch (e: any) {
@@ -47,13 +49,14 @@ export function TemplatesTab() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const handleDelete = async (t: RosterTemplate) => {
     if (t.is_default) return;
     if (!confirm(`Delete template "${t.name}"?`)) return;
     try {
-      await deleteRosterTemplate(t.id);
+      await deleteRosterTemplate(t.id, slug);
       addToast("Template deleted.", "success");
       load();
     } catch (e: any) {
@@ -66,7 +69,7 @@ export function TemplatesTab() {
     // blank if the fetch fails (defaults are a nicety, not required).
     let seed: RosterTemplateDefault | null = null;
     try {
-      const defaults = await fetchRosterTemplateDefaults();
+      const defaults = await fetchRosterTemplateDefaults(slug);
       seed = defaults[0] ?? null;
     } catch {
       // ignore — user gets a blank form
@@ -154,6 +157,7 @@ export function TemplatesTab() {
       {modal.kind !== "closed" && (
         <TemplateModal
           modal={modal}
+          slug={slug}
           onClose={() => setModal({ kind: "closed" })}
           onSaved={() => {
             setModal({ kind: "closed" });
@@ -210,12 +214,14 @@ function initialFormFromModal(modal: Exclude<ModalState, { kind: "closed" }>) {
 
 function TemplateModal({
   modal,
+  slug,
   onClose,
   onSaved,
   onError,
   onInfo,
 }: {
   modal: Exclude<ModalState, { kind: "closed" }>;
+  slug: string;
   onClose: () => void;
   onSaved: () => void;
   onError: (msg: string) => void;
@@ -246,10 +252,10 @@ function TemplateModal({
     };
     try {
       if (modal.kind === "edit") {
-        await updateRosterTemplate(modal.template.id, input);
+        await updateRosterTemplate(modal.template.id, input, slug);
         onInfo("Template updated.");
       } else {
-        await createRosterTemplate(input);
+        await createRosterTemplate(input, slug);
         onInfo("Template created.");
       }
       onSaved();

@@ -118,7 +118,7 @@ export function MobileMenu({ open, onClose }: MobileMenuProps) {
           <>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-1">
-                <NotificationBell />
+                <NotificationBell slug={slug} />
                 <NavLink
                   to="/profile"
                   onClick={onClose}

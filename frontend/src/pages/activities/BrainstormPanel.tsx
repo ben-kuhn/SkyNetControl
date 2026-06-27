@@ -5,6 +5,7 @@ import {
   startChatSession,
   type ActivityInput,
 } from "../../api/activities";
+import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { Activity, ChatMessage } from "../../types";
 import { useToast } from "../../context/ToastContext";
 
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
+  const { slug } = useCurrentNet();
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [composer, setComposer] = useState("");
@@ -34,7 +36,7 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    startChatSession()
+    startChatSession(slug)
       .then((s) => {
         if (!cancelled) setSessionId(s.id);
       })
@@ -60,7 +62,7 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
     setComposer("");
     setSending(true);
     try {
-      const { user_message, assistant_message } = await sendChatMessage(sessionId, text);
+      const { user_message, assistant_message } = await sendChatMessage(sessionId, text, slug);
       setMessages((prev) => [...prev, user_message, assistant_message]);
       setApiKeyMissing(false);
     } catch (e: any) {
@@ -102,7 +104,7 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
       tag_names: parseTags(tagsText),
     };
     try {
-      const activity = await approveChatSession(sessionId, input);
+      const activity = await approveChatSession(sessionId, input, slug);
       addToast("Activity created from chat.", "success");
       onApproved(activity);
     } catch (e: any) {

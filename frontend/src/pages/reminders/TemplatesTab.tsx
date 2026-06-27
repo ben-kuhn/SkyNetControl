@@ -8,6 +8,7 @@ import {
   type ReminderTemplateDefault,
   type TemplateInput,
 } from "../../api/reminders";
+import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { ReminderTemplate, ReminderTemplateType } from "../../types";
 import { useToast } from "../../context/ToastContext";
 
@@ -27,6 +28,7 @@ type ModalState =
   | { kind: "create"; seedByType: Record<ReminderTemplateType, ReminderTemplateDefault | null>; clonedFrom: ReminderTemplate | null };
 
 export function TemplatesTab() {
+  const { slug } = useCurrentNet();
   const [templates, setTemplates] = useState<ReminderTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function TemplatesTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await fetchReminderTemplates();
+      const data = await fetchReminderTemplates(slug);
       setTemplates(data);
       setError(null);
     } catch (e: any) {
@@ -49,13 +51,14 @@ export function TemplatesTab() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   const handleDelete = async (t: ReminderTemplate) => {
     if (t.is_default) return;
     if (!confirm(`Delete template "${t.name}"?`)) return;
     try {
-      await deleteReminderTemplate(t.id);
+      await deleteReminderTemplate(t.id, slug);
       addToast("Template deleted.", "success");
       load();
     } catch (e: any) {
@@ -72,7 +75,7 @@ export function TemplatesTab() {
       activity: null,
     };
     try {
-      const defaults = await fetchReminderTemplateDefaults();
+      const defaults = await fetchReminderTemplateDefaults(slug);
       for (const d of defaults) {
         seedByType[d.template_type] = d;
       }
@@ -168,6 +171,7 @@ export function TemplatesTab() {
       {modal.kind !== "closed" && (
         <TemplateModal
           modal={modal}
+          slug={slug}
           onClose={() => setModal({ kind: "closed" })}
           onSaved={() => {
             setModal({ kind: "closed" });
@@ -218,12 +222,14 @@ function initialFormFromModal(modal: Exclude<ModalState, { kind: "closed" }>) {
 
 function TemplateModal({
   modal,
+  slug,
   onClose,
   onSaved,
   onError,
   onInfo,
 }: {
   modal: Exclude<ModalState, { kind: "closed" }>;
+  slug: string;
   onClose: () => void;
   onSaved: () => void;
   onError: (msg: string) => void;
@@ -271,10 +277,10 @@ function TemplateModal({
     };
     try {
       if (modal.kind === "edit") {
-        await updateReminderTemplate(modal.template.id, input);
+        await updateReminderTemplate(modal.template.id, input, slug);
         onInfo("Template updated.");
       } else {
-        await createReminderTemplate(input);
+        await createReminderTemplate(input, slug);
         onInfo("Template created.");
       }
       onSaved();
