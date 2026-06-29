@@ -2,28 +2,27 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
+import { SettingsSection } from "../components/SettingsSection";
+import type { ConfigField } from "../components/SettingsSection";
 import { Spinner } from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../hooks/useAuth";
 import { useCurrentNet } from "../hooks/useCurrentNet";
-import { getNetConfig, patchNet, setNetConfigValue } from "../api/nets";
+import { getNetConfig, patchNet, setNetConfigBulk } from "../api/nets";
 
-interface NetConfigField {
-  key: string;
-  label: string;
-  type?: "text" | "boolean";
-  placeholder?: string;
-  helpText: string;
-  mono?: boolean;
-  group: string;
-  visibleWhen?: (values: Record<string, string>) => boolean;
+function parseStringArray(raw: string): string[] {
+  try {
+    const v = JSON.parse(raw || "[]");
+    return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
-const NET_CONFIG_FIELDS: NetConfigField[] = [
+const NET_OPS_FIELDS: ConfigField[] = [
   {
     key: "default_net_control",
     label: "Net Callsign",
-    group: "Net Operations",
     placeholder: "WAØXYZ",
     helpText: "Your net's club callsign — used as {{ net_callsign }} in templates.",
     mono: true,
@@ -31,15 +30,17 @@ const NET_CONFIG_FIELDS: NetConfigField[] = [
   {
     key: "net_address",
     label: "Net Winlink Address",
-    group: "Net Operations",
     placeholder: "yournet@winlink.org",
     helpText:
       "Winlink address used for check-in message parsing and as {{ net_address }} in templates.",
+    visibleWhen: (v) => v["winlink_enabled"] === "true",
   },
+];
+
+const PAT_FIELDS: ConfigField[] = [
   {
     key: "pat_mailbox_path",
     label: "PAT Mailbox Path",
-    group: "PAT",
     placeholder: "~/.local/share/pat/mailbox/YOURCALL",
     helpText: "Local filesystem path to the PAT Winlink client mailbox directory.",
     mono: true,
@@ -47,86 +48,58 @@ const NET_CONFIG_FIELDS: NetConfigField[] = [
   {
     key: "scanner.enabled",
     label: "Auto-Scanner",
-    group: "PAT",
     type: "boolean",
     helpText: "Automatically scan the PAT mailbox for new check-ins on a timer.",
   },
   {
     key: "scanner.interval_minutes",
     label: "Scan Interval (minutes)",
-    group: "PAT",
     placeholder: "5",
     helpText: "How often to scan the mailbox for new check-ins.",
     visibleWhen: (v) => v["scanner.enabled"] === "true",
   },
 ];
 
-const GROUPS = ["Net Operations", "PAT"];
-
-function ConfigFieldRow({
-  field,
-  value,
-  savedValue,
-  onChange,
-  onSave,
-  saving,
-}: {
-  field: NetConfigField;
-  value: string;
-  savedValue: string;
-  onChange: (value: string) => void;
-  onSave: () => void;
-  saving: boolean;
-}) {
-  const isDirty = value !== savedValue;
-  const type = field.type ?? "text";
-
-  let input: React.ReactNode;
-  if (type === "boolean") {
-    const checked = value === "true";
-    input = (
-      <label className="inline-flex items-center gap-2 text-sm text-text-primary">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked ? "true" : "false")}
-          className="accent-accent"
-        />
-        <span className="text-text-secondary">{checked ? "Enabled" : "Disabled"}</span>
-      </label>
-    );
-  } else {
-    input = (
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={field.placeholder}
-        className={`w-full bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted ${
-          field.mono ? "font-mono" : ""
-        }`}
-      />
-    );
+function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
+  const backendOptions = [
+    { value: "email", label: "Email" },
+    { value: "groupsio", label: "Groups.io" },
+  ];
+  if (winlinkEnabled) {
+    backendOptions.push({ value: "winlink", label: "Winlink" });
   }
-
-  return (
-    <div className="mb-4 last:mb-0">
-      <label className="block text-sm text-text-secondary mb-1">{field.label}</label>
-      <div className="flex gap-2 items-start">
-        <div className="flex-1 max-w-md">{input}</div>
-        <Button
-          size="sm"
-          variant={isDirty ? "primary" : "secondary"}
-          onClick={onSave}
-          loading={saving}
-          disabled={!isDirty}
-        >
-          Save
-        </Button>
-      </div>
-      <div className="text-xs text-text-muted mt-1">{field.helpText}</div>
-    </div>
-  );
+  return [
+    {
+      key: "delivery.backends",
+      label: "Enabled Delivery Backends",
+      type: "multiselect",
+      options: backendOptions,
+      helpText: "Channels for sending reminders and rosters from this net.",
+    },
+    {
+      key: "delivery.email.to_address",
+      label: "Email Recipient",
+      placeholder: "net-list@example.com",
+      helpText: "Email address this net sends reminders and rosters to.",
+      visibleWhen: (v) => parseStringArray(v["delivery.backends"] ?? "").includes("email"),
+    },
+    {
+      key: "delivery.groupsio.group_name",
+      label: "Groups.io Group Name",
+      placeholder: "your-net",
+      helpText: "Target group name on groups.io for this net.",
+      visibleWhen: (v) => parseStringArray(v["delivery.backends"] ?? "").includes("groupsio"),
+    },
+    {
+      key: "delivery.winlink.target_address",
+      label: "Winlink Delivery Address",
+      placeholder: "NET@winlink.org",
+      helpText: "Winlink address this net sends reminders and rosters to.",
+      visibleWhen: (v) =>
+        v["winlink_enabled"] === "true" &&
+        parseStringArray(v["delivery.backends"] ?? "").includes("winlink"),
+    },
+  ];
 }
 
 export function NetSettingsPage() {
@@ -138,12 +111,13 @@ export function NetSettingsPage() {
   const [name, setName] = useState("");
   const [slugDraft, setSlugDraft] = useState("");
   const [isPublic, setIsPublic] = useState(false);
+  const [winlinkEnabled, setWinlinkEnabled] = useState(true);
   const [savingMeta, setSavingMeta] = useState(false);
 
   const [config, setConfig] = useState<Record<string, string>>({});
   const [savedConfig, setSavedConfig] = useState<Record<string, string>>({});
   const [loadingConfig, setLoadingConfig] = useState(true);
-  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savingSection, setSavingSection] = useState<string | null>(null);
 
   const isAdmin = user?.is_admin === true;
 
@@ -161,6 +135,7 @@ export function NetSettingsPage() {
       .then((c) => {
         setConfig(c);
         setSavedConfig(c);
+        setWinlinkEnabled((c["winlink_enabled"] ?? "true") === "true");
       })
       .catch(() => addToast("Failed to load per-net config", "error"))
       .finally(() => setLoadingConfig(false));
@@ -168,30 +143,37 @@ export function NetSettingsPage() {
   }, [slug]);
 
   if (!net) {
-    return (
-      <div className="flex justify-center py-8">
-        <Spinner />
-      </div>
-    );
+    return <div className="flex justify-center py-8"><Spinner /></div>;
   }
 
-  const metaDirty =
-    name !== net.name || slugDraft !== net.slug || isPublic !== net.is_public;
+  const winlinkEnabledSaved = (savedConfig["winlink_enabled"] ?? "true") === "true";
+  const generalDirty =
+    name !== net.name ||
+    slugDraft !== net.slug ||
+    isPublic !== net.is_public ||
+    winlinkEnabled !== winlinkEnabledSaved;
 
-  const handleSaveMeta = async () => {
+  const handleSaveGeneral = async () => {
     setSavingMeta(true);
     try {
       const patch: { name?: string; slug?: string; is_public?: boolean } = {};
       if (name !== net.name) patch.name = name;
       if (isAdmin && slugDraft !== net.slug) patch.slug = slugDraft;
       if (isAdmin && isPublic !== net.is_public) patch.is_public = isPublic;
-      const updated = await patchNet(net.slug, patch);
+      const newSlug =
+        Object.keys(patch).length > 0
+          ? (await patchNet(net.slug, patch)).slug
+          : net.slug;
+      if (winlinkEnabled !== winlinkEnabledSaved) {
+        const wlValue = winlinkEnabled ? "true" : "false";
+        await setNetConfigBulk(newSlug, { winlink_enabled: wlValue });
+        setSavedConfig((prev) => ({ ...prev, winlink_enabled: wlValue }));
+        setConfig((prev) => ({ ...prev, winlink_enabled: wlValue }));
+      }
       addToast("Settings saved", "success");
-      // Refresh user memberships so the picker reflects the new name / slug.
       await refreshUser();
-      // If slug changed, navigate to the new URL.
       if (patch.slug && patch.slug !== net.slug) {
-        navigate(`/nets/${updated.slug}/settings`, { replace: true });
+        navigate(`/nets/${newSlug}/settings`, { replace: true });
       }
     } catch (e) {
       addToast(`Save failed: ${e instanceof Error ? e.message : "unknown"}`, "error");
@@ -200,16 +182,22 @@ export function NetSettingsPage() {
     }
   };
 
-  const handleSaveConfig = async (key: string) => {
-    setSavingKey(key);
+  const handleSectionSave = (sectionId: string) => async (keys: string[]) => {
+    setSavingSection(sectionId);
     try {
-      await setNetConfigValue(slug, key, config[key] || "");
-      setSavedConfig((prev) => ({ ...prev, [key]: config[key] || "" }));
-      addToast("Setting saved", "success");
+      const payload: Record<string, string> = {};
+      for (const k of keys) {
+        if ((config[k] ?? "") !== (savedConfig[k] ?? "")) {
+          payload[k] = config[k] ?? "";
+        }
+      }
+      await setNetConfigBulk(slug, payload);
+      setSavedConfig((prev) => ({ ...prev, ...payload }));
+      addToast("Settings saved", "success");
     } catch {
-      addToast("Failed to save setting", "error");
+      addToast("Failed to save settings", "error");
     } finally {
-      setSavingKey(null);
+      setSavingSection(null);
     }
   };
 
@@ -234,9 +222,7 @@ export function NetSettingsPage() {
               disabled={!isAdmin}
             />
             {!isAdmin && (
-              <p className="text-xs text-text-muted mt-1">
-                Slug changes require admin.
-              </p>
+              <p className="text-xs text-text-muted mt-1">Slug changes require admin.</p>
             )}
           </div>
           <label className="inline-flex items-center gap-2 text-sm text-text-primary">
@@ -256,53 +242,66 @@ export function NetSettingsPage() {
               Visibility changes require admin.
             </p>
           )}
+          <label className="inline-flex items-center gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              checked={winlinkEnabled}
+              onChange={(e) => setWinlinkEnabled(e.target.checked)}
+              className="accent-accent"
+            />
+            <span className="text-text-secondary">
+              Winlink-enabled (shows Winlink Address, PAT, and Winlink delivery options)
+            </span>
+          </label>
           <div>
             <Button
-              variant={metaDirty ? "primary" : "secondary"}
-              onClick={handleSaveMeta}
+              variant={generalDirty ? "primary" : "secondary"}
+              onClick={handleSaveGeneral}
               loading={savingMeta}
-              disabled={!metaDirty}
+              disabled={!generalDirty}
             >
-              Save changes
+              Save
             </Button>
           </div>
         </div>
       </div>
 
       {loadingConfig ? (
-        <div className="flex justify-center py-4">
-          <Spinner />
-        </div>
+        <div className="flex justify-center py-4"><Spinner /></div>
       ) : (
-        GROUPS.map((group) => {
-          const visibleFields = NET_CONFIG_FIELDS.filter(
-            (f) => f.group === group && (!f.visibleWhen || f.visibleWhen(config)),
-          );
-          if (visibleFields.length === 0) return null;
-          return (
-            <div
-              key={group}
-              className="bg-bg-surface border border-border rounded-lg p-6 mb-4"
-            >
-              <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-4">
-                {group}
-              </h2>
-              {visibleFields.map((field) => (
-                <ConfigFieldRow
-                  key={field.key}
-                  field={field}
-                  value={config[field.key] || ""}
-                  savedValue={savedConfig[field.key] || ""}
-                  onChange={(v) =>
-                    setConfig((prev) => ({ ...prev, [field.key]: v }))
-                  }
-                  onSave={() => handleSaveConfig(field.key)}
-                  saving={savingKey === field.key}
-                />
-              ))}
-            </div>
-          );
-        })
+        <>
+          <SettingsSection
+            title="Net Operations"
+            fields={NET_OPS_FIELDS}
+            values={config}
+            savedValues={savedConfig}
+            onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+            onSave={handleSectionSave("net-ops")}
+            saving={savingSection === "net-ops"}
+          />
+
+          {winlinkEnabledSaved && (
+            <SettingsSection
+              title="PAT"
+              fields={PAT_FIELDS}
+              values={config}
+              savedValues={savedConfig}
+              onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+              onSave={handleSectionSave("pat")}
+              saving={savingSection === "pat"}
+            />
+          )}
+
+          <SettingsSection
+            title="Delivery"
+            fields={deliveryFields(winlinkEnabledSaved)}
+            values={config}
+            savedValues={savedConfig}
+            onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+            onSave={handleSectionSave("delivery")}
+            saving={savingSection === "delivery"}
+          />
+        </>
       )}
     </div>
   );

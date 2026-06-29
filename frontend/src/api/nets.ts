@@ -64,3 +64,13 @@ export async function setNetConfigValue(slug: string, key: string, value: string
     body: JSON.stringify({ value }),
   });
 }
+
+export async function setNetConfigBulk(
+  slug: string,
+  values: Record<string, string>,
+): Promise<void> {
+  await apiFetch(`/nets/${encodeURIComponent(slug)}/config/bulk`, {
+    method: "PUT",
+    body: JSON.stringify({ values }),
+  });
+}
