@@ -12,18 +12,30 @@ scanner_router = APIRouter()
 
 @scanner_router.get("/status")
 def get_scanner_status(
-    _ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
 ):
     next_scan_time = None
     if scanner_state.running and scanner_state.last_scan_time:
         next_scan_time = (scanner_state.last_scan_time + timedelta(minutes=scanner_state.interval_minutes)).isoformat()
+
+    # scanner_state is process-global; expose active_session_id only when it
+    # belongs to the requesting net, otherwise other tenants' session IDs leak.
+    active_session_id: int | None = None
+    if scanner_state.active_session_id is not None:
+        from backend.modules.checkins.service import get_net_id_for_session
+        from backend.modules.schedule.models import NetSession
+
+        sess = db.get(NetSession, scanner_state.active_session_id)
+        if sess is not None and get_net_id_for_session(db, sess) == ctx.net.id:
+            active_session_id = scanner_state.active_session_id
 
     return {
         "running": scanner_state.running,
         "last_scan_time": scanner_state.last_scan_time.isoformat() if scanner_state.last_scan_time else None,
         "next_scan_time": next_scan_time,
         "last_scan_count": scanner_state.last_scan_count,
-        "active_session_id": scanner_state.active_session_id,
+        "active_session_id": active_session_id,
     }
 
 

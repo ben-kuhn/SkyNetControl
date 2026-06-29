@@ -160,10 +160,9 @@ async def scanner_loop(session_factory, get_interval_minutes):
             try:
                 with session_factory() as db:
                     now = datetime.now(tz=timezone.utc)
-                    # Try per-net scanning first; fall back to global config
-                    # for installations that haven't migrated to net_config yet.
-                    # TODO(Task 14/15): remove the global fallback once all
-                    # installations have per-net scanner config.
+                    # Try per-net scanning first; fall back to global config for
+                    # installations that haven't moved scanner.enabled into
+                    # net_config yet.
                     result = scan_all_enabled(db, now)
                     if result is None:
                         # No nets have per-net scanner.enabled; try global config
