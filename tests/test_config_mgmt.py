@@ -103,3 +103,25 @@ def test_non_sensitive_key_not_decrypted(db: Session):
     # to look enveloped — the read path keys off the *name*, not the contents.
     set_config_value(db, "net_address", "enc:v1:not-actually-encrypted")
     assert get_config_value(db, "net_address") == "enc:v1:not-actually-encrypted"
+
+
+def test_set_config_values_bulk_upserts_all_keys(db: Session):
+    from backend.config_mgmt.service import set_config_values_bulk
+
+    set_config_values_bulk(db, {"k1": "v1", "k2": "v2"})
+    assert get_all_config(db) == {"k1": "v1", "k2": "v2"}
+
+
+def test_set_config_values_bulk_updates_existing_keys(db: Session):
+    from backend.config_mgmt.service import set_config_values_bulk
+
+    set_config_value(db, "k1", "old")
+    set_config_values_bulk(db, {"k1": "new", "k2": "fresh"})
+    assert get_all_config(db) == {"k1": "new", "k2": "fresh"}
+
+
+def test_set_config_values_bulk_empty_dict_is_noop(db: Session):
+    from backend.config_mgmt.service import set_config_values_bulk
+
+    set_config_values_bulk(db, {})
+    assert get_all_config(db) == {}

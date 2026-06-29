@@ -65,6 +65,22 @@ def set_config_value(db: Session, key: str, value: str) -> None:
     db.commit()
 
 
+def set_config_values_bulk(db: Session, values: dict[str, str]) -> None:
+    """Upsert many config keys in a single transaction.
+
+    Caller is responsible for any per-value pre-processing (e.g. encrypting
+    sensitive values via secret_box). See backend.config_mgmt.routes for
+    the route-level encryption policy.
+    """
+    for key, value in values.items():
+        config = db.get(AppConfig, key)
+        if config is None:
+            db.add(AppConfig(key=key, value=value))
+        else:
+            config.value = value
+    db.commit()
+
+
 def get_all_config(db: Session) -> dict[str, str]:
     configs = db.query(AppConfig).all()
     return {c.key: c.value for c in configs}
