@@ -118,6 +118,128 @@ def test_migration_backfills_existing_data(tmp_path):
     ).fetchone() == (0,)
 
 
+def test_heal_stale_unique_name_constraint(tmp_path):
+    """Reproduce the cutover's failure mode and verify the healer fixes it.
+
+    Upgrade to one revision before the multi-net cutover, hand-rebuild the
+    affected tables to mimic the post-cutover broken state (both UNIQUE(name)
+    AND UNIQUE(net_id, name) present), then upgrade past the healer. The
+    surviving UNIQUE(name) should be gone and inserting a second template
+    named 'Default Net Roster' with a different net_id should succeed.
+    """
+    db = tmp_path / "t.db"
+    env = os.environ.copy()
+    env["SKYNET_DATABASE_URL"] = f"sqlite:///{db}"
+
+    # Land at the cutover parent — schema is at pre-multi-net state but the
+    # next migration to run is the cutover itself.
+    subprocess.run(
+        [".venv/bin/alembic", "upgrade", "c72c8361ac50"],
+        env=env, check=True, cwd=pathlib.Path.cwd(),
+    )
+
+    # Run cutover so we get nets table + the post-cutover schema everywhere.
+    subprocess.run(
+        [".venv/bin/alembic", "upgrade", "859ed3de034e"],
+        env=env, check=True, cwd=pathlib.Path.cwd(),
+    )
+
+    # Hand-corrupt the schema to mimic the bug: rebuild each table so that
+    # BOTH the stale UNIQUE(name) and the new UNIQUE(net_id, name) coexist.
+    con = sqlite3.connect(str(db))
+    con.execute("PRAGMA foreign_keys=OFF")
+    for tbl, body in [
+        ("roster_templates", """
+            id INTEGER NOT NULL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            subject_template TEXT NOT NULL,
+            header_template TEXT NOT NULL,
+            welcome_template TEXT NOT NULL,
+            comments_template TEXT NOT NULL,
+            footer_template TEXT NOT NULL,
+            lead_time_days INTEGER NOT NULL,
+            is_default BOOLEAN NOT NULL,
+            net_id INTEGER NOT NULL,
+            CONSTRAINT uq_roster_templates_net_name UNIQUE (net_id, name),
+            FOREIGN KEY(net_id) REFERENCES nets(id),
+            UNIQUE (name)
+        """),
+        ("reminder_templates", """
+            id INTEGER NOT NULL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            template_type VARCHAR(15) NOT NULL,
+            subject_template TEXT NOT NULL,
+            body_template TEXT NOT NULL,
+            lead_time_days INTEGER NOT NULL,
+            is_default BOOLEAN NOT NULL,
+            net_id INTEGER NOT NULL,
+            CONSTRAINT uq_reminder_templates_net_name UNIQUE (net_id, name),
+            FOREIGN KEY(net_id) REFERENCES nets(id),
+            UNIQUE (name)
+        """),
+        ("activity_tags", """
+            id INTEGER NOT NULL PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            net_id INTEGER NOT NULL,
+            CONSTRAINT uq_activity_tags_net_name UNIQUE (net_id, name),
+            FOREIGN KEY(net_id) REFERENCES nets(id),
+            UNIQUE (name)
+        """),
+    ]:
+        cols = con.execute(f"SELECT * FROM {tbl} LIMIT 0").description
+        col_names = ",".join(c[0] for c in cols)
+        con.execute(f"CREATE TABLE {tbl}_corrupt ({body})")
+        con.execute(f"INSERT INTO {tbl}_corrupt ({col_names}) SELECT {col_names} FROM {tbl}")
+        con.execute(f"DROP TABLE {tbl}")
+        con.execute(f"ALTER TABLE {tbl}_corrupt RENAME TO {tbl}")
+    con.commit()
+    con.close()
+
+    # Sanity-check the corruption took effect: a second row with the same
+    # name should fail before the heal runs.
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "INSERT INTO nets (id, slug, name, created_at) VALUES (2, 'second', 'Second Net', '2026-01-01')"
+    )
+    con.commit()
+    try:
+        con.execute(
+            "INSERT INTO activity_tags (name, net_id) VALUES ('dup', 1)"
+        )
+        con.execute(
+            "INSERT INTO activity_tags (name, net_id) VALUES ('dup', 2)"
+        )
+        con.commit()
+        raise AssertionError("expected UNIQUE(name) to block the second insert")
+    except sqlite3.IntegrityError:
+        con.rollback()  # confirms the bad constraint is present
+    con.close()
+
+    # Run all remaining migrations including the healer.
+    subprocess.run(
+        [".venv/bin/alembic", "upgrade", "head"],
+        env=env, check=True, cwd=pathlib.Path.cwd(),
+    )
+
+    # After heal: inserting the same template name into a different net works.
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "INSERT INTO activity_tags (name, net_id) VALUES ('dup', 1)"
+    )
+    con.execute(
+        "INSERT INTO activity_tags (name, net_id) VALUES ('dup', 2)"
+    )
+    con.commit()
+    # Per-net unique still enforced.
+    try:
+        con.execute("INSERT INTO activity_tags (name, net_id) VALUES ('dup', 1)")
+        con.commit()
+        raise AssertionError("uq_activity_tags_net_name should still block this")
+    except sqlite3.IntegrityError:
+        con.rollback()
+    con.close()
+
+
 def test_add_net_id_to_net_sessions_is_idempotent(tmp_path):
     """Partial-failure recovery for migration 3c8e5fa10001.
 

@@ -22,6 +22,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Skip if the table already exists. Same SQLite non-transactional DDL
+    # hazard as 3c8e5fa10001: legacy DBs can have the table created by an
+    # old partial deploy with alembic_version not bumped to here, and the
+    # retry then trips "table already exists." Inspector check makes this a
+    # no-op when the table is present.
+    bind = op.get_bind()
+    if "geocode_cache" in sa.inspect(bind).get_table_names():
+        return
     op.create_table(
         "geocode_cache",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),

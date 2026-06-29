@@ -21,6 +21,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # See d7e2b1f43c01 for the partial-deploy hazard this guards against.
+    bind = op.get_bind()
+    if "reverse_geocode_cache" in sa.inspect(bind).get_table_names():
+        return
     op.create_table(
         "reverse_geocode_cache",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
