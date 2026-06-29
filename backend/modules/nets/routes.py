@@ -218,3 +218,38 @@ def put_config(
 ):
     set_net_config(db, ctx.net.id, key, body["value"])
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Per-net test endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{net_slug}/test/groupsio")
+async def groupsio_test(
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """Post a benign test message to this net's configured groups.io group.
+
+    api_key is global; group_name is per-net. The caller must Save before Test.
+    Returns {ok, error} so the UI can surface the actual groups.io response on failure.
+    """
+    import asyncio
+
+    from backend.config_mgmt.service import get_config_value
+    from backend.integrations.delivery.backends.groupsio import GroupsIoBackend
+    from backend.modules.nets.config_service import get_net_config
+
+    api_key = get_config_value(db, "delivery.groupsio.api_key", "")
+    group_name = get_net_config(db, ctx.net.id, "delivery.groupsio.group_name", "")
+
+    result = await asyncio.to_thread(
+        GroupsIoBackend().send,
+        "[SkyNetControl] Test Message",
+        "Test Message. Sorry for the noise, please disregard.",
+        {"api_key": api_key, "group_name": group_name},
+    )
+    if result.success:
+        return {"ok": True}
+    return {"ok": False, "error": result.error}

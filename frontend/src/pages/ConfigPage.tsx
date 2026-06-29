@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useToast } from "../context/ToastContext";
-import { fetchConfig, setConfigBulk, sendGroupsIoTest } from "../api/config";
+import { fetchConfig, setConfigBulk } from "../api/config";
 import { getFormsStatus, fetchFormsLibrary } from "../api/forms";
 import type { FormsStatus } from "../api/forms";
 import { Button } from "../components/Button";
@@ -222,17 +222,6 @@ export function ConfigPage() {
     );
   }
 
-  const handleGroupsIoTest = async () => {
-    if (!confirm("Post a test message to the configured groups.io group?")) return;
-    try {
-      const result = await sendGroupsIoTest();
-      if (result.ok) addToast("Test message posted to groups.io.", "success");
-      else addToast(`Groups.io test failed: ${result.error ?? "unknown error"}`, "error");
-    } catch (e: any) {
-      addToast(`Groups.io test failed: ${e?.detail ?? e?.message ?? "request error"}`, "error");
-    }
-  };
-
   return (
     <div className="max-w-2xl">
       <h1 className="text-xl font-bold text-text-primary mb-6">Configuration</h1>
@@ -271,13 +260,7 @@ export function ConfigPage() {
         onChange={(k, v) => setValues((prev) => ({ ...prev, [k]: v }))}
         onSave={handleSectionSave("delivery-global")}
         saving={savingSection === "delivery-global"}
-      >
-        {savedValues["delivery.groupsio.api_key"] && (
-          <Button size="sm" variant="secondary" onClick={handleGroupsIoTest}>
-            Send groups.io test
-          </Button>
-        )}
-      </SettingsSection>
+      />
 
       <SettingsSection
         title="Callbook"

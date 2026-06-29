@@ -52,6 +52,7 @@ def db_setup():
 @pytest.fixture
 def test_app(test_settings, db_setup):
     from backend.config_mgmt.test_routes import test_router
+    from backend.modules.nets.routes import router as nets_router
 
     engine, factory = db_setup
     app = FastAPI()
@@ -60,6 +61,7 @@ def test_app(test_settings, db_setup):
     app.state.settings = test_settings
     app.include_router(auth_router, prefix="/api/auth")
     app.include_router(test_router, prefix="/api/admin")
+    app.include_router(nets_router)
     return app
 
 
@@ -478,19 +480,37 @@ async def test_smtp_test_uses_stored_password_when_blank(admin_client, test_app)
 
 
 # ---------------------------------------------------------------------------
-# Groups.io test endpoint
+# Groups.io test endpoint (per-net: POST /api/nets/{slug}/test/groupsio)
 # ---------------------------------------------------------------------------
+
+
+def _seed_net_for_groupsio_test(factory, callsign: str = "W0NE") -> str:
+    """Seed a Net, make callsign NET_CONTROL, return net slug."""
+    from backend.modules.nets.models import Net, NetMembership, NetRole
+    from backend.modules.nets.config_service import set_net_config
+    from backend.config_mgmt.service import set_config_value
+
+    slug = "testnet"
+    with factory() as db:
+        net = db.query(Net).filter_by(slug=slug).one_or_none()
+        if net is None:
+            net = Net(slug=slug, name="Test Net")
+            db.add(net)
+            db.flush()
+        m = db.get(NetMembership, (callsign, net.id))
+        if m is None:
+            db.add(NetMembership(user_callsign=callsign, net_id=net.id, role=NetRole.NET_CONTROL))
+        set_config_value(db, "delivery.groupsio.api_key", "stored-key")
+        set_net_config(db, net.id, "delivery.groupsio.group_name", "stored-group")
+        db.commit()
+    return slug
 
 
 @pytest.mark.asyncio
 async def test_groupsio_test_success(admin_client, test_app):
     """Stored credentials + a mocked successful HTTP round-trip → ok=True."""
-    from backend.config_mgmt.service import set_config_value
-
     client, token = admin_client
-    with test_app.state.session_factory() as db:
-        set_config_value(db, "delivery.groupsio.api_key", "stored-key")
-        set_config_value(db, "delivery.groupsio.group_name", "stored-group")
+    slug = _seed_net_for_groupsio_test(test_app.state.session_factory)
 
     mock_draft = MagicMock()
     mock_draft.status_code = 200
@@ -505,7 +525,7 @@ async def test_groupsio_test_success(admin_client, test_app):
 
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
         mock_httpx.post.side_effect = [mock_draft, mock_update, mock_post]
-        resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
+        resp = await client.post(f"/api/nets/{slug}/test/groupsio", cookies={"access_token": token})
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
@@ -521,16 +541,12 @@ async def test_groupsio_test_success(admin_client, test_app):
 @pytest.mark.asyncio
 async def test_groupsio_test_failure_surfaces_error(admin_client, test_app):
     """When the backend fails, the route returns ok=False with the error message."""
-    from backend.config_mgmt.service import set_config_value
-
     client, token = admin_client
-    with test_app.state.session_factory() as db:
-        set_config_value(db, "delivery.groupsio.api_key", "stored-key")
-        set_config_value(db, "delivery.groupsio.group_name", "stored-group")
+    slug = _seed_net_for_groupsio_test(test_app.state.session_factory)
 
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
         mock_httpx.post.side_effect = Exception("network down")
-        resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
+        resp = await client.post(f"/api/nets/{slug}/test/groupsio", cookies={"access_token": token})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -539,14 +555,51 @@ async def test_groupsio_test_failure_surfaces_error(admin_client, test_app):
 
 
 @pytest.mark.asyncio
-async def test_groupsio_test_no_api_key(admin_client):
+async def test_groupsio_test_no_api_key(admin_client, test_app):
     """No stored API key → backend returns 'not configured' without any HTTP call."""
+    from backend.modules.nets.models import Net, NetMembership, NetRole
+
     client, token = admin_client
+    slug = "nokey"
+    with test_app.state.session_factory() as db:
+        net = Net(slug=slug, name="No Key Net")
+        db.add(net)
+        db.flush()
+        db.add(NetMembership(user_callsign="W0NE", net_id=net.id, role=NetRole.NET_CONTROL))
+        db.commit()
+
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
+        resp = await client.post(f"/api/nets/{slug}/test/groupsio", cookies={"access_token": token})
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is False
     assert "not configured" in body["error"].lower()
     mock_httpx.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_groupsio_test_requires_net_control(admin_client, test_app):
+    """A user with no NET_CONTROL role on the net gets 403."""
+    from backend.modules.nets.models import Net
+
+    client, token = admin_client
+    # Seed a net but do NOT add W0NE as a member — admins aren't auto-NET_CONTROL.
+    # Actually admins bypass role checks, so seed a non-admin token instead.
+    from tests.conftest import make_test_token
+    from backend.config import Settings
+
+    with test_app.state.session_factory() as db:
+        from backend.auth.models import User as _User
+        outsider = _User(callsign="W0OUT", oidc_subject="sub|out", name="Outsider")
+        db.add(outsider)
+        net = Net(slug="restricted", name="Restricted Net")
+        db.add(net)
+        db.commit()
+
+    outsider_token = make_test_token("W0OUT", test_app.state.settings, is_admin=False)
+    resp = await client.post(
+        "/api/nets/restricted/test/groupsio",
+        cookies={"access_token": outsider_token},
+    )
+    assert resp.status_code in (403, 404)

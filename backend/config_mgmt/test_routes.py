@@ -408,34 +408,6 @@ class SmtpTestBody(BaseModel):
     to_address: str
 
 
-@test_router.post("/groupsio")
-async def groupsio_test(
-    _: Principal = Depends(require_admin_or_recovery),
-    db: Session = Depends(get_db_session),
-) -> dict:
-    """Post a benign test message to the configured groups.io group.
-
-    Uses the saved api_key and group_name (the frontend never receives the
-    raw api_key — it's masked as '***'), so the operator must Save before
-    Test. Returns {ok, error} so the UI can surface the actual groups.io
-    response body on failure.
-    """
-    from backend.config_mgmt.service import get_config_value
-    from backend.integrations.delivery.backends.groupsio import GroupsIoBackend
-
-    api_key = get_config_value(db, "delivery.groupsio.api_key", "")
-    group_name = get_config_value(db, "delivery.groupsio.group_name", "")
-
-    result = await asyncio.to_thread(
-        GroupsIoBackend().send,
-        "[SkyNetControl] Test Message",
-        "Test Message. Sorry for the noise, please disregard.",
-        {"api_key": api_key, "group_name": group_name},
-    )
-    if result.success:
-        return {"ok": True}
-    return {"ok": False, "error": result.error}
-
 
 @test_router.post("/smtp")
 async def smtp_test(

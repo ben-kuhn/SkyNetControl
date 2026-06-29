@@ -8,7 +8,7 @@ import { Spinner } from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../hooks/useAuth";
 import { useCurrentNet } from "../hooks/useCurrentNet";
-import { getNetConfig, patchNet, setNetConfigBulk } from "../api/nets";
+import { getNetConfig, patchNet, sendGroupsIoTest, setNetConfigBulk } from "../api/nets";
 
 function parseStringArray(raw: string): string[] {
   try {
@@ -203,6 +203,17 @@ export function NetSettingsPage() {
     }
   };
 
+  const handleGroupsIoTest = async () => {
+    if (!confirm("Post a test message to this net's configured groups.io group?")) return;
+    try {
+      const result = await sendGroupsIoTest(slug ?? "");
+      if (result.ok) addToast("Test message posted to groups.io.", "success");
+      else addToast(`Groups.io test failed: ${result.error ?? "unknown error"}`, "error");
+    } catch (e: any) {
+      addToast(`Groups.io test failed: ${e?.detail ?? e?.message ?? "request error"}`, "error");
+    }
+  };
+
   return (
     <div className="max-w-2xl">
       <h1 className="text-xl font-bold text-text-primary mb-6">
@@ -302,7 +313,13 @@ export function NetSettingsPage() {
             onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
             onSave={handleSectionSave("delivery")}
             saving={savingSection === "delivery"}
-          />
+          >
+            {savedConfig["delivery.groupsio.group_name"] && (
+              <Button size="sm" variant="secondary" onClick={handleGroupsIoTest}>
+                Send groups.io test
+              </Button>
+            )}
+          </SettingsSection>
         </>
       )}
     </div>

@@ -14,14 +14,6 @@ export async function setConfigValue(
   });
 }
 
-export interface GroupsIoTestResult {
-  ok: boolean;
-  error?: string;
-}
-
-export async function sendGroupsIoTest(): Promise<GroupsIoTestResult> {
-  return apiFetch<GroupsIoTestResult>("/admin/test/groupsio", { method: "POST" });
-}
 
 export async function setConfigBulk(
   values: Record<string, string>,

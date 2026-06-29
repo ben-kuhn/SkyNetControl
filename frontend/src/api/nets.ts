@@ -74,3 +74,12 @@ export async function setNetConfigBulk(
     body: JSON.stringify({ values }),
   });
 }
+
+export interface GroupsIoTestResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function sendGroupsIoTest(slug: string): Promise<GroupsIoTestResult> {
+  return apiFetch<GroupsIoTestResult>(`/nets/${encodeURIComponent(slug)}/test/groupsio`, { method: "POST" });
+}
