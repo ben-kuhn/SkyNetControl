@@ -35,20 +35,28 @@ class GroupsIoBackend:
         logger.info("groups.io send: group=%r subject=%r", group_name, subject)
 
         try:
+            # /newdraft only accepts group + draft_type; subject/body are
+            # silently ignored here and must be set via /updatedraft before
+            # /postdraft will accept the draft.
             draft_resp = httpx.post(
                 f"{BASE_URL}/newdraft",
                 headers=headers,
                 data={
                     "group_name": group_name,
                     "draft_type": "draft_type_post",
-                    "subject": subject,
-                    "body": body,
                 },
                 timeout=30,
             )
             draft_resp.raise_for_status()
-            draft_data = draft_resp.json()
-            draft_id = draft_data["id"]
+            draft_id = draft_resp.json()["id"]
+
+            update_resp = httpx.post(
+                f"{BASE_URL}/updatedraft",
+                headers=headers,
+                data={"draft_id": draft_id, "subject": subject, "body": body},
+                timeout=30,
+            )
+            update_resp.raise_for_status()
 
             post_resp = httpx.post(
                 f"{BASE_URL}/postdraft",

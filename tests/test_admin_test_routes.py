@@ -494,14 +494,17 @@ async def test_groupsio_test_success(admin_client, test_app):
 
     mock_draft = MagicMock()
     mock_draft.status_code = 200
-    mock_draft.json.return_value = {"draft_id": 1, "group_id": 2}
+    mock_draft.json.return_value = {"id": 1, "group_id": 2}
     mock_draft.raise_for_status = MagicMock()
+    mock_update = MagicMock()
+    mock_update.status_code = 200
+    mock_update.raise_for_status = MagicMock()
     mock_post = MagicMock()
     mock_post.status_code = 200
     mock_post.raise_for_status = MagicMock()
 
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        mock_httpx.post.side_effect = [mock_draft, mock_post]
+        mock_httpx.post.side_effect = [mock_draft, mock_update, mock_post]
         resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
 
     assert resp.status_code == 200
@@ -511,7 +514,8 @@ async def test_groupsio_test_success(admin_client, test_app):
     first_call = mock_httpx.post.call_args_list[0]
     assert first_call.kwargs["headers"]["Authorization"] == "Bearer stored-key"
     assert first_call.kwargs["data"]["group_name"] == "stored-group"
-    assert first_call.kwargs["data"]["body"] == "Test Message. Sorry for the noise, please disregard."
+    update_call = mock_httpx.post.call_args_list[1]
+    assert update_call.kwargs["data"]["body"] == "Test Message. Sorry for the noise, please disregard."
 
 
 @pytest.mark.asyncio
