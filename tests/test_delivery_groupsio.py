@@ -12,7 +12,7 @@ def test_groupsio_backend_success():
 
     mock_response_draft = MagicMock()
     mock_response_draft.status_code = 200
-    mock_response_draft.json.return_value = {"draft_id": 42, "group_id": 7}
+    mock_response_draft.json.return_value = {"id": 42, "group_id": 7}
     mock_response_draft.raise_for_status = MagicMock()
 
     mock_response_post = MagicMock()
@@ -34,6 +34,7 @@ def test_groupsio_backend_success():
     assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-key-123"
     assert calls[0].kwargs["data"]["draft_type"] == "draft_type_post"
     assert "/postdraft" in calls[1].args[0]
+    assert calls[1].kwargs["data"] == {"draft_id": 42}
 
 
 def test_groupsio_backend_draft_failure():

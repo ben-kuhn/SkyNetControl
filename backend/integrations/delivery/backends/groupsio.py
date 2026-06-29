@@ -48,13 +48,12 @@ class GroupsIoBackend:
             )
             draft_resp.raise_for_status()
             draft_data = draft_resp.json()
-            draft_id = draft_data["draft_id"]
-            group_id = draft_data["group_id"]
+            draft_id = draft_data["id"]
 
             post_resp = httpx.post(
                 f"{BASE_URL}/postdraft",
                 headers=headers,
-                data={"draft_id": draft_id, "group_id": group_id},
+                data={"draft_id": draft_id},
                 timeout=30,
             )
             post_resp.raise_for_status()
@@ -66,5 +65,5 @@ class GroupsIoBackend:
             logger.warning("groups.io send failed: %s: %s", type(exc).__name__, exc)
             return DeliveryResult(success=False, error=f"{type(exc).__name__}: {exc}")
 
-        logger.info("groups.io send ok: draft_id=%s group_id=%s", draft_id, group_id)
+        logger.info("groups.io send ok: draft_id=%s", draft_id)
         return DeliveryResult(success=True, error=None)
