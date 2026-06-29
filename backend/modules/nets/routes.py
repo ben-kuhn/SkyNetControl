@@ -17,7 +17,7 @@ from backend.auth.dependencies import (
 )
 from backend.auth.models import User
 from backend.modules.nets import service
-from backend.modules.nets.config_service import set_net_config
+from backend.modules.nets.config_service import set_net_config, set_net_config_bulk
 from backend.modules.nets.models import Net, NetRole
 
 router = APIRouter(prefix="/api/nets", tags=["nets"])
@@ -57,6 +57,10 @@ class MemberOut(BaseModel):
 
 class MemberIn(BaseModel):
     role: NetRole
+
+
+class NetConfigBulkIn(BaseModel):
+    values: dict[str, str]
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +197,16 @@ def get_config(
     db: Session = Depends(get_db_session),
 ):
     return service.list_net_config(db, net=ctx.net)
+
+
+@router.put("/{net_slug}/config/bulk")
+def put_config_bulk(
+    body: NetConfigBulkIn,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    set_net_config_bulk(db, ctx.net.id, body.values)
+    return {"ok": True, "count": len(body.values)}
 
 
 @router.put("/{net_slug}/config/{key}")

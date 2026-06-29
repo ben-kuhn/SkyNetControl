@@ -22,3 +22,16 @@ def set_net_config(db: Session, net_id: int, key: str, value: str) -> None:
         row.value = value
         row.updated_at = datetime.now(timezone.utc)
     db.commit()
+
+
+def set_net_config_bulk(db: Session, net_id: int, values: dict[str, str]) -> None:
+    """Upsert many per-net config keys in a single transaction."""
+    now = datetime.now(timezone.utc)
+    for key, value in values.items():
+        row = db.get(NetConfig, (net_id, key))
+        if row is None:
+            db.add(NetConfig(net_id=net_id, key=key, value=value))
+        else:
+            row.value = value
+            row.updated_at = now
+    db.commit()

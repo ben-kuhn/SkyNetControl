@@ -104,3 +104,45 @@ def test_set_net_config_updates_updated_at():
     row2 = db.get(NetConfig, (net.id, "ts.key"))
     # updated_at is set explicitly in set_net_config on update path
     assert row2.updated_at >= t1
+
+
+def test_set_net_config_bulk_upserts_all_keys():
+    from backend.modules.nets.config_service import set_net_config_bulk
+
+    db = _make_db()
+    net = _make_net(db)
+    set_net_config_bulk(db, net.id, {"k1": "v1", "k2": "v2"})
+    assert get_net_config(db, net.id, "k1") == "v1"
+    assert get_net_config(db, net.id, "k2") == "v2"
+
+
+def test_set_net_config_bulk_updates_existing_keys():
+    from backend.modules.nets.config_service import set_net_config_bulk
+
+    db = _make_db()
+    net = _make_net(db)
+    set_net_config(db, net.id, "k1", "old")
+    set_net_config_bulk(db, net.id, {"k1": "new", "k2": "fresh"})
+    assert get_net_config(db, net.id, "k1") == "new"
+    assert get_net_config(db, net.id, "k2") == "fresh"
+
+
+def test_set_net_config_bulk_isolated_per_net():
+    from backend.modules.nets.config_service import set_net_config_bulk
+
+    db = _make_db()
+    net_a = _make_net(db, "net-a")
+    net_b = _make_net(db, "net-b")
+    set_net_config_bulk(db, net_a.id, {"k": "a"})
+    set_net_config_bulk(db, net_b.id, {"k": "b"})
+    assert get_net_config(db, net_a.id, "k") == "a"
+    assert get_net_config(db, net_b.id, "k") == "b"
+
+
+def test_set_net_config_bulk_empty_dict_is_noop():
+    from backend.modules.nets.config_service import set_net_config_bulk
+
+    db = _make_db()
+    net = _make_net(db)
+    set_net_config_bulk(db, net.id, {})
+    assert get_net_config(db, net.id, "anything") is None
