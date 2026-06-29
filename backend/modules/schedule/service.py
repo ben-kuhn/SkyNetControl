@@ -28,6 +28,7 @@ def create_session(
     db: Session,
     start_date: date,
     session_type: SessionType,
+    net_id: int,
     end_date: date | None = None,
     season_id: int | None = None,
     grace_period_hours: float = 24.0,
@@ -35,6 +36,7 @@ def create_session(
     activity_id: int | None = None,
 ) -> NetSession:
     session_obj = NetSession(
+        net_id=net_id,
         season_id=season_id,
         start_date=start_date,
         end_date=end_date,
@@ -64,15 +66,8 @@ def get_session(db: Session, session_id: int, net_id: int | None = None) -> NetS
     session_obj = db.get(NetSession, session_id)
     if session_obj is None:
         return None
-    if net_id is not None:
-        # Resolve isolation: the session must be reachable via a season that
-        # belongs to *net_id*. An orphaned session (season_id=NULL) cannot be
-        # attributed to any net, so it is treated as not found.
-        if session_obj.season_id is None:
-            return None
-        season = db.get(NetSeason, session_obj.season_id)
-        if season is None or season.net_id != net_id:
-            return None
+    if net_id is not None and session_obj.net_id != net_id:
+        return None
     return session_obj
 
 
@@ -82,18 +77,7 @@ def list_sessions(
     season_id: int | None = None,
     status: SessionStatus | None = None,
 ) -> list[NetSession]:
-    # Sessions without a season (orphaned completed rows) cannot be attributed
-    # to a specific net via the season join, so they are excluded from the
-    # per-net listing.  They remain accessible individually via get_session
-    # (called without net_id) — e.g. for historical check-in lookups — but
-    # will NOT appear in this list even if their original season belonged to
-    # this net, because the INNER JOIN on NetSeason requires season_id IS NOT
-    # NULL.
-    query = (
-        db.query(NetSession)
-        .join(NetSeason, NetSession.season_id == NetSeason.id)
-        .filter(NetSeason.net_id == net_id)
-    )
+    query = db.query(NetSession).filter(NetSession.net_id == net_id)
     if season_id is not None:
         query = query.filter(NetSession.season_id == season_id)
     if status is not None:
@@ -182,6 +166,7 @@ def _generate_weekly_sessions(
         )
 
         session = NetSession(
+            net_id=season.net_id,
             season_id=season.id,
             start_date=current,
             end_date=current + timedelta(days=1),
@@ -218,6 +203,7 @@ def _generate_week_long_sessions(
         )
 
         session = NetSession(
+            net_id=season.net_id,
             season_id=season.id,
             start_date=current,
             end_date=week_end,

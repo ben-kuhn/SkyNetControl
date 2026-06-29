@@ -159,9 +159,10 @@ def test_generate_week_long_sessions(db: Session, net: Net):
     assert sessions[2].end_date == date(2026, 6, 21)
 
 
-def test_create_adhoc_session(db: Session):
+def test_create_adhoc_session(db: Session, net: Net):
     session_obj = create_session(
         db,
+        net_id=net.id,
         start_date=date(2026, 4, 15),
         session_type=SessionType.REGULAR_CHECKIN,
         net_control_callsign="W0NE",
@@ -174,9 +175,10 @@ def test_create_adhoc_session(db: Session):
     assert session_obj.grace_period_hours == 24.0
 
 
-def test_create_real_event_session(db: Session):
+def test_create_real_event_session(db: Session, net: Net):
     session_obj = create_session(
         db,
+        net_id=net.id,
         start_date=date(2026, 4, 15),
         session_type=SessionType.REAL_EVENT,
         net_control_callsign="W0NE",
@@ -186,9 +188,10 @@ def test_create_real_event_session(db: Session):
     assert session_obj.end_date is None
 
 
-def test_get_session(db: Session):
+def test_get_session(db: Session, net: Net):
     created = create_session(
         db,
+        net_id=net.id,
         start_date=date(2026, 4, 15),
         session_type=SessionType.REGULAR_CHECKIN,
     )
@@ -215,15 +218,16 @@ def test_list_sessions_no_filter(db: Session, net: Net):
     db.commit()
     generate_sessions(db, season)
 
-    # Ad-hoc session has no season → not attributable to a net; excluded from list
+    # Ad-hoc REAL_EVENT session is stamped with net_id directly → included in list
     create_session(
         db,
+        net_id=net.id,
         start_date=date(2026, 4, 15),
         session_type=SessionType.REAL_EVENT,
     )
 
     all_sessions = list_sessions(db, net_id=net.id)
-    assert len(all_sessions) == 2  # only the 2 from the season
+    assert len(all_sessions) == 3  # 2 from the season + 1 REAL_EVENT
 
 
 def test_list_sessions_filter_by_season(db: Session, net: Net):
@@ -243,6 +247,7 @@ def test_list_sessions_filter_by_season(db: Session, net: Net):
 
     create_session(
         db,
+        net_id=net.id,
         start_date=date(2026, 4, 15),
         session_type=SessionType.REAL_EVENT,
     )
@@ -278,9 +283,10 @@ def test_list_sessions_filter_by_status(db: Session, net: Net):
     assert cancelled[0].id == s1.id
 
 
-def test_update_session(db: Session):
+def test_update_session(db: Session, net: Net):
     session_obj = create_session(
         db,
+        net_id=net.id,
         start_date=date(2026, 4, 15),
         session_type=SessionType.REAL_EVENT,
     )

@@ -49,11 +49,8 @@ def create_notification(
 
 
 def _get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
-    """Resolve the net_id for a session by joining through its season."""
-    if net_session.season_id is None:
-        return None
-    season = db.get(NetSeason, net_session.season_id)
-    return season.net_id if season else None
+    """Resolve the net_id for a session via its explicit column."""
+    return net_session.net_id
 
 
 def list_for_user(

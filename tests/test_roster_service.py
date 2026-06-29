@@ -751,7 +751,7 @@ def test_generate_due_drafts_creates_notification(db, season_and_sessions, defau
 # ---------------------------------------------------------------------------
 
 
-def test_mark_sent_purges_session_source_files(db, tmp_path, monkeypatch):
+def test_mark_sent_purges_session_source_files(db, net_id, tmp_path, monkeypatch):
     """A successful mark_sent deletes the session's PAT mailbox files."""
     from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus
     from backend.modules.roster.service import mark_sent
@@ -760,6 +760,7 @@ def test_mark_sent_purges_session_source_files(db, tmp_path, monkeypatch):
     from datetime import date, datetime, timezone
 
     net_session = NetSession(
+        net_id=net_id,
         season_id=None,
         start_date=date.today(),
         end_date=date.today(),
@@ -822,7 +823,7 @@ def test_mark_sent_purges_session_source_files(db, tmp_path, monkeypatch):
     assert not src.exists(), "source file must be purged after a successful send"
 
 
-def test_mark_sent_failure_does_not_purge(db, tmp_path, monkeypatch):
+def test_mark_sent_failure_does_not_purge(db, net_id, tmp_path, monkeypatch):
     """A failed delivery (mark_sent returns None) leaves files in place."""
     from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus
     from backend.modules.roster.service import mark_sent
@@ -831,6 +832,7 @@ def test_mark_sent_failure_does_not_purge(db, tmp_path, monkeypatch):
     from datetime import date, datetime, timezone
 
     net_session = NetSession(
+        net_id=net_id,
         season_id=None,
         start_date=date.today(),
         end_date=date.today(),
@@ -891,7 +893,7 @@ def test_mark_sent_failure_does_not_purge(db, tmp_path, monkeypatch):
     assert src.exists(), "source files must remain when delivery failed"
 
 
-def test_skip_roster_purges_session_source_files(db, tmp_path):
+def test_skip_roster_purges_session_source_files(db, net_id, tmp_path):
     from backend.modules.checkins.models import RawMessage, CheckIn, MessageType, ParseStatus, TimingStatus
     from backend.modules.roster.service import skip_roster
     from backend.modules.roster.models import RosterLog, RosterStatus
@@ -899,6 +901,7 @@ def test_skip_roster_purges_session_source_files(db, tmp_path):
     from datetime import date, datetime, timezone
 
     net_session = NetSession(
+        net_id=net_id,
         season_id=None,
         start_date=date.today(),
         end_date=date.today(),

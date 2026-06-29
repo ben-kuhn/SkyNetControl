@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Float,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,6 +52,11 @@ class NetSession(Base):
     __tablename__ = "net_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # net_id is the source of truth for cross-net isolation. For sessions with a
+    # season, it must match the season's net_id; for orphans (REAL_EVENT) it's
+    # the only link to a net. No DB-level CHECK enforces the season match —
+    # routes only ever set net_id from ctx.net.id, so the invariant holds.
+    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), nullable=False, index=True)
     season_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("net_seasons.id"), nullable=True)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -61,3 +67,21 @@ class NetSession(Base):
     net_control_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     season: Mapped["NetSeason | None"] = relationship(back_populates="sessions")
+
+
+@event.listens_for(NetSession, "before_insert")
+def _backfill_net_id_from_season(_mapper, connection, target: "NetSession") -> None:
+    """If a caller forgot to set net_id but provided a season, derive it from the season.
+
+    Production routes always set net_id explicitly from ctx.net.id; this is a safety net
+    so a missed call site (or a test fixture) doesn't silently insert a NULL — SQLAlchemy
+    would raise a confusing IntegrityError instead of a clear cross-net leak."""
+    if target.net_id is not None:
+        return
+    if target.season_id is None:
+        return
+    row = connection.execute(
+        NetSeason.__table__.select().with_only_columns(NetSeason.net_id).where(NetSeason.id == target.season_id)
+    ).first()
+    if row is not None:
+        target.net_id = row[0]

@@ -152,10 +152,16 @@ def rich_db():
         session.add_all([admin, target])
         session.flush()
 
+        from backend.modules.nets.models import Net
         from backend.modules.schedule.models import NetSession
+
+        net = Net(slug="t", name="Test Net")
+        session.add(net)
+        session.flush()
 
         net_session = NetSession(
             id=1,
+            net_id=net.id,
             start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
             grace_period_hours=1,
             session_type="regular",
@@ -192,11 +198,6 @@ def rich_db():
             timing_status=TimingStatus.ON_TIME,
         )
         session.add(checkin)
-
-        from backend.modules.nets.models import Net
-        net = Net(slug="t", name="Test Net")
-        session.add(net)
-        session.flush()
 
         member = Member(
             net_id=net.id,

@@ -745,9 +745,10 @@ def test_scan_creates_no_notification_when_no_imports(db, season_and_session):
     assert db.query(Notification).count() == 0
 
 
-def test_scan_and_import_persists_source_path(db, tmp_path):
+def test_scan_and_import_persists_source_path(db, net_id, tmp_path):
     """New imports record their on-disk path on the RawMessage row."""
     net_session = NetSession(
+        net_id=net_id,
         start_date=date.today(),
         end_date=date.today(),
         status=SessionStatus.SCHEDULED,
@@ -777,9 +778,10 @@ def test_scan_and_import_persists_source_path(db, tmp_path):
     assert src.exists()
 
 
-def test_scan_and_import_upserts_source_path_on_rescan(db, tmp_path):
+def test_scan_and_import_upserts_source_path_on_rescan(db, net_id, tmp_path):
     """A rescan of the same message backfills source_path if it was NULL."""
     net_session = NetSession(
+        net_id=net_id,
         start_date=date.today(),
         end_date=date.today(),
         status=SessionStatus.SCHEDULED,
@@ -822,8 +824,9 @@ def test_scan_and_import_upserts_source_path_on_rescan(db, tmp_path):
     assert src.exists(), "scan must NOT delete the file at import time"
 
 
-def test_purge_session_source_files_deletes_all_paths(db, tmp_path):
+def test_purge_session_source_files_deletes_all_paths(db, net_id, tmp_path):
     net_session = NetSession(
+        net_id=net_id,
         start_date=date.today(),
         end_date=date.today(),
         status=SessionStatus.SCHEDULED,
@@ -869,9 +872,10 @@ def test_purge_session_source_files_deletes_all_paths(db, tmp_path):
         assert not p.exists()
 
 
-def test_purge_session_source_files_skips_null_paths(db, tmp_path):
+def test_purge_session_source_files_skips_null_paths(db, net_id, tmp_path):
     """Rows with NULL source_path (pre-migration) are silently skipped."""
     net_session = NetSession(
+        net_id=net_id,
         start_date=date.today(),
         end_date=date.today(),
         status=SessionStatus.SCHEDULED,

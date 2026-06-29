@@ -159,7 +159,6 @@ async def create_season(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    # require_net_role(NET_CONTROL) already enforces the role — no manual guard needed.
     if body.end_date < body.start_date:
         raise HTTPException(status_code=400, detail="end_date must not be before start_date")
     if not body.is_week_long and body.day_of_week is None:
@@ -243,6 +242,7 @@ async def create_session_route(
         db,
         start_date=body.start_date,
         session_type=body.session_type,
+        net_id=ctx.net.id,
         end_date=body.end_date,
         season_id=body.season_id,
         grace_period_hours=body.grace_period_hours,

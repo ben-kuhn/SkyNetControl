@@ -241,8 +241,16 @@ def build_roster_context(db: Session, net_session: NetSession) -> dict:
 
     session_url = f"{settings.app_base_url}/checkins?session={net_session.id}"
 
-    net_callsign = get_config_value(db, "default_net_control", default="") or ""
-    net_address = get_config_value(db, "net_address", default="") or ""
+    # Per-net values first; fall back to global AppConfig for installations not
+    # yet migrated to net_config.
+    from backend.modules.nets.config_service import get_net_config
+
+    net_callsign = get_net_config(db, net_session.net_id, "default_net_control", "") or ""
+    net_address = get_net_config(db, net_session.net_id, "net_address", "") or ""
+    if not net_callsign:
+        net_callsign = get_config_value(db, "default_net_control", default="") or ""
+    if not net_address:
+        net_address = get_config_value(db, "net_address", default="") or ""
 
     return {
         "date": date_str,
@@ -297,12 +305,8 @@ def render_roster(
 
 
 def _get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
-    """Resolve the net_id for a session by joining through its season."""
-    if net_session.season_id is None:
-        return None
-    from backend.modules.schedule.models import NetSeason
-    season = db.get(NetSeason, net_session.season_id)
-    return season.net_id if season else None
+    """Resolve the net_id for a session via its explicit column."""
+    return net_session.net_id
 
 
 def generate_draft(

@@ -211,8 +211,16 @@ def build_template_context(db: Session, net_session: NetSession) -> dict:
 
     next_week_preview = _build_next_week_preview(db, net_session)
 
-    net_callsign = get_config_value(db, "default_net_control", default="") or ""
-    net_address = get_config_value(db, "net_address", default="") or ""
+    # Pull net-scoped values from net_config; fall back to the global AppConfig
+    # for installations not yet migrated.
+    from backend.modules.nets.config_service import get_net_config
+
+    net_callsign = get_net_config(db, net_session.net_id, "default_net_control", "") or ""
+    net_address = get_net_config(db, net_session.net_id, "net_address", "") or ""
+    if not net_callsign:
+        net_callsign = get_config_value(db, "default_net_control", default="") or ""
+    if not net_address:
+        net_address = get_config_value(db, "net_address", default="") or ""
 
     return {
         "date": date_str,
@@ -255,13 +263,8 @@ def render_reminder(
 
 
 def _get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
-    """Resolve the net_id for a session by joining through its season."""
-    if net_session.season_id is None:
-        return None
-    from backend.modules.schedule.models import NetSeason
-
-    season = db.get(NetSeason, net_session.season_id)
-    return season.net_id if season else None
+    """Resolve the net_id for a session via its explicit column."""
+    return net_session.net_id
 
 
 def generate_draft(

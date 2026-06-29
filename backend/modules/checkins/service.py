@@ -105,11 +105,12 @@ def classify_timing(net_session: NetSession, received_at: datetime) -> TimingSta
 
 
 def get_net_id_for_session(db: Session, net_session: NetSession) -> int | None:
-    """Resolve the net_id for a session by joining through its season."""
-    if net_session.season_id is None:
-        return None
-    season = db.get(NetSeason, net_session.season_id)
-    return season.net_id if season else None
+    """Resolve the net_id for a session.
+
+    Reads ``net_session.net_id`` directly. The legacy season-join fallback was
+    removed once every session row gained an explicit ``net_id`` column.
+    """
+    return net_session.net_id
 
 
 def is_new_member(db: Session, net_id: int, callsign: str) -> bool:

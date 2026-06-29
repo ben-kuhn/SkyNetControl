@@ -114,8 +114,9 @@ def test_session_belongs_to_season(db: Session, net: Net):
     assert season.sessions[0].id == s1.id
 
 
-def test_create_real_event_session_no_season(db: Session):
+def test_create_real_event_session_no_season(db: Session, net: Net):
     session_obj = NetSession(
+        net_id=net.id,
         season_id=None,
         start_date=date(2026, 4, 15),
         end_date=None,
