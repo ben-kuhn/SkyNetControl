@@ -90,10 +90,37 @@ def dispatch_delivery(
         else:
             log.status = DeliveryStatus.FAILED
             log.error_message = result.error
+            logger.warning(
+                "Delivery failed (%s %s/%s): %s",
+                name, content_type, content_id, result.error,
+            )
 
         db.commit()
 
     return any_success
+
+
+def get_last_attempt_errors(db: Session, content_type: str, content_id: int) -> list[str]:
+    """Return error messages from the most recent failed attempts per backend.
+
+    Used so 'send failed' API responses can surface the actual backend error
+    (e.g. groups.io's response body) instead of a generic message.
+    """
+    logs = (
+        db.query(DeliveryLog)
+        .filter_by(content_type=content_type, content_id=content_id, status=DeliveryStatus.FAILED)
+        .order_by(DeliveryLog.created_at.desc())
+        .all()
+    )
+    seen: set[str] = set()
+    errors: list[str] = []
+    for log in logs:
+        if log.backend in seen:
+            continue
+        seen.add(log.backend)
+        if log.error_message:
+            errors.append(f"{log.backend}: {log.error_message}")
+    return errors
 
 
 def _lookup_content(db: Session, content_type: str, content_id: int) -> tuple[str, str]:

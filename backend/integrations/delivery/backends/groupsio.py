@@ -1,8 +1,24 @@
+import logging
+
 import httpx
+from httpx import HTTPStatusError
 
 from backend.integrations.delivery.backends.base import DeliveryResult
 
 BASE_URL = "https://groups.io/api/v1"
+
+logger = logging.getLogger(__name__)
+
+
+def _format_http_error(exc: HTTPStatusError) -> str:
+    # raise_for_status() produces a message without the response body, so the
+    # actual groups.io error (bad group_name, moderation required, etc.) is
+    # invisible to operators. Include a snippet of the body in the stored error.
+    body = (exc.response.text or "").strip()
+    if len(body) > 500:
+        body = body[:500] + "…"
+    base = f"groups.io HTTP {exc.response.status_code} from {exc.request.url}"
+    return f"{base}: {body}" if body else base
 
 
 class GroupsIoBackend:
@@ -15,6 +31,8 @@ class GroupsIoBackend:
 
         group_name = config.get("group_name", "")
         headers = {"Authorization": f"Bearer {api_key}"}
+
+        logger.info("groups.io send: group=%r subject=%r", group_name, subject)
 
         try:
             draft_resp = httpx.post(
@@ -35,7 +53,13 @@ class GroupsIoBackend:
                 timeout=30,
             )
             post_resp.raise_for_status()
-
-            return DeliveryResult(success=True, error=None)
+        except HTTPStatusError as exc:
+            error = _format_http_error(exc)
+            logger.warning("groups.io send failed: %s", error)
+            return DeliveryResult(success=False, error=error)
         except Exception as exc:
-            return DeliveryResult(success=False, error=str(exc))
+            logger.warning("groups.io send failed: %s: %s", type(exc).__name__, exc)
+            return DeliveryResult(success=False, error=f"{type(exc).__name__}: {exc}")
+
+        logger.info("groups.io send ok: draft_id=%s group_id=%s", draft_id, group_id)
+        return DeliveryResult(success=True, error=None)

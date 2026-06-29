@@ -310,12 +310,18 @@ async def mark_sent_route(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
+    from backend.integrations.delivery.service import get_last_attempt_errors
+
     log = db.get(ReminderLog, reminder_id)
     if log is None or not _verify_log_net(db, log, ctx.net.id):
         raise HTTPException(status_code=404, detail="Reminder not found")
+    if log.status != ReminderStatus.APPROVED:
+        raise HTTPException(status_code=409, detail="Reminder not in approved status")
     result = mark_sent(db, reminder_id)
     if result is None:
-        raise HTTPException(status_code=409, detail="Reminder not in approved status")
+        errors = get_last_attempt_errors(db, "reminder", reminder_id)
+        detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
+        raise HTTPException(status_code=502, detail=detail)
     return _reminder_to_response(result)
 
 

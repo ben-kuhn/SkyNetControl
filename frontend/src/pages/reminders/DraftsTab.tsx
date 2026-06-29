@@ -273,11 +273,7 @@ function DetailPanel({
       onChanged(updated);
       onInfo("Reminder sent.");
     } catch (e: any) {
-      if (e?.status === 409) {
-        onError("Send failed — verify delivery backends are configured (Config page).");
-      } else {
-        onError(e?.detail ?? e?.message ?? "Send failed");
-      }
+      onError(e?.detail ?? e?.message ?? "Send failed");
     }
   };
 

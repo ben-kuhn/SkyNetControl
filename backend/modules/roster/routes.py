@@ -345,12 +345,20 @@ async def mark_sent_route(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
+    from backend.integrations.delivery.service import get_last_attempt_errors
+
     log = db.get(RosterLog, roster_id)
     if log is None or not _verify_log_net(db, log, ctx.net.id):
         raise HTTPException(status_code=404, detail="Roster not found")
+    if log.status != RosterStatus.APPROVED:
+        raise HTTPException(status_code=409, detail="Roster not in approved status")
     result = mark_sent_service(db, roster_id)
     if result is None:
-        raise HTTPException(status_code=409, detail="Roster not in approved status")
+        # mark_sent kept status APPROVED because delivery failed. Surface the
+        # actual backend errors so the UI doesn't show a generic message.
+        errors = get_last_attempt_errors(db, "roster", roster_id)
+        detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
+        raise HTTPException(status_code=502, detail=detail)
     return _roster_to_response(result)
 
 
