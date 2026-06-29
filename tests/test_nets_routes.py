@@ -186,9 +186,16 @@ async def test_list_nets_includes_role_for_member(client, test_settings, db_setu
 
 @pytest.mark.asyncio
 async def test_list_nets_role_is_none_for_admin_without_membership(client, test_settings, db_setup):
-    """Admin with no explicit membership sees role=null for nets they own implicitly."""
+    """Admin with no explicit membership sees role=null for nets they see implicitly via is_admin.
+
+    create_net now auto-adds the creator as net_control, so to exercise the "admin
+    sees a net but isn't a member" path we have to remove the membership after.
+    """
     with db_setup() as db:
-        create_net(db, slug="admin-only", name="Admin Only", creator_callsign="W0ADM")
+        net = create_net(db, slug="admin-only", name="Admin Only", creator_callsign="W0ADM")
+        membership = db.get(NetMembership, ("W0ADM", net.id))
+        db.delete(membership)
+        db.commit()
     token = _admin_token(test_settings)
     resp = await client.get("/api/nets", cookies={"access_token": token})
     assert resp.status_code == 200
@@ -426,15 +433,15 @@ async def test_delete_member_not_found_returns_404(client, test_settings, db_set
 @pytest.mark.asyncio
 async def test_list_members_as_viewer(client, test_settings, db_setup):
     with db_setup() as db:
+        # W0ADM is auto-added as NET_CONTROL by create_net; KD0TST is added explicitly.
         net = create_net(db, slug="list-mem", name="List Mem", creator_callsign="W0ADM")
         add_member(db, net=net, callsign="KD0TST", role=NetRole.VIEWER)
     token = make_test_token("KD0TST", test_settings, token_version=1)
     resp = await client.get("/api/nets/list-mem/members", cookies={"access_token": token})
     assert resp.status_code == 200
     members = resp.json()
-    assert len(members) == 1
-    assert members[0]["callsign"] == "KD0TST"
-    assert members[0]["role"] == "viewer"
+    by_callsign = {m["callsign"]: m["role"] for m in members}
+    assert by_callsign == {"W0ADM": "net_control", "KD0TST": "viewer"}
 
 
 # ---------------------------------------------------------------------------

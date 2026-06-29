@@ -27,7 +27,13 @@ def validate_slug(slug: str) -> None:
 
 
 def create_net(db: Session, *, slug: str, name: str, creator_callsign: str) -> Net:
-    """Create a new Net, validate slug, seed default templates, return the Net."""
+    """Create a new Net, validate slug, seed default templates, return the Net.
+
+    The creator is added as a NET_CONTROL member. Admins implicitly see every net
+    via `User.is_admin`, but membership is what owns operational role assignment —
+    without it, admin-but-not-net-creator deployments lose net_control affordances
+    when admin status gets revoked later.
+    """
     validate_slug(slug)
 
     existing = db.query(Net).filter(Net.slug == slug).one_or_none()
@@ -39,6 +45,7 @@ def create_net(db: Session, *, slug: str, name: str, creator_callsign: str) -> N
     db.flush()  # assign net.id
 
     net_seeds.seed_default_net_content(db, net.id)
+    db.add(NetMembership(user_callsign=creator_callsign, net_id=net.id, role=NetRole.NET_CONTROL))
 
     db.commit()
     db.refresh(net)

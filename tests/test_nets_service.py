@@ -67,6 +67,7 @@ def test_invalid_slugs(bad):
 
 def test_create_net_basic():
     db = _make_db()
+    _seed_user(db, "W0NE")
     net = create_net(db, slug="w0ne", name="W0NE Weekly Net", creator_callsign="W0NE")
     assert net.id is not None
     assert net.slug == "w0ne"
@@ -74,8 +75,18 @@ def test_create_net_basic():
     assert net.is_public is True
 
 
+def test_create_net_adds_creator_as_net_control():
+    db = _make_db()
+    _seed_user(db, "W0NE")
+    net = create_net(db, slug="w0ne", name="W0NE Weekly Net", creator_callsign="W0NE")
+    membership = db.get(NetMembership, ("W0NE", net.id))
+    assert membership is not None
+    assert membership.role == NetRole.NET_CONTROL
+
+
 def test_create_net_duplicate_slug_raises():
     db = _make_db()
+    _seed_user(db, "W0NE")
     create_net(db, slug="dup-net", name="Net One", creator_callsign="W0NE")
     with pytest.raises(ValueError, match="already exists"):
         create_net(db, slug="dup-net", name="Net Two", creator_callsign="W0NE")
@@ -83,12 +94,14 @@ def test_create_net_duplicate_slug_raises():
 
 def test_create_net_bad_slug_raises():
     db = _make_db()
+    _seed_user(db, "W0NE")
     with pytest.raises(ValueError):
         create_net(db, slug="Bad_Slug!", name="Bad Net", creator_callsign="W0NE")
 
 
 def test_create_net_calls_seed_default_net_content():
     db = _make_db()
+    _seed_user(db, "W0NE")
     with patch("backend.modules.nets.service.net_seeds.seed_default_net_content") as mock_seed:
         net = create_net(db, slug="seed-net", name="Seed Net", creator_callsign="W0NE")
         mock_seed.assert_called_once_with(db, net.id)

@@ -381,19 +381,26 @@ async def test_me_returns_nets(test_client, test_settings, db_setup):
 
 @pytest.mark.asyncio
 async def test_me_admin_nets_only_explicit_memberships(test_client, test_settings, db_setup):
-    """Admin user's nets array only includes their explicit memberships (not all nets)."""
+    """Admin user's /me nets array reflects explicit memberships, not the global net list.
+
+    create_net auto-adds the creator as net_control, so the membership the admin sees
+    here is from being the creator. A second net created by someone else (or with the
+    auto-membership removed) wouldn't appear in /me even though the admin can see it
+    via the implicit is_admin-grants-everything path in GET /api/nets.
+    """
     _, factory = db_setup
     with factory() as session:
         session.add(User(callsign="W0ADM", oidc_subject="auth0|admin", name="Admin", is_admin=True))
         session.commit()
         create_net(session, slug="admin-net", name="Admin Net", creator_callsign="W0ADM")
-        # admin is not an explicit member of this net
 
     token = make_test_token("W0ADM", test_settings, is_admin=True, token_version=0)
     response = await test_client.get("/api/auth/me", cookies={"access_token": token})
     assert response.status_code == 200
     data = response.json()
-    assert data["nets"] == []  # admin sees all nets via /api/nets, but /me only lists explicit memberships
+    assert len(data["nets"]) == 1
+    assert data["nets"][0]["slug"] == "admin-net"
+    assert data["nets"][0]["role"] == "net_control"
 
 
 @pytest.mark.asyncio
