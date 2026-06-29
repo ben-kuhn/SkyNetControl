@@ -38,7 +38,12 @@ class GroupsIoBackend:
             draft_resp = httpx.post(
                 f"{BASE_URL}/newdraft",
                 headers=headers,
-                data={"group_name": group_name, "subject": subject, "body": body},
+                data={
+                    "group_name": group_name,
+                    "draft_type": "draft_type_post",
+                    "subject": subject,
+                    "body": body,
+                },
                 timeout=30,
             )
             draft_resp.raise_for_status()

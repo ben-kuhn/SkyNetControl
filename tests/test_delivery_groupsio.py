@@ -32,6 +32,7 @@ def test_groupsio_backend_success():
     assert len(calls) == 2
     assert "/newdraft" in calls[0].args[0]
     assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-key-123"
+    assert calls[0].kwargs["data"]["draft_type"] == "draft_type_post"
     assert "/postdraft" in calls[1].args[0]
 
 
