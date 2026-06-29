@@ -34,7 +34,6 @@ from backend.integrations.callbook.service import is_callbook_configured, lookup
 from backend.modules.nets.models import NetRole
 from backend.modules.schedule.models import NetSession
 
-# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
 checkins_router = APIRouter(prefix="/api/nets/{net_slug}/checkins", tags=["checkins"])
 
 

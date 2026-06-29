@@ -22,7 +22,6 @@ from backend.modules.reminders.service import (
 )
 from backend.modules.schedule.models import NetSession, NetSeason
 
-# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
 reminders_router = APIRouter(prefix="/api/nets/{net_slug}/reminders", tags=["reminders"])
 
 

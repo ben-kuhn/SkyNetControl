@@ -26,10 +26,14 @@ export function CurrentNetProvider({ children }: { children: React.ReactNode }) 
     setLoading(true);
     setError(null);
     getNet(slug)
-      .then((n) => { setNet(n); setLoading(false); })
+      .then((n) => {
+        setNet(n);
+        setLoading(false);
+        // Only remember slugs that resolve — otherwise a deleted/forbidden net
+        // gets stuck as the slug-less redirect target.
+        localStorage.setItem("lastNetSlug", slug);
+      })
       .catch((e) => { setError(String(e)); setLoading(false); });
-    // Remember the last-visited net slug so slug-less redirects can restore it
-    localStorage.setItem("lastNetSlug", slug);
   }, [slug]);
 
   const role: NetRole | "admin" | null = user?.is_admin

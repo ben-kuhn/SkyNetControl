@@ -23,7 +23,6 @@ from backend.modules.roster.service import (
 )
 from backend.modules.schedule.models import NetSession
 
-# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
 roster_router = APIRouter(prefix="/api/nets/{net_slug}/roster", tags=["roster"])
 
 

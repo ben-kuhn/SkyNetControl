@@ -26,7 +26,6 @@ from backend.modules.activities.service import (
 
 logger = logging.getLogger(__name__)
 
-# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
 activities_router = APIRouter(prefix="/api/nets/{net_slug}/activities", tags=["activities"])
 
 

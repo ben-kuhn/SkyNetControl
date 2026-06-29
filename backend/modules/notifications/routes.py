@@ -12,7 +12,6 @@ from backend.modules.notifications.service import (
     mark_read,
 )
 
-# TODO(Task 13): replace DEFAULT_NET_SLUG with CurrentNetContext once available.
 notifications_router = APIRouter(prefix="/api/nets/{net_slug}/notifications", tags=["notifications"])
 
 

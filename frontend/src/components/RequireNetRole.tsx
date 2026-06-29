@@ -48,8 +48,8 @@ export function RequireNetRole({ children, min }: RequireNetRoleProps) {
     );
   }
 
-  const effectiveRole = role ?? "viewer"; // null means no membership → lowest rank
-  const hasAccess = role !== null && ROLE_RANK[effectiveRole] >= ROLE_RANK[min];
+  // Null role means no membership (e.g. anonymous on a public net) — deny.
+  const hasAccess = role !== null && ROLE_RANK[role] >= ROLE_RANK[min];
 
   if (!hasAccess) {
     return (
