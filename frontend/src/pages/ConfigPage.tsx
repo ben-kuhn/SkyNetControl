@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useToast } from "../context/ToastContext";
-import { fetchConfig, setConfigValue } from "../api/config";
+import { fetchConfig, setConfigValue, sendGroupsIoTest } from "../api/config";
 import { getFormsStatus, fetchFormsLibrary } from "../api/forms";
 import type { FormsStatus } from "../api/forms";
 import { Button } from "../components/Button";
@@ -305,6 +305,39 @@ function ConfigFieldRow({
   );
 }
 
+function GroupsIoTestButton() {
+  const { addToast } = useToast();
+  const [sending, setSending] = useState(false);
+
+  const handleClick = async () => {
+    if (!confirm("Post a test message to the configured groups.io group?")) return;
+    setSending(true);
+    try {
+      const result = await sendGroupsIoTest();
+      if (result.ok) {
+        addToast("Test message posted to groups.io.", "success");
+      } else {
+        addToast(`Groups.io test failed: ${result.error ?? "unknown error"}`, "error");
+      }
+    } catch (e: any) {
+      addToast(`Groups.io test failed: ${e?.detail ?? e?.message ?? "request error"}`, "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="mt-2">
+      <Button size="sm" variant="secondary" onClick={handleClick} loading={sending}>
+        Send groups.io test message
+      </Button>
+      <div className="text-xs text-text-muted mt-1">
+        Posts "Test Message. Sorry for the noise, please disregard." to the saved group. Save any unsaved changes first.
+      </div>
+    </div>
+  );
+}
+
 function WinlinkFormsSection() {
   const { addToast } = useToast();
   const [status, setStatus] = useState<FormsStatus | null>(null);
@@ -476,6 +509,10 @@ export function ConfigPage() {
                 saving={savingKey === field.key}
               />
             ))}
+            {group === "Delivery" &&
+              parseStringArray(savedValues["delivery.backends"] ?? "").includes("groupsio") && (
+                <GroupsIoTestButton />
+              )}
           </div>
         );
       })}

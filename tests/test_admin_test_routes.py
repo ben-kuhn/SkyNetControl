@@ -475,3 +475,74 @@ async def test_smtp_test_uses_stored_password_when_blank(admin_client, test_app)
 
     # Verify login was called with the stored password
     mock_smtp_instance.login.assert_called_once_with("user@example.com", "STORED-SECRET")
+
+
+# ---------------------------------------------------------------------------
+# Groups.io test endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_groupsio_test_success(admin_client, test_app):
+    """Stored credentials + a mocked successful HTTP round-trip → ok=True."""
+    from backend.config_mgmt.service import set_config_value
+
+    client, token = admin_client
+    with test_app.state.session_factory() as db:
+        set_config_value(db, "delivery.groupsio.api_key", "stored-key")
+        set_config_value(db, "delivery.groupsio.group_name", "stored-group")
+
+    mock_draft = MagicMock()
+    mock_draft.status_code = 200
+    mock_draft.json.return_value = {"draft_id": 1, "group_id": 2}
+    mock_draft.raise_for_status = MagicMock()
+    mock_post = MagicMock()
+    mock_post.status_code = 200
+    mock_post.raise_for_status = MagicMock()
+
+    with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
+        mock_httpx.post.side_effect = [mock_draft, mock_post]
+        resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+    # Confirm it used the saved credentials and the canonical test body.
+    first_call = mock_httpx.post.call_args_list[0]
+    assert first_call.kwargs["headers"]["Authorization"] == "Bearer stored-key"
+    assert first_call.kwargs["data"]["group_name"] == "stored-group"
+    assert first_call.kwargs["data"]["body"] == "Test Message. Sorry for the noise, please disregard."
+
+
+@pytest.mark.asyncio
+async def test_groupsio_test_failure_surfaces_error(admin_client, test_app):
+    """When the backend fails, the route returns ok=False with the error message."""
+    from backend.config_mgmt.service import set_config_value
+
+    client, token = admin_client
+    with test_app.state.session_factory() as db:
+        set_config_value(db, "delivery.groupsio.api_key", "stored-key")
+        set_config_value(db, "delivery.groupsio.group_name", "stored-group")
+
+    with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
+        mock_httpx.post.side_effect = Exception("network down")
+        resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "network down" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_groupsio_test_no_api_key(admin_client):
+    """No stored API key → backend returns 'not configured' without any HTTP call."""
+    client, token = admin_client
+    with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
+        resp = await client.post("/api/admin/test/groupsio", cookies={"access_token": token})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "not configured" in body["error"].lower()
+    mock_httpx.post.assert_not_called()

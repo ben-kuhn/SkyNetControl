@@ -13,3 +13,12 @@ export async function setConfigValue(
     body: JSON.stringify({ value }),
   });
 }
+
+export interface GroupsIoTestResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function sendGroupsIoTest(): Promise<GroupsIoTestResult> {
+  return apiFetch<GroupsIoTestResult>("/admin/test/groupsio", { method: "POST" });
+}
