@@ -50,7 +50,35 @@ def db_setup():
             )
         )
         from backend.modules.nets.models import Net
-        session.add(Net(slug=NET_SLUG, name="Test Net"))
+        from backend.modules.reminders.models import ReminderLog
+        from backend.modules.schedule.models import NetSeason, NetSession, SessionType
+        from datetime import date as _date
+
+        net = Net(slug=NET_SLUG, name="Test Net")
+        session.add(net)
+        session.flush()
+        season = NetSeason(
+            net_id=net.id, name="S",
+            start_date=_date(2026, 1, 1), end_date=_date(2026, 3, 31),
+            day_of_week=3,
+        )
+        session.add(season)
+        session.flush()
+        net_session = NetSession(
+            id=1,
+            season_id=season.id,
+            start_date=_date(2026, 1, 7), end_date=_date(2026, 1, 7),
+            grace_period_hours=24.0, session_type=SessionType.REGULAR_CHECKIN,
+        )
+        session.add(net_session)
+        session.flush()
+        # Tests reference reminder content_id=1 — seed a ReminderLog with that id
+        # so the new cross-net guard can resolve it back to this net.
+        session.add(ReminderLog(
+            id=1, session_id=net_session.id,
+            content_subject="", content_body="",
+            drafted_at=datetime.now(tz=timezone.utc),
+        ))
         session.commit()
     return factory
 
@@ -103,13 +131,13 @@ async def test_get_delivery_status(client, test_settings, db_setup):
 
 
 @pytest.mark.anyio
-async def test_get_delivery_status_empty(client, test_settings):
+async def test_get_delivery_status_unknown_id_returns_404(client, test_settings):
+    """Conflate 'not found' with 'cross-net' so existence isn't probeable."""
     resp = await client.get(
         f"{BASE}/reminder/999",
         headers=_auth_headers(test_settings),
     )
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.status_code == 404
 
 
 @pytest.mark.anyio
@@ -149,3 +177,43 @@ async def test_retry_delivery(client, test_settings, db_setup):
 async def test_retry_requires_auth(client):
     resp = await client.post(f"{BASE}/reminder/1/retry")
     assert resp.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_get_delivery_status_rejects_cross_net(client, test_settings, db_setup):
+    """IDOR guard: a reminder log on net 'other' can't be read via net 't'."""
+    from datetime import date as _date
+
+    from backend.modules.nets.models import Net
+    from backend.modules.reminders.models import ReminderLog
+    from backend.modules.schedule.models import NetSeason, NetSession, SessionType
+
+    with db_setup() as session:
+        other = Net(slug="other", name="Other Net")
+        session.add(other)
+        session.flush()
+        season = NetSeason(
+            net_id=other.id, name="O",
+            start_date=_date(2026, 1, 1), end_date=_date(2026, 3, 31),
+            day_of_week=3,
+        )
+        session.add(season); session.flush()
+        sess = NetSession(
+            id=2,
+            season_id=season.id,
+            start_date=_date(2026, 1, 7), end_date=_date(2026, 1, 7),
+            grace_period_hours=24.0, session_type=SessionType.REGULAR_CHECKIN,
+        )
+        session.add(sess); session.flush()
+        session.add(ReminderLog(
+            id=2, session_id=sess.id,
+            content_subject="", content_body="",
+            drafted_at=datetime.now(tz=timezone.utc),
+        ))
+        session.commit()
+
+    resp = await client.get(
+        f"{BASE}/reminder/2",
+        headers=_auth_headers(test_settings),
+    )
+    assert resp.status_code == 404
