@@ -409,10 +409,9 @@ function GenerateModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div
         className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-semibold text-text-primary mb-3">Generate reminder draft</h3>
         <label className="block text-xs uppercase tracking-wider text-text-muted font-semibold mb-1">Session</label>

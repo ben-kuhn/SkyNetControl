@@ -274,10 +274,9 @@ function TemplateModal({
         : "New template";
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div
         className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-3xl max-h-[90vh] overflow-auto"
-        onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-semibold text-text-primary mb-3">{title}</h3>
 

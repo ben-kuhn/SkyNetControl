@@ -465,10 +465,9 @@ function SectionTextarea({
 
 function PreviewModal({ text, onClose }: { text: string; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div
         className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-3xl max-h-[90vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3 pb-3 border-b border-border">
           <h3 className="text-lg font-semibold text-text-primary">Preview</h3>
@@ -525,10 +524,9 @@ function GenerateModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div
         className="bg-bg-surface border border-border rounded-lg p-5 w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-semibold text-text-primary mb-3">Generate roster draft</h3>
         <label className="block text-xs uppercase tracking-wider text-text-muted font-semibold mb-1">Session</label>
