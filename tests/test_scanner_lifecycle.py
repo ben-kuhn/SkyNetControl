@@ -1,8 +1,8 @@
 from backend.integrations.scanner.service import scanner_state
 
 
-def test_scanner_not_started_when_disabled(app):
-    """Scanner should not start if scanner.enabled is not 'true'."""
+def test_scanner_state_not_running_before_lifespan(app):
+    """scanner_state.running is False before the app lifespan starts the task."""
     assert scanner_state.running is False
 
 

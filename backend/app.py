@@ -127,20 +127,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         scanner_task = None
         try:
-            with session_factory() as db:
-                from backend.config_mgmt.service import get_config_value
+            from backend.integrations.scanner.service import scanner_loop
+            from backend.modules.nets.models import Net
+            from backend.modules.nets.config_service import get_net_config
 
-                enabled = get_config_value(db, "scanner.enabled", "false")
-            if enabled == "true":
-                from backend.integrations.scanner.service import scanner_loop
+            def get_interval():
+                with session_factory() as db:
+                    intervals: list[int] = []
+                    for net in db.query(Net).all():
+                        if get_net_config(db, net.id, "scanner.enabled", "false") != "true":
+                            continue
+                        try:
+                            intervals.append(int(get_net_config(db, net.id, "scanner.interval_minutes", "5")))
+                        except (TypeError, ValueError):
+                            pass
+                    return min(intervals) if intervals else 5
 
-                def get_interval():
-                    with session_factory() as db:
-                        from backend.config_mgmt.service import get_config_value as gcv
-
-                        return int(gcv(db, "scanner.interval_minutes", "5"))
-
-                scanner_task = asyncio.create_task(scanner_loop(session_factory, get_interval))
+            scanner_task = asyncio.create_task(scanner_loop(session_factory, get_interval))
         except Exception:
             pass
 
