@@ -22,3 +22,12 @@ export interface GroupsIoTestResult {
 export async function sendGroupsIoTest(): Promise<GroupsIoTestResult> {
   return apiFetch<GroupsIoTestResult>("/admin/test/groupsio", { method: "POST" });
 }
+
+export async function setConfigBulk(
+  values: Record<string, string>,
+): Promise<void> {
+  await apiFetch<unknown>(`/config/bulk`, {
+    method: "PUT",
+    body: JSON.stringify({ values }),
+  });
+}
