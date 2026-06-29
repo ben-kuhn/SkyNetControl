@@ -413,23 +413,24 @@ def mark_sent(db: Session, reminder_id: int) -> ReminderLog | None:
 
     from backend.integrations.delivery.service import dispatch_delivery
 
-    delivered = dispatch_delivery(db, "reminder", log.id, log.content_subject, log.content_body)
+    net_session = db.get(NetSession, log.session_id)
+    if net_session is None:
+        return None
+    delivered = dispatch_delivery(db, "reminder", log.id, log.content_subject, log.content_body, net_session.net_id)
     if not delivered:
-        net_session = db.get(NetSession, log.session_id)
-        if net_session is not None:
-            recipient = resolve_session_recipient(db, net_session)
-            if recipient is not None:
-                create_notification(
-                    db,
-                    recipient_callsign=recipient,
-                    kind=NotificationKind.DELIVERY_FAILURE,
-                    message=(
-                        f"Send failed for reminder on {_format_session_date(net_session)} — verify delivery backends"
-                    ),
-                    link_url="/config",
-                    session_id=net_session.id,
-                    dedupe=False,
-                )
+        recipient = resolve_session_recipient(db, net_session)
+        if recipient is not None:
+            create_notification(
+                db,
+                recipient_callsign=recipient,
+                kind=NotificationKind.DELIVERY_FAILURE,
+                message=(
+                    f"Send failed for reminder on {_format_session_date(net_session)} — verify delivery backends"
+                ),
+                link_url="/config",
+                session_id=net_session.id,
+                dedupe=False,
+            )
         return None  # stay APPROVED so user can retry
 
     log.status = ReminderStatus.SENT

@@ -15,6 +15,7 @@ from backend.config_mgmt.models import AppConfig
 from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
 from backend.integrations.delivery.routes import delivery_router
 from backend.config import Settings
+from backend.modules.nets.config_service import set_net_config
 
 
 NET_SLUG = "t"
@@ -153,8 +154,10 @@ async def test_retry_delivery(client, test_settings, db_setup):
                 created_at=datetime.now(tz=timezone.utc),
             )
         )
-        session.add(AppConfig(key="delivery.email.to_address", value="net@test.com"))
         session.commit()
+        from backend.modules.nets.models import Net
+        net = session.query(Net).filter_by(slug=NET_SLUG).one()
+        set_net_config(session, net.id, "delivery.email.to_address", "net@test.com")
 
     with patch("backend.integrations.delivery.service.get_backend") as mock_get:
         from backend.integrations.delivery.backends.base import DeliveryResult

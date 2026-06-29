@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.config_mgmt.models import AppConfig
 from backend.db.base import Base
+from backend.modules.nets.config_service import set_net_config
 from backend.integrations.delivery.backends.base import DeliveryResult
 from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
 from backend.modules.reminders.models import ReminderLog, ReminderStatus
@@ -67,9 +68,9 @@ def _setup_session(db: Session) -> NetSession:
 
 
 def _configure_email_backend(db: Session) -> None:
-    db.add(AppConfig(key="delivery.backends", value=json.dumps(["email"])))
-    db.add(AppConfig(key="delivery.email.to_address", value="net@test.com"))
-    db.commit()
+    net = _ensure_net(db)
+    set_net_config(db, net.id, "delivery.backends", json.dumps(["email"]))
+    set_net_config(db, net.id, "delivery.email.to_address", "net@test.com")
 
 
 class _StubBackend:

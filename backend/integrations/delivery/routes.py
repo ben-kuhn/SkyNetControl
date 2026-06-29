@@ -64,5 +64,5 @@ def retry_delivery(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
 ):
     _verify_content_belongs_to_net(db, content_type, content_id, ctx.net.id)
-    success = retry_failed(db, content_type, content_id)
+    success = retry_failed(db, content_type, content_id, ctx.net.id)
     return {"retried": success}

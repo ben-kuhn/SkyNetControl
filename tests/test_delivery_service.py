@@ -11,12 +11,20 @@ from backend.integrations.delivery.service import (
     get_delivery_status,
 )
 from backend.config_mgmt.models import AppConfig
+from backend.modules.nets.config_service import set_net_config
 from backend.db.base import Base
+
+NET_ID = 1
 
 
 @pytest.fixture
 def db_session(app):
     with app.state.session_factory() as session:
+        # Ensure a Net row exists with id=NET_ID for per-net config FK
+        from backend.modules.nets.models import Net
+        if session.get(Net, NET_ID) is None:
+            session.add(Net(id=NET_ID, slug="test", name="Test Net"))
+            session.commit()
         yield session
 
 
@@ -29,16 +37,20 @@ def _set_config(db_session, key, value):
     db_session.commit()
 
 
+def _set_net_cfg(db_session, key, value):
+    set_net_config(db_session, NET_ID, key, value)
+
+
 def test_dispatch_creates_logs_and_delivers(db_session):
-    _set_config(db_session, "delivery.backends", json.dumps(["email"]))
-    _set_config(db_session, "delivery.email.to_address", "net@example.com")
+    _set_net_cfg(db_session, "delivery.backends", json.dumps(["email"]))
+    _set_net_cfg(db_session, "delivery.email.to_address", "net@example.com")
 
     with patch("backend.integrations.delivery.service.get_backend") as mock_get:
         mock_backend = MagicMock()
         mock_backend.send.return_value = DeliveryResult(success=True, error=None)
         mock_get.return_value = mock_backend
 
-        result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body")
+        result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body", NET_ID)
 
     assert result is True
     logs = db_session.query(DeliveryLog).filter_by(content_type="reminder", content_id=1).all()
@@ -48,15 +60,15 @@ def test_dispatch_creates_logs_and_delivers(db_session):
 
 
 def test_dispatch_all_fail_returns_false(db_session):
-    _set_config(db_session, "delivery.backends", json.dumps(["email"]))
-    _set_config(db_session, "delivery.email.to_address", "net@example.com")
+    _set_net_cfg(db_session, "delivery.backends", json.dumps(["email"]))
+    _set_net_cfg(db_session, "delivery.email.to_address", "net@example.com")
 
     with patch("backend.integrations.delivery.service.get_backend") as mock_get:
         mock_backend = MagicMock()
         mock_backend.send.return_value = DeliveryResult(success=False, error="SMTP down")
         mock_get.return_value = mock_backend
 
-        result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body")
+        result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body", NET_ID)
 
     assert result is False
     logs = db_session.query(DeliveryLog).filter_by(content_type="reminder", content_id=1).all()
@@ -66,17 +78,17 @@ def test_dispatch_all_fail_returns_false(db_session):
 
 
 def test_dispatch_no_backends_configured(db_session):
-    _set_config(db_session, "delivery.backends", json.dumps([]))
+    _set_net_cfg(db_session, "delivery.backends", json.dumps([]))
 
-    result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body")
+    result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body", NET_ID)
     assert result is False
 
 
 def test_dispatch_multiple_backends_partial_success(db_session):
-    _set_config(db_session, "delivery.backends", json.dumps(["email", "groupsio"]))
-    _set_config(db_session, "delivery.email.to_address", "net@example.com")
+    _set_net_cfg(db_session, "delivery.backends", json.dumps(["email", "groupsio"]))
+    _set_net_cfg(db_session, "delivery.email.to_address", "net@example.com")
     _set_config(db_session, "delivery.groupsio.api_key", "key-123")
-    _set_config(db_session, "delivery.groupsio.group_name", "w0ne")
+    _set_net_cfg(db_session, "delivery.groupsio.group_name", "w0ne")
 
     call_count = 0
 
@@ -91,7 +103,7 @@ def test_dispatch_multiple_backends_partial_success(db_session):
         return mock
 
     with patch("backend.integrations.delivery.service.get_backend", side_effect=mock_get):
-        result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body")
+        result = dispatch_delivery(db_session, "reminder", 1, "Subject", "Body", NET_ID)
 
     assert result is True
     logs = db_session.query(DeliveryLog).filter_by(content_type="reminder", content_id=1).all()
@@ -102,7 +114,7 @@ def test_dispatch_multiple_backends_partial_success(db_session):
 
 
 def test_retry_failed_only_retries_failed(db_session):
-    _set_config(db_session, "delivery.email.to_address", "net@example.com")
+    _set_net_cfg(db_session, "delivery.email.to_address", "net@example.com")
 
     db_session.add(
         DeliveryLog(
@@ -127,14 +139,14 @@ def test_retry_failed_only_retries_failed(db_session):
     db_session.commit()
 
     _set_config(db_session, "delivery.groupsio.api_key", "key-123")
-    _set_config(db_session, "delivery.groupsio.group_name", "w0ne")
+    _set_net_cfg(db_session, "delivery.groupsio.group_name", "w0ne")
 
     with patch("backend.integrations.delivery.service.get_backend") as mock_get:
         mock_backend = MagicMock()
         mock_backend.send.return_value = DeliveryResult(success=True, error=None)
         mock_get.return_value = mock_backend
 
-        retry_failed(db_session, "reminder", 1)
+        retry_failed(db_session, "reminder", 1, NET_ID)
 
     logs = db_session.query(DeliveryLog).filter_by(content_type="reminder", content_id=1).all()
     assert all(log.status == DeliveryStatus.SENT for log in logs)
