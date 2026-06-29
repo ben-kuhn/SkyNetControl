@@ -19,23 +19,27 @@ function parseStringArray(raw: string): string[] {
   }
 }
 
-const NET_OPS_FIELDS: ConfigField[] = [
-  {
-    key: "default_net_control",
-    label: "Net Callsign",
-    placeholder: "WAØXYZ",
-    helpText: "Your net's club callsign — used as {{ net_callsign }} in templates.",
-    mono: true,
-  },
-  {
-    key: "net_address",
-    label: "Net Winlink Address",
-    placeholder: "yournet@winlink.org",
-    helpText:
-      "Winlink address used for check-in message parsing and as {{ net_address }} in templates.",
-    visibleWhen: (v) => v["winlink_enabled"] === "true",
-  },
-];
+function netOpsFields(winlinkEnabledSaved: boolean): ConfigField[] {
+  const fields: ConfigField[] = [
+    {
+      key: "default_net_control",
+      label: "Net Callsign",
+      placeholder: "WAØXYZ",
+      helpText: "Your net's club callsign — used as {{ net_callsign }} in templates.",
+      mono: true,
+    },
+  ];
+  if (winlinkEnabledSaved) {
+    fields.push({
+      key: "net_address",
+      label: "Net Winlink Address",
+      placeholder: "yournet@winlink.org",
+      helpText:
+        "Winlink address used for check-in message parsing and as {{ net_address }} in templates.",
+    });
+  }
+  return fields;
+}
 
 const PAT_FIELDS: ConfigField[] = [
   {
@@ -95,9 +99,7 @@ function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
       label: "Winlink Delivery Address",
       placeholder: "NET@winlink.org",
       helpText: "Winlink address this net sends reminders and rosters to.",
-      visibleWhen: (v) =>
-        v["winlink_enabled"] === "true" &&
-        parseStringArray(v["delivery.backends"] ?? "").includes("winlink"),
+      visibleWhen: (v) => parseStringArray(v["delivery.backends"] ?? "").includes("winlink"),
     },
   ];
 }
@@ -272,7 +274,7 @@ export function NetSettingsPage() {
         <>
           <SettingsSection
             title="Net Operations"
-            fields={NET_OPS_FIELDS}
+            fields={netOpsFields(winlinkEnabledSaved)}
             values={config}
             savedValues={savedConfig}
             onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
