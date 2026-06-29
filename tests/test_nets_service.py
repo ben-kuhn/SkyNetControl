@@ -182,6 +182,99 @@ def test_delete_net_removes_net_and_config():
     assert db.query(NetMembership).filter(NetMembership.net_id == net_id).count() == 0
 
 
+def test_delete_net_cascades_per_net_rows():
+    """delete_net must drop every per-net row, not just config + memberships.
+    Postgres would otherwise reject the deletion on FK violation; SQLite would
+    silently orphan rows (FK enforcement is off by default)."""
+    from datetime import date, datetime, timezone
+
+    from backend.modules.activities.models import (
+        Activity,
+        ActivityTag,
+        ActivityTagAssignment,
+        ChatSession,
+    )
+    from backend.modules.checkins.models import CheckIn, Member, ParseStatus, TimingStatus
+    from backend.modules.reminders.models import ReminderLog, ReminderTemplate
+    from backend.modules.roster.models import RosterLog, RosterTemplate
+    from backend.modules.schedule.models import NetSeason, NetSession, SessionType
+
+    db = _make_db()
+    _seed_user(db, "W0ADM", is_admin=True)
+    net = create_net(db, slug="full", name="Full Net", creator_callsign="W0ADM")
+    net_id = net.id
+    now = datetime.now(tz=timezone.utc)
+
+    season = NetSeason(
+        net_id=net_id, name="S1",
+        start_date=date(2026, 1, 1), end_date=date(2026, 3, 31),
+        day_of_week=3,
+    )
+    db.add(season); db.flush()
+    net_session = NetSession(
+        season_id=season.id,
+        start_date=date(2026, 1, 7), end_date=date(2026, 1, 7),
+        grace_period_hours=24.0, session_type=SessionType.REGULAR_CHECKIN,
+    )
+    db.add(net_session); db.flush()
+
+    db.add(CheckIn(
+        session_id=net_session.id, callsign="K0X", name="X",
+        mode="voice", parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME, is_new_member=False,
+    ))
+    db.add(RosterLog(
+        session_id=net_session.id, content_subject="", content_header="",
+        content_welcome="", content_comments="", content_footer="", drafted_at=now,
+    ))
+    db.add(ReminderLog(
+        session_id=net_session.id, content_subject="", content_body="", drafted_at=now,
+    ))
+    db.add(Member(
+        callsign="K0X", net_id=net_id, name="X",
+        first_check_in_date=now, last_check_in_date=now, total_check_ins=1,
+    ))
+    activity = Activity(net_id=net_id, title="Trivia", description="x", instructions="x")
+    db.add(activity); db.flush()
+    tag = ActivityTag(net_id=net_id, name="trivia")
+    db.add(tag); db.flush()
+    db.add(ActivityTagAssignment(activity_id=activity.id, tag_id=tag.id))
+    chat = ChatSession(activity_id=activity.id)
+    db.add(chat); db.flush()
+    db.add(RosterTemplate(
+        net_id=net_id, name="custom-roster", subject_template="",
+        header_template="", welcome_template="", comments_template="", footer_template="",
+    ))
+    from backend.modules.reminders.models import TemplateType
+    db.add(ReminderTemplate(
+        net_id=net_id, name="custom-reminder",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="", body_template="",
+    ))
+    db.commit()
+    chat_id = chat.id
+    season_id = season.id
+    session_id = net_session.id
+
+    delete_net(db, net=net)
+    db.expire_all()
+
+    assert db.query(NetSeason).filter_by(net_id=net_id).count() == 0
+    assert db.query(NetSession).filter_by(season_id=season_id).count() == 0
+    assert db.query(CheckIn).filter_by(session_id=session_id).count() == 0
+    assert db.query(Member).filter_by(net_id=net_id).count() == 0
+    assert db.query(Activity).filter_by(net_id=net_id).count() == 0
+    assert db.query(ActivityTag).filter_by(net_id=net_id).count() == 0
+    assert db.query(RosterTemplate).filter_by(net_id=net_id).count() == 0
+    assert db.query(ReminderTemplate).filter_by(net_id=net_id).count() == 0
+    assert db.query(RosterLog).filter_by(session_id=session_id).count() == 0
+    assert db.query(ReminderLog).filter_by(session_id=session_id).count() == 0
+    assert db.query(Net).filter_by(id=net_id).one_or_none() is None
+    # ChatSession survives but loses its activity FK (chats outlive activities).
+    surviving_chat = db.get(ChatSession, chat_id)
+    assert surviving_chat is not None and surviving_chat.activity_id is None
+
+
 # ---------------------------------------------------------------------------
 # add_member / remove_member
 # ---------------------------------------------------------------------------

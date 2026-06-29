@@ -38,10 +38,6 @@ def create_net(db: Session, *, slug: str, name: str, creator_callsign: str) -> N
     db.add(net)
     db.flush()  # assign net.id
 
-    # Seed default net content (roster + reminder templates).
-    # Task 8 done: seeds roster templates for this net.
-    # TODO (Task 9): seed_default_net_content will also seed reminder templates once
-    # ReminderTemplate gains a net_id FK column.
     net_seeds.seed_default_net_content(db, net.id)
 
     db.commit()
@@ -85,11 +81,63 @@ def update_net(
 
 
 def delete_net(db: Session, *, net: Net) -> None:
-    """Delete a Net and all its per-net data (cascade via ORM relationship)."""
-    # NetMembership and NetConfig cascade via relationship(cascade="all, delete-orphan")
-    # on Net.memberships. NetConfig has FK to nets.id without ORM relationship on Net,
-    # so we delete those manually before deleting the net.
-    db.query(NetConfig).filter(NetConfig.net_id == net.id).delete()
+    """Delete a Net and all its per-net data.
+
+    No FK declares ON DELETE CASCADE — Postgres rejects the row drop otherwise,
+    and SQLite leaks orphans because it doesn't enforce FKs by default.
+    Deletion order is children before parents.
+    """
+    from backend.auth.pat_models import PersonalAccessToken
+    from backend.modules.activities.models import (
+        Activity,
+        ActivityTag,
+        ActivityTagAssignment,
+        ActivityUsage,
+        ChatSession,
+    )
+    from backend.modules.checkins.models import CheckIn, Member
+    from backend.modules.reminders.models import ReminderLog, ReminderTemplate
+    from backend.modules.roster.models import RosterLog, RosterTemplate
+    from backend.modules.schedule.models import NetSeason, NetSession
+
+    net_id = net.id
+    session_ids = [
+        sid
+        for (sid,) in db.query(NetSession.id)
+        .join(NetSeason, NetSession.season_id == NetSeason.id)
+        .filter(NetSeason.net_id == net_id)
+        .all()
+    ]
+    activity_ids = [
+        aid for (aid,) in db.query(Activity.id).filter(Activity.net_id == net_id).all()
+    ]
+
+    if session_ids:
+        db.query(CheckIn).filter(CheckIn.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(RosterLog).filter(RosterLog.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ReminderLog).filter(ReminderLog.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(ActivityUsage).filter(ActivityUsage.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(NetSession).filter(NetSession.id.in_(session_ids)).delete(synchronize_session=False)
+
+    if activity_ids:
+        db.query(ActivityTagAssignment).filter(
+            ActivityTagAssignment.activity_id.in_(activity_ids)
+        ).delete(synchronize_session=False)
+        # Null the optional activity_id pointer on chat sessions rather than
+        # deleting them — chats can outlive their parent activity.
+        db.query(ChatSession).filter(ChatSession.activity_id.in_(activity_ids)).update(
+            {ChatSession.activity_id: None}, synchronize_session=False
+        )
+
+    db.query(NetSeason).filter(NetSeason.net_id == net_id).delete(synchronize_session=False)
+    db.query(RosterTemplate).filter(RosterTemplate.net_id == net_id).delete(synchronize_session=False)
+    db.query(ReminderTemplate).filter(ReminderTemplate.net_id == net_id).delete(synchronize_session=False)
+    db.query(Activity).filter(Activity.net_id == net_id).delete(synchronize_session=False)
+    db.query(ActivityTag).filter(ActivityTag.net_id == net_id).delete(synchronize_session=False)
+    db.query(Member).filter(Member.net_id == net_id).delete(synchronize_session=False)
+    db.query(PersonalAccessToken).filter(PersonalAccessToken.net_id == net_id).delete(synchronize_session=False)
+    db.query(NetConfig).filter(NetConfig.net_id == net_id).delete(synchronize_session=False)
+    # NetMembership cascades via Net.memberships relationship.
     db.delete(net)
     db.commit()
 
