@@ -31,8 +31,17 @@ def upgrade() -> None:
     bind = op.get_bind()
 
     # 1. Add the column nullable so the backfill can run.
-    with op.batch_alter_table("net_sessions") as batch:
-        batch.add_column(sa.Column("net_id", sa.Integer(), nullable=True))
+    #
+    # SQLite has non-transactional DDL — if a prior run of this migration
+    # succeeded on ADD COLUMN but failed before alembic could stamp the new
+    # version, the column sits there NULL with no FK/index and the retry
+    # blows up with "duplicate column name". Detect that state and skip the
+    # ADD; the rest of the migration (backfill UPDATEs, NOT NULL/FK/index
+    # via batch recreate) is already idempotent and will complete the work.
+    existing_columns = {c["name"] for c in sa.inspect(bind).get_columns("net_sessions")}
+    if "net_id" not in existing_columns:
+        with op.batch_alter_table("net_sessions") as batch:
+            batch.add_column(sa.Column("net_id", sa.Integer(), nullable=True))
 
     # 2. Backfill from seasons where possible.
     op.execute(
