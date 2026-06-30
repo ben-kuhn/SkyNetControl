@@ -11,11 +11,14 @@ import type { NetMembershipSummary } from "../types";
  * - Admins also call /api/nets to see nets they may not be explicitly members of.
  * - On selection, navigates to the same sub-page under the new slug.
  */
-export function NetPicker() {
+export function NetPicker({ slug: slugOverride }: { slug?: string } = {}) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { slug: currentSlug } = useParams<{ slug: string }>();
+  const params = useParams<{ slug: string }>();
+  // When mounted on a global page the URL has no slug; the Sidebar passes its
+  // localStorage-derived fallback so the picker shows the right net.
+  const currentSlug = slugOverride ?? params.slug;
   const [adminNets, setAdminNets] = useState<NetMembershipSummary[]>([]);
 
   useEffect(() => {

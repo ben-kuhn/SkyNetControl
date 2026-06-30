@@ -47,9 +47,19 @@ function meetsRole(
   return ROLE_RANK[userRole] >= ROLE_RANK[required];
 }
 
+function readLastNetSlug(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return localStorage.getItem("lastNetSlug") ?? undefined;
+}
+
 export function Sidebar() {
   const { user, logout } = useAuth();
-  const { slug } = useParams<{ slug?: string }>();
+  const { slug: urlSlug } = useParams<{ slug?: string }>();
+  // When the user is on a global page (Config / Users / Nets / Profile) the URL
+  // has no slug, but they still want the per-net nav for whichever net they
+  // last visited. CurrentNetContext writes lastNetSlug on every successful
+  // net load; we read it as the fallback so the sidebar stays useful.
+  const slug = urlSlug ?? readLastNetSlug();
 
   // Determine effective role for nav filtering
   const netRole: NetRole | "admin" | null = user?.is_admin
@@ -72,10 +82,10 @@ export function Sidebar() {
         <span className="font-bold text-accent tracking-wide">SkyNetControl</span>
       </div>
 
-      {/* Net picker (when inside a net) */}
+      {/* Net picker (when inside a net, or falling back to last-visited net) */}
       {slug && (
         <div className="px-3 pt-3 pb-1">
-          <NetPicker />
+          <NetPicker slug={slug} />
         </div>
       )}
 

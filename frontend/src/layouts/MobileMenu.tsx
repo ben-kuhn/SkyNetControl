@@ -48,9 +48,17 @@ interface MobileMenuProps {
   onClose: () => void;
 }
 
+function readLastNetSlug(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  return localStorage.getItem("lastNetSlug") ?? undefined;
+}
+
 export function MobileMenu({ open, onClose }: MobileMenuProps) {
   const { user, logout } = useAuth();
-  const { slug } = useParams<{ slug?: string }>();
+  const { slug: urlSlug } = useParams<{ slug?: string }>();
+  // Same fallback as Sidebar: when on a global page, keep the per-net nav
+  // pointed at whichever net the user last visited.
+  const slug = urlSlug ?? readLastNetSlug();
 
   if (!open) return null;
 
