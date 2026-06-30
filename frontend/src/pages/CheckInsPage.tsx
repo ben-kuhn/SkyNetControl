@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useToast } from "../context/ToastContext";
 import { useCurrentNet } from "../hooks/useCurrentNet";
 import { Spinner } from "../components/Spinner";
@@ -580,6 +580,7 @@ export function CheckInsPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
@@ -796,8 +797,9 @@ export function CheckInsPage() {
     try {
       const result = await approveSession(selectedSessionId, slug);
       addToast(`Session approved. ${result.members_updated} member records updated.`, "success");
-      await loadSessions(selectedSessionId);
-      await loadCheckins();
+      // Approval is the gate to roster work — jump straight there so the
+      // operator doesn't have to navigate manually mid-workflow.
+      navigate(`/nets/${slug}/roster`);
     } catch {
       addToast("Approve failed", "error");
     } finally {
