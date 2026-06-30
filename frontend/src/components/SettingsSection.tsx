@@ -56,7 +56,7 @@ function FieldRow({
           onChange={(e) => onChange(e.target.checked ? "true" : "false")}
           className="accent-accent"
         />
-        <span className="text-text-secondary">{checked ? "Enabled" : "Disabled"}</span>
+        <span className="text-text-secondary">{field.label}</span>
       </label>
     );
   } else if (type === "multiselect") {
