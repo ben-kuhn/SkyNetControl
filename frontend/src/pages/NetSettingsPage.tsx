@@ -64,20 +64,19 @@ const PAT_FIELDS: ConfigField[] = [
   },
 ];
 
-function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
-  const backendOptions = [
-    { value: "email", label: "Email" },
-    { value: "groupsio", label: "Groups.io" },
-  ];
-  if (winlinkEnabled) {
-    backendOptions.push({ value: "winlink", label: "Winlink" });
-  }
+const DELIVERY_BACKEND_OPTIONS = [
+  { value: "email", label: "Email" },
+  { value: "groupsio", label: "Groups.io" },
+  { value: "winlink", label: "Winlink" },
+];
+
+function deliveryFields(): ConfigField[] {
   return [
     {
       key: "delivery.backends",
       label: "Enabled Delivery Backends",
       type: "multiselect",
-      options: backendOptions,
+      options: DELIVERY_BACKEND_OPTIONS,
       helpText: "Channels for sending reminders and rosters from this net.",
     },
     {
@@ -263,7 +262,7 @@ export function NetSettingsPage() {
               className="accent-accent"
             />
             <span className="text-text-secondary">
-              Winlink-enabled (shows Winlink Address, PAT, and Winlink delivery options)
+              Winlink-enabled (this net parses incoming Winlink check-ins; shows Net Winlink Address + PAT scanner)
             </span>
           </label>
           <div>
@@ -307,7 +306,7 @@ export function NetSettingsPage() {
 
           <SettingsSection
             title="Delivery"
-            fields={deliveryFields(winlinkEnabledSaved)}
+            fields={deliveryFields()}
             values={config}
             savedValues={savedConfig}
             onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
