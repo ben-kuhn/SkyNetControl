@@ -19,12 +19,12 @@ def test_groupsio_backend_success():
     mock_response_update.status_code = 200
     mock_response_update.raise_for_status = MagicMock()
 
+    mock_response_post = MagicMock()
+    mock_response_post.status_code = 200
+    mock_response_post.raise_for_status = MagicMock()
+
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        # TEMP: /postdraft is disabled in the backend while we verify HTML
-        # rendering — only newdraft + updatedraft are expected. Restore the
-        # 3-call flow when reverting the postdraft comment-out in
-        # backend/integrations/delivery/backends/groupsio.py.
-        mock_httpx.post.side_effect = [mock_response_draft, mock_response_update]
+        mock_httpx.post.side_effect = [mock_response_draft, mock_response_update, mock_response_post]
 
         backend = GroupsIoBackend()
         result = backend.send("Test Subject", "Test Body", config)
@@ -33,7 +33,7 @@ def test_groupsio_backend_success():
     assert result.error is None
 
     calls = mock_httpx.post.call_args_list
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert "/newdraft" in calls[0].args[0]
     assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-key-123"
     assert calls[0].kwargs["data"]["draft_type"] == "draft_type_post"
@@ -46,6 +46,8 @@ def test_groupsio_backend_success():
         "subject": "Test Subject",
         "body": "<pre>Test Body</pre>",
     }
+    assert "/postdraft" in calls[2].args[0]
+    assert calls[2].kwargs["data"] == {"draft_id": 42}
 
 
 def test_groupsio_backend_escapes_html_special_chars():
@@ -61,8 +63,7 @@ def test_groupsio_backend_escapes_html_special_chars():
     resp.json.return_value = {"id": 1}
 
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        # TEMP: only 2 calls while /postdraft is commented out.
-        mock_httpx.post.side_effect = [resp, resp]
+        mock_httpx.post.side_effect = [resp, resp, resp]
         backend = GroupsIoBackend()
         result = backend.send("Subj", "A & B <c>", config)
 

@@ -519,12 +519,12 @@ async def test_groupsio_test_success(admin_client, test_app):
     mock_update = MagicMock()
     mock_update.status_code = 200
     mock_update.raise_for_status = MagicMock()
+    mock_post = MagicMock()
+    mock_post.status_code = 200
+    mock_post.raise_for_status = MagicMock()
 
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        # TEMP: /postdraft is disabled in the backend while we verify HTML
-        # rendering — restore the 3-mock side_effect (mock_post) when
-        # reverting the postdraft comment-out in groupsio.py.
-        mock_httpx.post.side_effect = [mock_draft, mock_update]
+        mock_httpx.post.side_effect = [mock_draft, mock_update, mock_post]
         resp = await client.post(f"/api/nets/{slug}/test/groupsio", cookies={"access_token": token})
 
     assert resp.status_code == 200
