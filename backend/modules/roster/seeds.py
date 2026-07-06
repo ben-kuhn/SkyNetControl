@@ -31,7 +31,8 @@ DEFAULT_NET_ROSTER: SeedRosterTemplate = {
     "name": "Default Net Roster",
     "subject_template": "{{ net_callsign }} Winlink Net Roster — {{ date }}",
     "header_template": (
-        "{{ net_callsign }} Winlink Net Roster for {{ day_of_week }}, {{ date }}"
+        "{{ net_callsign }} Winlink Net Roster for "
+        "{% if day_of_week %}{{ day_of_week }}, {% endif %}{{ date }}"
         "{% if time %} at {{ time }} UTC{% endif %}.\n"
         "Net Control: {{ net_control }}\n"
         "{% if activity_title %}Activity: {{ activity_title }}{% endif %}\n"

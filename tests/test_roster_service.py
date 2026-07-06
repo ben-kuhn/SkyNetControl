@@ -556,11 +556,16 @@ def test_assemble_roster(db, season_and_sessions, default_template):
     log = generate_draft(db, session1.id)
     text = assemble_roster(db, log.id)
     assert text is not None
-    assert "Roster" in text
     assert "W0TST" in text
     assert "Test Op" in text
     assert "Welcome Test Op" in text
     assert "Great net!" in text
+    # content_subject must NOT appear in the assembled body — it already
+    # ships as the delivered message subject, and repeating it here
+    # produces a duplicate header (bug seen 2026-06-29).
+    assert log.content_subject not in text
+    # First line is the header, not a subject repeat.
+    assert text.splitlines()[0] == log.content_header.splitlines()[0]
 
 
 def test_format_roster_table_aligned_columns():
@@ -608,6 +613,38 @@ def test_format_roster_table_aligned_columns():
 
 def test_format_roster_table_empty():
     assert _format_roster_table([]) == ""
+
+
+def test_seed_header_no_stray_comma_when_day_of_week_missing():
+    """Regression: the shipped default header rendered
+    'Winlink Net Roster for , June 29, 2026' when day_of_week was empty
+    (real events / seasons without a day set). The conditional guard
+    must skip the day+comma entirely when the value is falsy.
+    """
+    import jinja2
+
+    from backend.modules.roster.seeds import DEFAULT_NET_ROSTER
+
+    ctx = {
+        "net_callsign": "W0NE",
+        "date": "June 29, 2026",
+        "day_of_week": "",
+        "time": "",
+        "net_control": "KU0HN",
+        "activity_title": "",
+        "total_count": 3,
+    }
+    rendered = jinja2.Environment().from_string(
+        DEFAULT_NET_ROSTER["header_template"]
+    ).render(ctx)
+    assert "for , June" not in rendered
+    assert "for June 29, 2026" in rendered
+
+    ctx["day_of_week"] = "Monday"
+    rendered = jinja2.Environment().from_string(
+        DEFAULT_NET_ROSTER["header_template"]
+    ).render(ctx)
+    assert "for Monday, June 29, 2026" in rendered
 
 
 def test_assemble_roster_not_found(db):

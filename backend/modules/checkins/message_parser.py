@@ -458,14 +458,16 @@ def parse_plain_text_message(body: str, known_modes: set[str] | None = None) -> 
     # front of the protocol and a relay/gateway note after it, which the
     # prefix match can't see. Fall back to the canonicalizer: if it spots
     # a recognized protocol token anywhere in the trailing segment, take
-    # that. The original trailing is discarded rather than kept as a
-    # comment, since band/gateway noise isn't useful data to surface.
+    # that as the mode but keep the operator's original trailing text
+    # (band, gateway, etc.) as the comment — it's often the most useful
+    # info in the check-in.
     if not mode:
         from backend.modules.checkins.mode_normalize import CANONICAL_MODES, normalize_mode
         normalized = normalize_mode(trailing)
         if normalized in CANONICAL_MODES:
             mode = normalized
-            comments = None
+            # `comments` is already the stripped `trailing` from
+            # _match_known_mode's no-match return path — keep it.
 
     if extra_comment:
         comments = f"{comments} {extra_comment}".strip() if comments else extra_comment

@@ -469,7 +469,11 @@ def assemble_roster(db: Session, roster_id: int) -> str | None:
     checkins = db.query(CheckIn).filter(CheckIn.session_id == log.session_id).order_by(CheckIn.name).all()
     table = _format_roster_table(checkins)
 
-    parts = [log.content_subject, "", log.content_header]
+    # content_subject already goes out as the delivered message's subject
+    # (email Subject: / groups.io draft subject / etc.). Repeating it at
+    # the top of the body produces a duplicate header on top of the real
+    # content_header, so start the body at content_header instead.
+    parts = [log.content_header]
     if table:
         parts.extend(["", table])
     if log.content_welcome.strip():

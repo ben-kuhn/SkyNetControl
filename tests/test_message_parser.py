@@ -263,15 +263,26 @@ def test_parse_plain_text_canonical_mode_casing_preserved():
 def test_parse_plain_text_mode_canonicalizer_fallback():
     """When the strict prefix match fails because of a leading band token
     or trailing gateway/comment noise, fall back to the canonicalizer so
-    the recognized protocol still wins. Band/gateway noise is *not* kept
-    as a comment — it isn't useful data to surface in the check-in row.
+    the recognized protocol still wins — but preserve the operator's
+    original trailing text as the comment so band/gateway info survives.
     """
     body = "Alice, W1ABC, Somewhere, Some County, ST, USA, HF VARA gateway W2XYZ"
     result = parse_plain_text_message(body, known_modes={"VARA", "VARA FM"})
     assert result["mode"] == "VARA"
     assert result["callsign"] == "W1ABC"
     assert result["name"] == "Alice"
-    assert result["comments"] is None
+    assert result["comments"] == "HF VARA gateway W2XYZ"
+
+
+def test_parse_plain_text_vhf_packet_preserved_in_comments():
+    """Regression: 'VHF Packet' as a compound mode label was normalised to
+    'Packet' but the original text was being discarded. Now the full
+    string (including the band token) is kept as the comment.
+    """
+    body = "Ben, KU0HN, Lewiston, Winona, MN, VHF Packet via KU0HN-10"
+    result = parse_plain_text_message(body, known_modes={"Packet"})
+    assert result["mode"] == "Packet"
+    assert result["comments"] == "VHF Packet via KU0HN-10"
 
 
 CHECKIN_FORM_BODY = """<?xml version="1.0"?>
