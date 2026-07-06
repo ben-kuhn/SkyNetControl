@@ -16,6 +16,7 @@ from backend.modules.roster.service import (
     list_templates as list_templates_service,
     mark_sent as mark_sent_service,
     regenerate_draft as regenerate_draft_service,
+    resend_roster as resend_roster_service,
     skip_roster as skip_roster_service,
     update_draft as update_draft_service,
     update_template as update_template_service,
@@ -358,6 +359,30 @@ async def mark_sent_route(
         # actual backend errors so the UI doesn't show a generic message.
         errors = get_last_attempt_errors(db, "roster", roster_id)
         detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
+        raise HTTPException(status_code=502, detail=detail)
+    return _roster_to_response(result)
+
+
+@roster_router.post("/{roster_id}/resend")
+async def resend_roster_route(
+    roster_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.integrations.delivery.service import get_last_attempt_errors
+
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    if log.status != RosterStatus.SENT:
+        raise HTTPException(status_code=409, detail="Roster not in sent status")
+    result = resend_roster_service(db, roster_id)
+    if result is None:
+        errors = get_last_attempt_errors(db, "roster", roster_id)
+        if errors:
+            detail = "Re-send failed: " + "; ".join(errors)
+        else:
+            detail = "Re-send failed (no delivery backends configured)"
         raise HTTPException(status_code=502, detail=detail)
     return _roster_to_response(result)
 

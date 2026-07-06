@@ -5,6 +5,7 @@ import {
   generateRosterDraft,
   previewRoster,
   regenerateRosterDraft,
+  resendRoster,
   sendRoster,
   skipRoster,
   updateRosterDraft,
@@ -276,6 +277,7 @@ function DetailPanel({
 
   const isDraft = roster.status === "draft";
   const isApproved = roster.status === "approved";
+  const isSent = roster.status === "sent";
 
   const handleSave = async () => {
     try {
@@ -310,6 +312,17 @@ function DetailPanel({
       onInfo("Roster sent.");
     } catch (e: any) {
       onError(e?.detail ?? e?.message ?? "Send failed");
+    }
+  };
+
+  const handleResend = async () => {
+    if (!confirm("Re-send this roster to all configured delivery backends?")) return;
+    try {
+      const updated = await resendRoster(roster.id, slug);
+      onChanged(updated);
+      onInfo("Roster re-sent.");
+    } catch (e: any) {
+      onError(e?.detail ?? e?.message ?? "Re-send failed");
     }
   };
 
@@ -399,6 +412,11 @@ function DetailPanel({
         {isApproved && (
           <button onClick={handleSend} className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90">
             Send
+          </button>
+        )}
+        {isSent && (
+          <button onClick={handleResend} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
+            Re-send
           </button>
         )}
         {(isDraft || isApproved) && (

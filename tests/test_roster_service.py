@@ -23,6 +23,7 @@ from backend.modules.roster.service import (
     _format_roster_table,
     assemble_roster,
     approve_roster,
+    resend_roster,
     mark_sent,
     skip_roster,
     update_draft,
@@ -653,6 +654,62 @@ def test_mark_sent_wrong_status(db, season_and_sessions, default_template):
     _, session1, _, _ = season_and_sessions
     log = generate_draft(db, session1.id)
     assert mark_sent(db, log.id) is None
+
+
+def test_resend_roster_requires_sent_status(db, season_and_sessions, default_template):
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    # DRAFT — cannot resend
+    assert resend_roster(db, log.id) is None
+    approve_roster(db, log.id, "W0NE")
+    # APPROVED — still cannot resend
+    assert resend_roster(db, log.id) is None
+
+
+def test_resend_roster_success_refreshes_sent_at(db, season_and_sessions, default_template):
+    """resend_roster keeps status=SENT, refreshes sent_at, dispatches delivery."""
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    approve_roster(db, log.id, "W0NE")
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        sent = mark_sent(db, log.id)
+    assert sent is not None
+    first_sent_at = sent.sent_at
+
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ) as dispatch:
+        resent = resend_roster(db, log.id)
+    assert resent is not None
+    assert resent.status == RosterStatus.SENT
+    assert resent.sent_at is not None and resent.sent_at >= first_sent_at
+    # dispatch was called with the roster body — assert content_type=roster.
+    args, _ = dispatch.call_args
+    assert args[1] == "roster"
+    assert args[2] == log.id
+
+
+def test_resend_roster_delivery_failure_returns_none(db, season_and_sessions, default_template):
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    approve_roster(db, log.id, "W0NE")
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        mark_sent(db, log.id)
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=False,
+    ):
+        assert resend_roster(db, log.id) is None
+    # Status stays SENT even after failed resend.
+    refreshed = db.get(type(log), log.id)
+    assert refreshed.status == RosterStatus.SENT
 
 
 def test_skip_roster_from_draft(db, season_and_sessions, default_template):

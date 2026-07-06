@@ -545,6 +545,52 @@ def mark_sent(db: Session, roster_id: int) -> RosterLog | None:
     return log
 
 
+def resend_roster(db: Session, roster_id: int) -> RosterLog | None:
+    """Re-dispatch an already SENT roster through delivery backends.
+
+    Re-assembles the body from the current prose sections + check-ins so any
+    edits made after the original send are picked up. Status stays SENT;
+    ``sent_at`` is refreshed to the latest successful re-send so the UI can
+    show when the most recent delivery went out. Each attempt adds fresh
+    ``delivery_logs`` rows for the audit trail.
+
+    Returns None when the roster isn't SENT or when every backend fails
+    (delivery-log rows still capture the failure).
+    """
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status != RosterStatus.SENT:
+        return None
+
+    from backend.integrations.delivery.service import dispatch_delivery
+
+    assembled = assemble_roster(db, roster_id)
+    body = assembled if assembled else ""
+
+    net_session = db.get(NetSession, log.session_id)
+    if net_session is None:
+        return None
+
+    delivered = dispatch_delivery(db, "roster", log.id, log.content_subject, body, net_session.net_id)
+    if not delivered:
+        recipient = resolve_session_recipient(db, net_session)
+        if recipient is not None:
+            create_notification(
+                db,
+                recipient_callsign=recipient,
+                kind=NotificationKind.DELIVERY_FAILURE,
+                message=f"Re-send failed for roster on {_format_session_date(net_session)} — verify delivery backends",
+                link_url="/config",
+                session_id=net_session.id,
+                dedupe=False,
+            )
+        return None
+
+    log.sent_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
 def skip_roster(db: Session, roster_id: int) -> RosterLog | None:
     """Transition DRAFT or APPROVED → SKIPPED."""
     log = db.get(RosterLog, roster_id)

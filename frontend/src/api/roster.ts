@@ -29,6 +29,10 @@ export async function sendRoster(id: number, netSlug: string): Promise<Roster> {
   return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/send`, { method: "POST" });
 }
 
+export async function resendRoster(id: number, netSlug: string): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/resend`, { method: "POST" });
+}
+
 export async function skipRoster(id: number, netSlug: string): Promise<Roster> {
   return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/skip`, { method: "POST" });
 }

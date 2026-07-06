@@ -381,6 +381,32 @@ async def test_send_roster_route(admin_client, db_setup):
 
 
 @pytest.mark.anyio
+async def test_resend_roster_route(admin_client, db_setup):
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    await admin_client.post(f"{BASE}/{rid}/approve")
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        await admin_client.post(f"{BASE}/{rid}/send")
+        resp = await admin_client.post(f"{BASE}/{rid}/resend")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "sent"
+
+
+@pytest.mark.anyio
+async def test_resend_roster_requires_sent(admin_client, db_setup):
+    """Resend on a DRAFT roster returns 409, not 200."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    resp = await admin_client.post(f"{BASE}/{rid}/resend")
+    assert resp.status_code == 409
+
+
+@pytest.mark.anyio
 async def test_skip_roster_route(admin_client, db_setup):
     sid = db_setup["net_session"].id
     gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
