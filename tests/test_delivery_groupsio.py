@@ -19,12 +19,12 @@ def test_groupsio_backend_success():
     mock_response_update.status_code = 200
     mock_response_update.raise_for_status = MagicMock()
 
-    mock_response_post = MagicMock()
-    mock_response_post.status_code = 200
-    mock_response_post.raise_for_status = MagicMock()
-
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        mock_httpx.post.side_effect = [mock_response_draft, mock_response_update, mock_response_post]
+        # TEMP: /postdraft is disabled in the backend while we verify HTML
+        # rendering — only newdraft + updatedraft are expected. Restore the
+        # 3-call flow when reverting the postdraft comment-out in
+        # backend/integrations/delivery/backends/groupsio.py.
+        mock_httpx.post.side_effect = [mock_response_draft, mock_response_update]
 
         backend = GroupsIoBackend()
         result = backend.send("Test Subject", "Test Body", config)
@@ -33,15 +33,42 @@ def test_groupsio_backend_success():
     assert result.error is None
 
     calls = mock_httpx.post.call_args_list
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert "/newdraft" in calls[0].args[0]
     assert calls[0].kwargs["headers"]["Authorization"] == "Bearer test-key-123"
     assert calls[0].kwargs["data"]["draft_type"] == "draft_type_post"
     assert "subject" not in calls[0].kwargs["data"]
     assert "/updatedraft" in calls[1].args[0]
-    assert calls[1].kwargs["data"] == {"draft_id": 42, "subject": "Test Subject", "body": "Test Body"}
-    assert "/postdraft" in calls[2].args[0]
-    assert calls[2].kwargs["data"] == {"draft_id": 42}
+    # groups.io renders `body` as HTML — the backend wraps the plain-text body
+    # in <pre> to preserve newlines and column alignment. See groupsio.py.
+    assert calls[1].kwargs["data"] == {
+        "draft_id": 42,
+        "subject": "Test Subject",
+        "body": "<pre>Test Body</pre>",
+    }
+
+
+def test_groupsio_backend_escapes_html_special_chars():
+    """Angle brackets / ampersands in the plain-text body must be escaped so
+    they survive groups.io's HTML rendering intact.
+    """
+    from unittest.mock import patch, MagicMock
+
+    config = {"api_key": "k", "group_name": "g"}
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"id": 1}
+
+    with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
+        # TEMP: only 2 calls while /postdraft is commented out.
+        mock_httpx.post.side_effect = [resp, resp]
+        backend = GroupsIoBackend()
+        result = backend.send("Subj", "A & B <c>", config)
+
+    assert result.success is True
+    update_call = mock_httpx.post.call_args_list[1]
+    assert update_call.kwargs["data"]["body"] == "<pre>A &amp; B &lt;c&gt;</pre>"
 
 
 def test_groupsio_backend_draft_failure():

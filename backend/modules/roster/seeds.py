@@ -49,7 +49,7 @@ DEFAULT_NET_ROSTER: SeedRosterTemplate = {
     "footer_template": (
         "{% if next_week_preview %}Next week: {{ next_week_preview }}\n{% endif %}"
         "{% if map_url %}Check-in details: {{ session_url }}\n{% endif %}"
-        "73 de {{ net_callsign }}"
+        "73 de {{ net_control }}, {{ net_callsign }} Net Control"
     ),
     "lead_time_days": 1,
 }

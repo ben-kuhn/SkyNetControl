@@ -1,3 +1,4 @@
+import html
 import logging
 
 import httpx
@@ -50,21 +51,33 @@ class GroupsIoBackend:
             draft_resp.raise_for_status()
             draft_id = draft_resp.json()["id"]
 
+            # groups.io renders `body` as HTML — plain-text newlines collapse
+            # to whitespace, so wrap the roster body in <pre> to preserve
+            # newlines and the fixed-width table alignment.
+            body_html = f"<pre>{html.escape(body)}</pre>"
             update_resp = httpx.post(
                 f"{BASE_URL}/updatedraft",
                 headers=headers,
-                data={"draft_id": draft_id, "subject": subject, "body": body},
+                data={"draft_id": draft_id, "subject": subject, "body": body_html},
                 timeout=30,
             )
             update_resp.raise_for_status()
 
-            post_resp = httpx.post(
-                f"{BASE_URL}/postdraft",
-                headers=headers,
-                data={"draft_id": draft_id},
-                timeout=30,
-            )
-            post_resp.raise_for_status()
+            # === TEMP: draft-only mode for testing HTML rendering ===
+            # Skipping /postdraft so the message stays as a draft in the
+            # groups.io Admin → Drafts area (viewable, deletable, no members
+            # notified). REVERT ME by un-commenting the /postdraft block and
+            # restoring the assertions in
+            #   tests/test_delivery_groupsio.py::test_groupsio_backend_success
+            #   tests/test_admin_test_routes.py::test_groupsio_test_success
+            # once HTML rendering is confirmed.
+            # post_resp = httpx.post(
+            #     f"{BASE_URL}/postdraft",
+            #     headers=headers,
+            #     data={"draft_id": draft_id},
+            #     timeout=30,
+            # )
+            # post_resp.raise_for_status()
         except HTTPStatusError as exc:
             error = _format_http_error(exc)
             logger.warning("groups.io send failed: %s", error)
@@ -73,5 +86,5 @@ class GroupsIoBackend:
             logger.warning("groups.io send failed: %s: %s", type(exc).__name__, exc)
             return DeliveryResult(success=False, error=f"{type(exc).__name__}: {exc}")
 
-        logger.info("groups.io send ok: draft_id=%s", draft_id)
+        logger.info("groups.io send ok (draft-only, TEMP): draft_id=%s", draft_id)
         return DeliveryResult(success=True, error=None)

@@ -422,6 +422,44 @@ def generate_due_drafts(db: Session, net_id: int | None = None) -> list[RosterLo
 # ---------------------------------------------------------------------------
 
 
+_ROSTER_HEADERS = ("Name", "Callsign", "City", "County", "State", "Mode")
+
+
+def _format_roster_table(checkins) -> str:
+    """Render check-ins as a fixed-width plain-text table.
+
+    Leading 1-char marker column carries ``*`` for new members. Long comments
+    go on their own indented line below the row so they don't blow up the
+    Mode column width. Empty when no check-ins.
+    """
+    if not checkins:
+        return ""
+
+    rows = [
+        [ci.name or "", ci.callsign or "", ci.city or "",
+         ci.county or "", ci.state or "", ci.mode or ""]
+        for ci in checkins
+    ]
+    widths = [
+        max(len(h), *(len(row[i]) for row in rows))
+        for i, h in enumerate(_ROSTER_HEADERS)
+    ]
+
+    def row_line(marker: str, vals: list[str]) -> str:
+        cols = "  ".join(v.ljust(w) for v, w in zip(vals, widths))
+        return f"{marker} {cols}".rstrip()
+
+    lines = [
+        row_line(" ", list(_ROSTER_HEADERS)),
+        row_line(" ", ["-" * w for w in widths]),
+    ]
+    for ci, row in zip(checkins, rows):
+        lines.append(row_line("*" if ci.is_new_member else " ", row))
+        if ci.comments:
+            lines.append(f"    {ci.comments}")
+    return "\n".join(lines)
+
+
 def assemble_roster(db: Session, roster_id: int) -> str | None:
     """Assemble the full plain-text roster from prose sections and current check-in data."""
     log = db.get(RosterLog, roster_id)
@@ -429,23 +467,7 @@ def assemble_roster(db: Session, roster_id: int) -> str | None:
         return None
 
     checkins = db.query(CheckIn).filter(CheckIn.session_id == log.session_id).order_by(CheckIn.name).all()
-
-    table_lines = []
-    for ci in checkins:
-        marker = " *" if ci.is_new_member else ""
-        parts = [ci.name, ci.callsign]
-        if ci.city:
-            parts.append(ci.city)
-        if ci.county:
-            parts.append(ci.county)
-        if ci.state:
-            parts.append(ci.state)
-        parts.append(ci.mode)
-        if ci.comments:
-            parts.append(ci.comments)
-        table_lines.append(" | ".join(parts) + marker)
-
-    table = "\n".join(table_lines)
+    table = _format_roster_table(checkins)
 
     parts = [log.content_subject, "", log.content_header]
     if table:

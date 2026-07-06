@@ -519,12 +519,12 @@ async def test_groupsio_test_success(admin_client, test_app):
     mock_update = MagicMock()
     mock_update.status_code = 200
     mock_update.raise_for_status = MagicMock()
-    mock_post = MagicMock()
-    mock_post.status_code = 200
-    mock_post.raise_for_status = MagicMock()
 
     with patch("backend.integrations.delivery.backends.groupsio.httpx") as mock_httpx:
-        mock_httpx.post.side_effect = [mock_draft, mock_update, mock_post]
+        # TEMP: /postdraft is disabled in the backend while we verify HTML
+        # rendering — restore the 3-mock side_effect (mock_post) when
+        # reverting the postdraft comment-out in groupsio.py.
+        mock_httpx.post.side_effect = [mock_draft, mock_update]
         resp = await client.post(f"/api/nets/{slug}/test/groupsio", cookies={"access_token": token})
 
     assert resp.status_code == 200
@@ -535,7 +535,10 @@ async def test_groupsio_test_success(admin_client, test_app):
     assert first_call.kwargs["headers"]["Authorization"] == "Bearer stored-key"
     assert first_call.kwargs["data"]["group_name"] == "stored-group"
     update_call = mock_httpx.post.call_args_list[1]
-    assert update_call.kwargs["data"]["body"] == "Test Message. Sorry for the noise, please disregard."
+    # groups.io renders `body` as HTML — the backend wraps plain text in <pre>.
+    assert update_call.kwargs["data"]["body"] == (
+        "<pre>Test Message. Sorry for the noise, please disregard.</pre>"
+    )
 
 
 @pytest.mark.asyncio

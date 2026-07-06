@@ -20,6 +20,7 @@ from backend.modules.roster.service import (
     render_roster,
     generate_draft,
     generate_due_drafts,
+    _format_roster_table,
     assemble_roster,
     approve_roster,
     mark_sent,
@@ -559,6 +560,53 @@ def test_assemble_roster(db, season_and_sessions, default_template):
     assert "Test Op" in text
     assert "Welcome Test Op" in text
     assert "Great net!" in text
+
+
+def test_format_roster_table_aligned_columns():
+    """Rows share fixed column widths so the roster renders as a real table
+    (not the old pipe-separated blob that groups.io flattened into a wall
+    of text). New-member marker leads Jake's row; long comments go on
+    their own indented line.
+    """
+    class _CI:
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    checkins = [
+        _CI(name="Chris", callsign="KD9CZM", city="Holmen", county="La Crosse",
+            state="WI", mode="VARA", comments="", is_new_member=False),
+        _CI(name="Jake", callsign="KE9FFT", city="La Crosse", county="",
+            state="WI", mode="Packet via W9GM-10", comments="", is_new_member=True),
+        _CI(name="Kyle", callsign="KF0POS", city="Owatonna", county="Steele",
+            state="MN", mode="Packet",
+            comments="Good morning! Kyle checking in over packet.",
+            is_new_member=False),
+    ]
+
+    table = _format_roster_table(checkins)
+    lines = table.split("\n")
+
+    callsign_positions = [
+        ln.index(cs)
+        for ln in lines
+        for cs in ("KD9CZM", "KE9FFT", "KF0POS")
+        if cs in ln
+    ]
+    assert len(set(callsign_positions)) == 1, callsign_positions
+
+    # Header + separator + 3 rows + 1 comment sub-line
+    assert lines[0].lstrip().startswith("Name")
+    jake_line = next(ln for ln in lines if "KE9FFT" in ln)
+    assert jake_line.startswith("*"), jake_line
+    kyle_line = next(ln for ln in lines if "KF0POS" in ln)
+    assert "Good morning" not in kyle_line
+    assert any(ln.startswith("    Good morning") for ln in lines)
+    assert " | " not in table
+
+
+def test_format_roster_table_empty():
+    assert _format_roster_table([]) == ""
 
 
 def test_assemble_roster_not_found(db):
