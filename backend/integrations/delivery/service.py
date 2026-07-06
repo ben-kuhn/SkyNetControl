@@ -66,14 +66,29 @@ def dispatch_delivery(
 
     for name in backend_names:
         config = _build_config(db, name, net_id)
-        log = DeliveryLog(
-            content_type=content_type,
-            content_id=content_id,
-            backend=name,
-            status=DeliveryStatus.PENDING,
-            created_at=datetime.now(tz=timezone.utc),
+        # UNIQUE(content_type, content_id, backend) constrains delivery_logs
+        # to one row per backend per piece of content — that row represents
+        # the most recent attempt's state. On re-dispatch (e.g. resend_roster)
+        # the row already exists, so reset it in place instead of inserting.
+        log = (
+            db.query(DeliveryLog)
+            .filter_by(content_type=content_type, content_id=content_id, backend=name)
+            .one_or_none()
         )
-        db.add(log)
+        if log is None:
+            log = DeliveryLog(
+                content_type=content_type,
+                content_id=content_id,
+                backend=name,
+                status=DeliveryStatus.PENDING,
+                created_at=datetime.now(tz=timezone.utc),
+            )
+            db.add(log)
+        else:
+            log.status = DeliveryStatus.PENDING
+            log.error_message = None
+            log.sent_at = None
+            log.created_at = datetime.now(tz=timezone.utc)
         db.flush()
 
         try:

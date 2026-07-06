@@ -77,6 +77,55 @@ def test_dispatch_all_fail_returns_false(db_session):
     assert logs[0].error_message == "SMTP down"
 
 
+def test_dispatch_reuses_existing_row_on_redispatch(db_session):
+    """A second dispatch for the same (content, backend) must reset the
+    existing row in place — not INSERT a duplicate that would violate the
+    UNIQUE(content_type, content_id, backend) constraint. This is what
+    powers resend_roster.
+    """
+    _set_net_cfg(db_session, "delivery.backends", json.dumps(["email"]))
+    _set_net_cfg(db_session, "delivery.email.to_address", "net@example.com")
+
+    with patch("backend.integrations.delivery.service.get_backend") as mock_get:
+        mock_backend = MagicMock()
+        mock_backend.send.return_value = DeliveryResult(success=True, error=None)
+        mock_get.return_value = mock_backend
+
+        assert dispatch_delivery(db_session, "roster", 1, "S", "B", NET_ID) is True
+        first_log_id = db_session.query(DeliveryLog).filter_by(
+            content_type="roster", content_id=1
+        ).one().id
+
+        # Re-dispatch (simulates resend_roster) — must succeed and reuse row.
+        assert dispatch_delivery(db_session, "roster", 1, "S", "B2", NET_ID) is True
+
+    logs = db_session.query(DeliveryLog).filter_by(content_type="roster", content_id=1).all()
+    assert len(logs) == 1
+    assert logs[0].id == first_log_id  # same row, reset in place
+    assert logs[0].status == DeliveryStatus.SENT
+
+
+def test_dispatch_redispatch_after_failure_clears_error(db_session):
+    """Re-dispatching after a failure must clear the old error_message
+    when the retry succeeds, so stale errors don't linger on the row.
+    """
+    _set_net_cfg(db_session, "delivery.backends", json.dumps(["email"]))
+    _set_net_cfg(db_session, "delivery.email.to_address", "net@example.com")
+
+    with patch("backend.integrations.delivery.service.get_backend") as mock_get:
+        mock_backend = MagicMock()
+        mock_backend.send.return_value = DeliveryResult(success=False, error="SMTP down")
+        mock_get.return_value = mock_backend
+        dispatch_delivery(db_session, "roster", 2, "S", "B", NET_ID)
+
+        mock_backend.send.return_value = DeliveryResult(success=True, error=None)
+        dispatch_delivery(db_session, "roster", 2, "S", "B", NET_ID)
+
+    log = db_session.query(DeliveryLog).filter_by(content_type="roster", content_id=2).one()
+    assert log.status == DeliveryStatus.SENT
+    assert log.error_message is None
+
+
 def test_dispatch_no_backends_configured(db_session):
     _set_net_cfg(db_session, "delivery.backends", json.dumps([]))
 
