@@ -8,6 +8,7 @@ from backend.auth.dependencies import NetContext, get_db_session, require_net_ro
 from backend.modules.nets.models import NetRole
 from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.chat_service import (
+    count_user_messages_today,
     create_chat_session,
     get_chat_history,
     get_chat_session,
@@ -183,6 +184,14 @@ def _chat_session_to_response(chat: ChatSession, messages: list[ChatMessage] | N
     }
 
 
+def _config_int(db: Session, key: str, default: str) -> int:
+    raw = get_config_value(db, key, default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def _message_to_response(msg: ChatMessage) -> dict:
     return {
         "id": msg.id,
@@ -228,6 +237,20 @@ async def send_chat_message_route(
     chat = get_chat_session(db, chat_session_id, net_id=ctx.net.id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
+
+    # Budget guardrails: cheap DB checks before any API spend.
+    user_limit = _config_int(db, "claude_daily_user_message_limit", "25")
+    if user_limit > 0 and count_user_messages_today(db, ctx.user.callsign) >= user_limit:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily chat limit reached for your callsign — resets at midnight UTC.",
+        )
+    global_limit = _config_int(db, "claude_daily_global_message_limit", "100")
+    if global_limit > 0 and count_user_messages_today(db) >= global_limit:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily chat limit for this app has been reached — resets at midnight UTC.",
+        )
 
     api_key = get_config_value(db, "claude_api_key")
     if not api_key:

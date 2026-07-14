@@ -194,3 +194,24 @@ def test_get_chat_history(db: Session):
     messages = get_chat_history(db, chat.id)
     assert len(messages) == 1
     assert messages[0].content == "Hello"
+
+
+def test_count_user_messages_today(db: Session, fake_claude):
+    chat = create_chat_session(db)
+    send_message(db, chat.id, "idea one", api_key="k", sender_callsign="W0NC")
+    send_message(db, chat.id, "idea two", api_key="k", sender_callsign="W0NC")
+    send_message(db, chat.id, "idea three", api_key="k", sender_callsign="W0NE")
+    # Legacy row without attribution counts globally but not per-user.
+    db.add(
+        chat_service.ChatMessage(
+            chat_session_id=chat.id,
+            role=chat_service.ChatMessageRole.USER,
+            content="legacy",
+        )
+    )
+    db.commit()
+
+    assert chat_service.count_user_messages_today(db, "W0NC") == 2
+    assert chat_service.count_user_messages_today(db, "W0NE") == 1
+    # Global count: 4 user messages; assistant replies are not counted.
+    assert chat_service.count_user_messages_today(db) == 4

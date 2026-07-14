@@ -6,7 +6,8 @@ from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
 from backend.auth.models import User
-from backend.modules.activities.models import Activity, ChatSession
+from backend.config_mgmt.models import AppConfig
+from backend.modules.activities.models import Activity, ChatMessage, ChatMessageRole, ChatSession
 from backend.modules.nets.models import Net, NetMembership, NetRole
 from backend.config import Settings
 from tests.conftest import make_test_token
@@ -435,3 +436,106 @@ async def test_chat_session_unlinked_accessible(admin_client, db_setup):
     # Unlinked sessions are accessible (they inherit net when approved)
     resp = await admin_client.get(f"{BASE}/chat/sessions/{chat_id}")
     assert resp.status_code == 200
+
+
+# --- Budget guardrails ---
+
+
+def _seed_chat_and_config(db_setup, *, user_limit, global_limit, seed_messages=()):
+    """Create a chat session, config rows, and pre-existing user messages.
+
+    seed_messages is an iterable of callsign-or-None values; one USER-role
+    message is created per entry (created_at defaults to now, i.e. today).
+    """
+    factory = db_setup["factory"]
+    with factory() as session:
+        chat = ChatSession()
+        session.add(chat)
+        session.add(AppConfig(key="claude_api_key", value="test-key"))
+        session.add(AppConfig(key="claude_daily_user_message_limit", value=str(user_limit)))
+        session.add(AppConfig(key="claude_daily_global_message_limit", value=str(global_limit)))
+        session.flush()
+        for callsign in seed_messages:
+            session.add(
+                ChatMessage(
+                    chat_session_id=chat.id,
+                    role=ChatMessageRole.USER,
+                    content="seeded",
+                    sender_callsign=callsign,
+                )
+            )
+        session.commit()
+        return chat.id
+
+
+@pytest.fixture
+def fake_send_message(monkeypatch):
+    """Replace routes.send_message; records calls, persists real rows."""
+    calls = []
+
+    def _fake(db, chat_session_id, user_content, api_key, sender_callsign=None):
+        calls.append(user_content)
+        user_msg = ChatMessage(
+            chat_session_id=chat_session_id,
+            role=ChatMessageRole.USER,
+            content=user_content,
+            sender_callsign=sender_callsign,
+        )
+        assistant_msg = ChatMessage(
+            chat_session_id=chat_session_id,
+            role=ChatMessageRole.ASSISTANT,
+            content="stub reply",
+        )
+        db.add_all([user_msg, assistant_msg])
+        db.commit()
+        db.refresh(user_msg)
+        db.refresh(assistant_msg)
+        return user_msg, assistant_msg
+
+    import backend.modules.activities.routes as activities_routes
+
+    monkeypatch.setattr(activities_routes, "send_message", _fake)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_chat_per_user_cap_returns_429(nc_client, db_setup, fake_send_message):
+    chat_id = _seed_chat_and_config(
+        db_setup, user_limit=2, global_limit=0, seed_messages=["W0NC", "W0NC"]
+    )
+    resp = await nc_client.post(f"{BASE}/chat/sessions/{chat_id}/messages", json={"content": "hi"})
+    assert resp.status_code == 429
+    assert "limit" in resp.json()["detail"].lower()
+    assert fake_send_message == []  # capped before any API call
+
+
+@pytest.mark.asyncio
+async def test_chat_per_user_cap_is_per_callsign(admin_client, db_setup, fake_send_message):
+    # W0NC is at the limit, but W0NE (admin) is not.
+    chat_id = _seed_chat_and_config(
+        db_setup, user_limit=2, global_limit=0, seed_messages=["W0NC", "W0NC"]
+    )
+    resp = await admin_client.post(f"{BASE}/chat/sessions/{chat_id}/messages", json={"content": "hi"})
+    assert resp.status_code == 200
+    assert fake_send_message == ["hi"]
+
+
+@pytest.mark.asyncio
+async def test_chat_global_cap_counts_legacy_rows(nc_client, db_setup, fake_send_message):
+    # Global cap of 2 met by one attributed and one legacy NULL-callsign row.
+    chat_id = _seed_chat_and_config(
+        db_setup, user_limit=0, global_limit=2, seed_messages=["W0NE", None]
+    )
+    resp = await nc_client.post(f"{BASE}/chat/sessions/{chat_id}/messages", json={"content": "hi"})
+    assert resp.status_code == 429
+    assert fake_send_message == []
+
+
+@pytest.mark.asyncio
+async def test_chat_zero_limits_disable_caps(nc_client, db_setup, fake_send_message):
+    chat_id = _seed_chat_and_config(
+        db_setup, user_limit=0, global_limit=0, seed_messages=["W0NC"] * 50
+    )
+    resp = await nc_client.post(f"{BASE}/chat/sessions/{chat_id}/messages", json={"content": "hi"})
+    assert resp.status_code == 200
+    assert fake_send_message == ["hi"]

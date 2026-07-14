@@ -1,5 +1,8 @@
 import anthropic
 
+from datetime import datetime, timezone
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.modules.activities.models import (
@@ -124,3 +127,21 @@ def link_chat_to_activity(db: Session, chat_session_id: int, activity_id: int) -
     if chat is not None:
         chat.activity_id = activity_id
         db.commit()
+
+
+def count_user_messages_today(db: Session, sender_callsign: str | None = None) -> int:
+    """Count USER-role chat messages created since midnight UTC.
+
+    With *sender_callsign*, counts that operator's messages; without it,
+    counts all user messages (the global-cap denominator, which includes
+    legacy NULL-callsign rows).
+    """
+    start_of_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    query = (
+        db.query(func.count(ChatMessage.id))
+        .filter(ChatMessage.role == ChatMessageRole.USER)
+        .filter(ChatMessage.created_at >= start_of_day)
+    )
+    if sender_callsign is not None:
+        query = query.filter(ChatMessage.sender_callsign == sender_callsign)
+    return query.scalar() or 0
