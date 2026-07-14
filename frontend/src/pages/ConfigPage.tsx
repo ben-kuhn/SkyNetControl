@@ -42,6 +42,20 @@ const INTEGRATIONS_FIELDS: ConfigField[] = [
     helpText: "API key for Claude-powered activity brainstorming (optional)",
     secret: true,
   },
+  {
+    key: "claude_daily_user_message_limit",
+    label: "Claude Daily Per-User Message Limit",
+    placeholder: "25",
+    helpText:
+      "Max brainstorm-chat messages each operator may send per UTC day. 0 = unlimited. Default 25.",
+  },
+  {
+    key: "claude_daily_global_message_limit",
+    label: "Claude Daily Global Message Limit",
+    placeholder: "100",
+    helpText:
+      "Max brainstorm-chat messages across all operators per UTC day. 0 = unlimited. Default 100.",
+  },
 ];
 
 const DELIVERY_GLOBAL_FIELDS: ConfigField[] = [
