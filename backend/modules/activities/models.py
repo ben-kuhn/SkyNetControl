@@ -109,6 +109,9 @@ class ChatMessage(Base):
     chat_session_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
     role: Mapped[ChatMessageRole] = mapped_column(Enum(ChatMessageRole), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Callsign of the operator who sent a USER-role message; NULL for
+    # assistant messages and rows created before attribution existed.
+    sender_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

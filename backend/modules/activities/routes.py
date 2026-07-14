@@ -237,7 +237,9 @@ async def send_chat_message_route(
         )
 
     try:
-        user_msg, assistant_msg = send_message(db, chat_session_id, body.content, api_key=api_key)
+        user_msg, assistant_msg = send_message(
+            db, chat_session_id, body.content, api_key=api_key, sender_callsign=ctx.user.callsign
+        )
     except Exception as exc:
         # Log the full exception server-side; return a generic 502 so we
         # don't leak Anthropic SDK details (request IDs, rate-limit info,

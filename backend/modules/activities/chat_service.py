@@ -82,6 +82,7 @@ def send_message(
     chat_session_id: int,
     user_content: str,
     api_key: str,
+    sender_callsign: str | None = None,
 ) -> tuple[ChatMessage, ChatMessage]:
     # Get existing history
     history = get_chat_history(db, chat_session_id)
@@ -95,6 +96,7 @@ def send_message(
         chat_session_id=chat_session_id,
         role=ChatMessageRole.USER,
         content=user_content,
+        sender_callsign=sender_callsign,
     )
     db.add(user_msg)
     db.flush()
