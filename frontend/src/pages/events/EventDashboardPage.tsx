@@ -1,10 +1,23 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import {
+  activateEvent,
+  addEventNote,
+  closeEvent,
+  reopenEvent,
+  setEventLogPinned,
+  updateParticipant,
+} from "../../api/events";
+import { Button } from "../../components/Button";
 import { Spinner } from "../../components/Spinner";
+import { useToast } from "../../context/ToastContext";
 import { useCurrentNet } from "../../hooks/useCurrentNet";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
+import type { ParticipantStatus } from "../../types";
+import { CheckInBar } from "./CheckInBar";
 import { NetLogPanel } from "./NetLogPanel";
 import { ParticipantBoard, STATUS_LABEL } from "./ParticipantBoard";
+import { PostsPanel } from "./PostsPanel";
 
 export function EventDashboardPage() {
   const { slug, eventId } = useParams<{ slug: string; eventId: string }>();
@@ -12,6 +25,22 @@ export function EventDashboardPage() {
   const canWrite = role === "net_control" || role === "admin";
   const { updates, connected, refresh } = useEventUpdates(slug!, Number(eventId));
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [participantNote, setParticipantNote] = useState("");
+  const [pinNote, setPinNote] = useState(false);
+
+  // Point 3: toast-driven error reporter and generic action helper
+  const { addToast } = useToast();
+  const onError = (message: string) => addToast(message, "error");
+
+  async function act(fn: () => Promise<unknown>, failMessage: string) {
+    try {
+      await fn();
+      await refresh();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : failMessage);
+    }
+  }
 
   if (!updates) {
     return (
@@ -25,11 +54,6 @@ export function EventDashboardPage() {
   const selected = participants.find((p) => p.id === selectedId) ?? null;
   const selectedLog = selected ? log.filter((e) => e.callsign === selected.callsign) : [];
   const pinned = selected ? selectedLog.filter((e) => e.pinned) : [];
-
-  // canWrite/refresh wired up by the NCS-controls task; referenced here so
-  // the read-only build stays lint-clean.
-  void canWrite;
-  void refresh;
 
   return (
     <div className="p-4 md:p-6">
@@ -52,6 +76,22 @@ export function EventDashboardPage() {
         {!connected && (
           <span className="text-xs text-danger animate-pulse">reconnecting…</span>
         )}
+        {/* Point 4: lifecycle buttons */}
+        {canWrite && event.status === "draft" && (
+          <Button size="sm" onClick={() => void act(() => activateEvent(event.id, slug!), "Activate failed")}>
+            Activate
+          </Button>
+        )}
+        {canWrite && event.status === "active" && (
+          <Button size="sm" variant="danger" onClick={() => void act(() => closeEvent(event.id, slug!), "Close failed")}>
+            Close event
+          </Button>
+        )}
+        {canWrite && event.status === "closed" && (
+          <Button size="sm" variant="secondary" onClick={() => void act(() => reopenEvent(event.id, slug!), "Reopen failed")}>
+            Reopen
+          </Button>
+        )}
         <div className="ml-auto">
           <Link
             to={`/nets/${slug}/events/${event.id}/report`}
@@ -62,14 +102,39 @@ export function EventDashboardPage() {
         </div>
       </div>
 
+      {/* Point 5: Check-in bar above the board */}
+      {canWrite && event.status === "active" && (
+        <CheckInBar netSlug={slug!} eventId={event.id} posts={posts} onDone={refresh} onError={onError} />
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Participant board */}
         <div className="lg:col-span-2">
+          {/* Point 6: actions render prop for status change per row */}
           <ParticipantBoard
             participants={participants}
             posts={posts}
             selectedId={selectedId}
             onSelect={(id) => setSelectedId(id === selectedId ? null : id)}
+            actions={canWrite && event.status === "active" ? (p) => (
+              <select
+                value={p.current_status}
+                onChange={(e) =>
+                  void act(
+                    () => updateParticipant(event.id, p.id, { status: e.target.value as ParticipantStatus }, slug!),
+                    "Status change failed",
+                  )
+                }
+                className="rounded-md bg-bg-elevated border border-border px-2 py-1 text-xs text-text-primary"
+              >
+                {(p.current_status === "checked_out"
+                  ? ["checked_out", "checked_in"]
+                  : ["checked_in", "at_post", "en_route", "out_of_service", "checked_out"]
+                ).map((s) => (
+                  <option key={s} value={s}>{STATUS_LABEL[s as ParticipantStatus]}</option>
+                ))}
+              </select>
+            ) : undefined}
           />
 
           {/* Participant detail */}
@@ -83,8 +148,17 @@ export function EventDashboardPage() {
               {pinned.length > 0 && (
                 <div className="mb-2 flex flex-col gap-1">
                   {pinned.map((e) => (
-                    <div key={e.seq} className="text-sm bg-warning/10 rounded px-2 py-1">
+                    <div key={e.seq} className="text-sm bg-warning/10 rounded px-2 py-1 flex items-center gap-1">
                       📌 {e.message}
+                      {/* Point 8 unpin control */}
+                      {canWrite && event.status === "active" && (
+                        <button
+                          onClick={() => void act(() => setEventLogPinned(event.id, e.id, false, slug!), "Unpin failed")}
+                          className="ml-2 text-xs text-text-muted hover:text-danger"
+                        >
+                          unpin
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -99,13 +173,85 @@ export function EventDashboardPage() {
                   </div>
                 ))}
               </div>
+              {/* Point 8: participant note composer */}
+              {canWrite && event.status === "active" && (
+                <div className="flex gap-2 items-center mt-2">
+                  <input
+                    value={participantNote}
+                    onChange={(e) => setParticipantNote(e.target.value)}
+                    placeholder={`Note on ${selected.callsign}…`}
+                    className="flex-1 rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-text-primary"
+                  />
+                  <label className="text-xs text-text-muted flex items-center gap-1">
+                    <input type="checkbox" checked={pinNote} onChange={(e) => setPinNote(e.target.checked)} />
+                    Pin
+                  </label>
+                  <Button
+                    size="sm"
+                    disabled={!participantNote.trim()}
+                    onClick={() =>
+                      void act(async () => {
+                        await addEventNote(
+                          event.id,
+                          { message: participantNote.trim(), callsign: selected.callsign, pinned: pinNote },
+                          slug!,
+                        );
+                        setParticipantNote("");
+                        setPinNote(false);
+                      }, "Failed to add note")
+                    }
+                  >
+                    Add note
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Point 9: posts panel below participant detail */}
+          {canWrite && event.status !== "closed" && (
+            <div className="mt-4">
+              <PostsPanel netSlug={slug!} eventId={event.id} posts={posts} onChanged={refresh} onError={onError} />
             </div>
           )}
         </div>
 
         {/* Net log */}
         <div className="min-h-[300px] lg:h-[calc(100vh-12rem)]">
-          <NetLogPanel log={log} />
+          {/* Point 7: log composer for NCS */}
+          <NetLogPanel
+            log={log}
+            composer={canWrite && event.status === "active" ? (
+              <div className="flex gap-2">
+                <input
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && noteText.trim()) {
+                      void act(async () => {
+                        await addEventNote(event.id, { message: noteText.trim() }, slug!);
+                        setNoteText("");
+                      }, "Failed to add note");
+                    }
+                  }}
+                  placeholder="Add log entry…"
+                  className="flex-1 rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-text-primary"
+                />
+                <Button
+                  size="sm"
+                  disabled={!noteText.trim()}
+                  onClick={() =>
+                    void act(async () => {
+                      await addEventNote(event.id, { message: noteText.trim() }, slug!);
+                      setNoteText("");
+                    }, "Failed to add note")
+                  }
+                >
+                  Log
+                </Button>
+              </div>
+            ) : undefined}
+          />
         </div>
       </div>
     </div>
