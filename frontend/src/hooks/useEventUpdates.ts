@@ -23,8 +23,14 @@ export function useEventUpdates(netSlug: string, eventId: number) {
   const refresh = useCallback(async () => {
     try {
       const u = await fetchEventUpdates(eventId, sinceRef.current, netSlug);
-      logRef.current = [...logRef.current, ...u.log];
-      sinceRef.current = u.latest_seq;
+      // Deduplicate overlapping log ranges: if two polls fire concurrently
+      // (interval fires during a slow in-flight poll, or write-triggered refresh
+      // overlaps the interval), both capture the same sinceRef.current and the
+      // server returns overlapping seq ranges. Filter by the last known seq to keep
+      // the accumulated log strictly increasing.
+      const lastSeq = logRef.current.length > 0 ? logRef.current[logRef.current.length - 1]!.seq : 0;
+      logRef.current = [...logRef.current, ...u.log.filter((e) => e!.seq > lastSeq)];
+      sinceRef.current = Math.max(sinceRef.current, u.latest_seq);
       statusRef.current = u.event.status;
       setUpdates({ ...u, log: logRef.current });
       setConnected(true);
