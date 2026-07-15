@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -11,18 +11,24 @@ from backend.modules.events.models import (
     EventParticipant,
     EventPost,
     EventType,
+    ParticipantStatus,
 )
 from backend.modules.events.service import (
     EventError,
     InvalidPostError,
     InvalidStatusTransitionError,
     activate_event as activate_event_service,
+    add_note as add_note_service,
+    check_in as check_in_service,
     close_event as close_event_service,
+    compute_report as compute_report_service,
     create_event as create_event_service,
     create_post as create_post_service,
     delete_post as delete_post_service,
     reopen_event as reopen_event_service,
+    set_log_pinned as set_log_pinned_service,
     update_event as update_event_service,
+    update_participant as update_participant_service,
     update_post as update_post_service,
 )
 from backend.modules.nets.models import NetRole
@@ -312,3 +318,148 @@ async def delete_post_route(
         _raise_for(err)
     if not deleted:
         raise HTTPException(status_code=404, detail="Post not found")
+
+
+# --- Participant / log schemas ---
+
+
+class ParticipantCheckIn(BaseModel):
+    callsign: str
+    name: str | None = None
+    post_id: int | None = None
+    location: str | None = None
+
+
+class ParticipantUpdate(BaseModel):
+    status: ParticipantStatus | None = None
+    post_id: int | None = None
+    location: str | None = None
+    name: str | None = None
+
+
+class NoteCreate(BaseModel):
+    message: str
+    callsign: str | None = None
+    pinned: bool = False
+
+
+class LogPinUpdate(BaseModel):
+    pinned: bool
+
+
+# --- Participant routes ---
+
+
+@events_router.post("/{event_id}/participants", status_code=201)
+async def check_in_route(
+    event_id: int,
+    body: ParticipantCheckIn,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    try:
+        participant = check_in_service(
+            db, event_id,
+            callsign=body.callsign,
+            actor=ctx.user.callsign,
+            name=body.name,
+            post_id=body.post_id,
+            location=body.location,
+        )
+    except EventError as err:
+        _raise_for(err)
+    return _participant_to_response(participant)
+
+
+@events_router.patch("/{event_id}/participants/{participant_id}")
+async def update_participant_route(
+    event_id: int,
+    participant_id: int,
+    body: ParticipantUpdate,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    data = body.model_dump(exclude_unset=True)
+    try:
+        participant = update_participant_service(
+            db, event_id, participant_id, actor=ctx.user.callsign, **data
+        )
+    except EventError as err:
+        _raise_for(err)
+    if participant is None:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    return _participant_to_response(participant)
+
+
+# --- Log routes ---
+
+
+@events_router.post("/{event_id}/log", status_code=201)
+async def add_note_route(
+    event_id: int,
+    body: NoteCreate,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    try:
+        entry = add_note_service(
+            db, event_id,
+            actor=ctx.user.callsign,
+            message=body.message,
+            callsign=body.callsign,
+            pinned=body.pinned,
+        )
+    except EventError as err:
+        _raise_for(err)
+    return _log_to_response(entry)
+
+
+@events_router.patch("/{event_id}/log/{entry_id}")
+async def pin_log_route(
+    event_id: int,
+    entry_id: int,
+    body: LogPinUpdate,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    entry = set_log_pinned_service(db, event_id, entry_id, body.pinned)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Log entry not found")
+    return _log_to_response(entry)
+
+
+# --- Updates (polling cursor) + report ---
+
+
+@events_router.get("/{event_id}/updates")
+async def updates_route(
+    event_id: int,
+    since: int = Query(default=0, ge=0),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
+):
+    event = _get_event_or_404(db, ctx.net.id, event_id)
+    snapshot = _snapshot(db, event)
+    log = (
+        db.query(EventLogEntry)
+        .filter(EventLogEntry.event_id == event.id, EventLogEntry.seq > since)
+        .order_by(EventLogEntry.seq)
+        .all()
+    )
+    snapshot["log"] = [_log_to_response(e) for e in log]
+    snapshot["latest_seq"] = event.log_seq
+    return snapshot
+
+
+@events_router.get("/{event_id}/report")
+async def report_route(
+    event_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
+):
+    event = _get_event_or_404(db, ctx.net.id, event_id)
+    return {"participants": compute_report_service(db, event)}
