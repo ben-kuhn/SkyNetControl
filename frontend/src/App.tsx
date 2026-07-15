@@ -24,6 +24,7 @@ import { NetSettingsPage } from "./pages/NetSettingsPage";
 import { NoNetsPage } from "./pages/NoNetsPage";
 import { EventsPage } from "./pages/events/EventsPage";
 import { EventDashboardPage } from "./pages/events/EventDashboardPage";
+import { EventReportPage } from "./pages/events/EventReportPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { RequireNetRole } from "./components/RequireNetRole";
 import { SetupGate } from "./components/SetupGate";
@@ -141,6 +142,7 @@ function GatedRoutes() {
           <Route path="members" element={<RequireNetRole min="viewer"><MembersPage /></RequireNetRole>} />
           <Route path="events" element={<RequireNetRole min="viewer"><EventsPage /></RequireNetRole>} />
           <Route path="events/:eventId" element={<RequireNetRole min="viewer"><EventDashboardPage /></RequireNetRole>} />
+          <Route path="events/:eventId/report" element={<RequireNetRole min="viewer"><EventReportPage /></RequireNetRole>} />
           <Route path="reminders" element={<RequireNetRole min="net_control"><RemindersPage /></RequireNetRole>} />
           <Route path="roster" element={<RequireNetRole min="net_control"><RosterPage /></RequireNetRole>} />
           <Route path="activities" element={<RequireNetRole min="net_control"><ActivitiesPage /></RequireNetRole>} />
