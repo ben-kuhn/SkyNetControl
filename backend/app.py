@@ -36,6 +36,7 @@ from backend.config_mgmt.test_routes import test_router
 from backend.config_mgmt.setup_routes import setup_router
 from backend.auth.recovery_routes import recovery_router
 from backend.modules.forms.routes import forms_router
+from backend.modules.events.routes import events_router
 
 
 _DEFAULT_JWT_SECRET = "change-me-in-production"
@@ -292,6 +293,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(checkins_router)
     app.include_router(reminders_router)  # prefix: /api/nets/{net_slug}/reminders
     app.include_router(roster_router)  # prefix: /api/nets/{net_slug}/roster
+    app.include_router(events_router)  # prefix: /api/nets/{net_slug}/events
     app.include_router(notifications_router)  # prefix: /api/nets/{net_slug}/notifications
     app.include_router(audit_router, prefix="/api/audit")
     app.include_router(delivery_router, prefix="/api/nets/{net_slug}/delivery")
