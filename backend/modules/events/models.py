@@ -65,6 +65,14 @@ class Event(Base):
     # so concurrent operators can't mint the same seq.
     log_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Per-event APRS map settings (sub-project 2). Positions themselves are
+    # in-memory only; these persisted flags configure the live client.
+    aprs_other_stations: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    aprs_range_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aprs_range_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aprs_range_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aprs_beacon_posts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     posts: Mapped[list["EventPost"]] = relationship(back_populates="event", cascade="all, delete-orphan")
     participants: Mapped[list["EventParticipant"]] = relationship(
         back_populates="event", cascade="all, delete-orphan"

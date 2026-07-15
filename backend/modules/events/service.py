@@ -173,6 +173,11 @@ def update_event(
     name: str | None = None,
     description: object = _UNSET,
     scheduled_start: object = _UNSET,
+    aprs_other_stations: object = _UNSET,
+    aprs_range_lat: object = _UNSET,
+    aprs_range_lon: object = _UNSET,
+    aprs_range_km: object = _UNSET,
+    aprs_beacon_posts: object = _UNSET,
 ) -> Event | None:
     event = locked_event(db, event_id)
     if event is None:
@@ -185,6 +190,16 @@ def update_event(
         event.description = description
     if scheduled_start is not _UNSET:
         event.scheduled_start = scheduled_start
+    if aprs_other_stations is not _UNSET:
+        event.aprs_other_stations = aprs_other_stations
+    if aprs_range_lat is not _UNSET:
+        event.aprs_range_lat = aprs_range_lat
+    if aprs_range_lon is not _UNSET:
+        event.aprs_range_lon = aprs_range_lon
+    if aprs_range_km is not _UNSET:
+        event.aprs_range_km = aprs_range_km
+    if aprs_beacon_posts is not _UNSET:
+        event.aprs_beacon_posts = aprs_beacon_posts
     db.commit()
     db.refresh(event)
     return event

@@ -51,6 +51,11 @@ class EventUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     scheduled_start: datetime | None = None
+    aprs_other_stations: bool | None = None
+    aprs_range_lat: float | None = None
+    aprs_range_lon: float | None = None
+    aprs_range_km: float | None = None
+    aprs_beacon_posts: bool | None = None
 
 
 class PostCreate(BaseModel):
@@ -87,6 +92,11 @@ def _event_to_response(event: Event) -> dict:
         "closed_at": _iso(event.closed_at),
         "created_by": event.created_by,
         "created_at": _iso(event.created_at),
+        "aprs_other_stations": event.aprs_other_stations,
+        "aprs_range_lat": event.aprs_range_lat,
+        "aprs_range_lon": event.aprs_range_lon,
+        "aprs_range_km": event.aprs_range_km,
+        "aprs_beacon_posts": event.aprs_beacon_posts,
     }
 
 
