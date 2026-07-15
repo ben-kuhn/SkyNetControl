@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from backend.integrations.callbook.service import lookup_callsign
 from backend.modules.events.models import (
     Event,
     EventLogEntry,
@@ -258,3 +259,280 @@ def delete_post(db: Session, event_id: int, post_id: int) -> bool:
     db.delete(post)
     db.commit()
     return True
+
+
+# --- Participants ---------------------------------------------------------
+
+
+def _human_status(status: ParticipantStatus) -> str:
+    return status.value.replace("_", " ")
+
+
+def _callbook_name(db: Session, callsign: str) -> str | None:
+    """Best-effort name prefill. Never raises; a down callbook must not block
+    a check-in mid-event. NOTE: lookup_callsign commits internally when it
+    refreshes its cache — call this BEFORE taking the event row lock."""
+    try:
+        result = lookup_callsign(db, callsign)
+    except Exception:
+        return None
+    if result is None:
+        return None
+    return result.get("name")
+
+
+def _resolve_post(db: Session, event_id: int, post_id: int) -> EventPost:
+    post = db.query(EventPost).filter(EventPost.id == post_id, EventPost.event_id == event_id).one_or_none()
+    if post is None:
+        raise InvalidPostError("Post does not belong to this event")
+    return post
+
+
+def check_in(
+    db: Session,
+    event_id: int,
+    *,
+    callsign: str,
+    actor: str,
+    name: str | None = None,
+    post_id: int | None = None,
+    location: str | None = None,
+) -> EventParticipant:
+    callsign = callsign.strip().upper()
+    if not callsign:
+        raise DuplicateParticipantError("Callsign is required")
+
+    # Callbook lookup does network I/O and commits its cache — do it before
+    # taking the event row lock so the lock isn't held across a network call.
+    if name is None:
+        name = _callbook_name(db, callsign)
+
+    event = locked_event(db, event_id)
+    if event is None or event.status != EventStatus.ACTIVE:
+        raise EventNotActiveError("Event is not active")
+
+    post = _resolve_post(db, event_id, post_id) if post_id is not None else None
+
+    existing = (
+        db.query(EventParticipant)
+        .filter(EventParticipant.event_id == event_id, EventParticipant.callsign == callsign)
+        .one_or_none()
+    )
+    if existing is not None:
+        if existing.current_status != ParticipantStatus.CHECKED_OUT:
+            raise DuplicateParticipantError(f"{callsign} is already checked in")
+        # Re-check-in: new stint on the same row.
+        existing.current_status = ParticipantStatus.CHECKED_IN
+        existing.checked_in_at = _utcnow()
+        existing.checked_out_at = None
+        if post is not None:
+            existing.post_id = post.id
+        if location is not None:
+            existing.location = location
+        if name is not None:
+            existing.name = name
+        participant = existing
+    else:
+        participant = EventParticipant(
+            event_id=event_id,
+            callsign=callsign,
+            name=name,
+            post_id=post.id if post is not None else None,
+            location=location,
+        )
+        db.add(participant)
+        db.flush()
+
+    message = f"{callsign} checked in"
+    if post is not None:
+        message += f" at {post.name}"
+    add_log_entry(
+        db, event, entry_type=EventLogType.SYSTEM, message=message, actor=actor,
+        callsign=callsign, new_status=ParticipantStatus.CHECKED_IN,
+    )
+    db.commit()
+    db.refresh(participant)
+    return participant
+
+
+def update_participant(
+    db: Session,
+    event_id: int,
+    participant_id: int,
+    *,
+    actor: str,
+    status: object = _UNSET,
+    post_id: object = _UNSET,
+    location: object = _UNSET,
+    name: object = _UNSET,
+) -> EventParticipant | None:
+    event = locked_event(db, event_id)
+    if event is None:
+        return None
+    if event.status != EventStatus.ACTIVE:
+        raise EventNotActiveError("Event is not active")
+    participant = (
+        db.query(EventParticipant)
+        .filter(EventParticipant.id == participant_id, EventParticipant.event_id == event_id)
+        .one_or_none()
+    )
+    if participant is None:
+        return None
+    callsign = participant.callsign
+
+    if status is not _UNSET and status != participant.current_status:
+        if (
+            participant.current_status == ParticipantStatus.CHECKED_OUT
+            and status != ParticipantStatus.CHECKED_IN
+        ):
+            raise InvalidStatusTransitionError(
+                f"{callsign} is checked out — they must check in again first"
+            )
+        participant.current_status = status
+        if status == ParticipantStatus.CHECKED_OUT:
+            participant.checked_out_at = _utcnow()
+            message = f"{callsign} checked out"
+        elif status == ParticipantStatus.CHECKED_IN and participant.checked_out_at is not None:
+            participant.checked_in_at = _utcnow()
+            participant.checked_out_at = None
+            message = f"{callsign} checked in"
+        else:
+            message = f"{callsign} status: {_human_status(status)}"
+        add_log_entry(
+            db, event, entry_type=EventLogType.SYSTEM, message=message, actor=actor,
+            callsign=callsign, new_status=status,
+        )
+
+    if post_id is not _UNSET:
+        if post_id is None:
+            participant.post_id = None
+            add_log_entry(
+                db, event, entry_type=EventLogType.SYSTEM,
+                message=f"{callsign} unassigned from post", actor=actor, callsign=callsign,
+            )
+        else:
+            post = _resolve_post(db, event_id, post_id)
+            participant.post_id = post.id
+            add_log_entry(
+                db, event, entry_type=EventLogType.SYSTEM,
+                message=f"{callsign} assigned to {post.name}", actor=actor, callsign=callsign,
+            )
+
+    if location is not _UNSET:
+        participant.location = location
+        add_log_entry(
+            db, event, entry_type=EventLogType.SYSTEM,
+            message=f"{callsign} location: {location or '(cleared)'}", actor=actor, callsign=callsign,
+        )
+
+    if name is not _UNSET:
+        participant.name = name  # correction, not an operational fact — no log entry
+
+    db.commit()
+    db.refresh(participant)
+    return participant
+
+
+# --- Notes ----------------------------------------------------------------
+
+
+def add_note(
+    db: Session,
+    event_id: int,
+    *,
+    actor: str,
+    message: str,
+    callsign: str | None = None,
+    pinned: bool = False,
+) -> EventLogEntry:
+    event = locked_event(db, event_id)
+    if event is None or event.status != EventStatus.ACTIVE:
+        raise EventNotActiveError("Event is not active")
+    callsign = callsign.strip().upper() if callsign else None
+    entry_type = EventLogType.PARTICIPANT_NOTE if callsign else EventLogType.NOTE
+    entry = add_log_entry(
+        db, event, entry_type=entry_type, message=message, actor=actor,
+        callsign=callsign, pinned=pinned,
+    )
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+def set_log_pinned(db: Session, event_id: int, entry_id: int, pinned: bool) -> EventLogEntry | None:
+    entry = (
+        db.query(EventLogEntry)
+        .filter(EventLogEntry.id == entry_id, EventLogEntry.event_id == event_id)
+        .one_or_none()
+    )
+    if entry is None:
+        return None
+    entry.pinned = pinned
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+# --- Report ----------------------------------------------------------------
+
+
+def compute_report(db: Session, event: Event) -> list[dict]:
+    """Per-participant stints and total on-event seconds, derived from the
+    structured new_status on SYSTEM log entries. An open stint (no checkout)
+    counts until event.closed_at, or now for a still-active event; its "end"
+    stays None in the payload."""
+    participants = (
+        db.query(EventParticipant)
+        .filter(EventParticipant.event_id == event.id)
+        .order_by(EventParticipant.callsign)
+        .all()
+    )
+    entries = (
+        db.query(EventLogEntry)
+        .filter(
+            EventLogEntry.event_id == event.id,
+            EventLogEntry.new_status.in_([ParticipantStatus.CHECKED_IN, ParticipantStatus.CHECKED_OUT]),
+        )
+        .order_by(EventLogEntry.seq)
+        .all()
+    )
+    by_callsign: dict[str, list[EventLogEntry]] = {}
+    for entry in entries:
+        by_callsign.setdefault(entry.callsign, []).append(entry)
+
+    if event.closed_at is not None:
+        cutoff = event.closed_at
+    else:
+        cutoff = _utcnow()
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+
+    report = []
+    for participant in participants:
+        stints: list[dict] = []
+        open_start: datetime | None = None
+        for entry in by_callsign.get(participant.callsign, []):
+            created = entry.created_at
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if entry.new_status == ParticipantStatus.CHECKED_IN and open_start is None:
+                open_start = created
+            elif entry.new_status == ParticipantStatus.CHECKED_OUT and open_start is not None:
+                stints.append({"start": open_start, "end": created})
+                open_start = None
+        if open_start is not None:
+            stints.append({"start": open_start, "end": None})
+
+        total = sum(((s["end"] or cutoff) - s["start"]).total_seconds() for s in stints)
+        report.append({
+            "callsign": participant.callsign,
+            "name": participant.name,
+            "post": participant.post.name if participant.post else None,
+            "location": participant.location,
+            "stints": [
+                {"start": s["start"].isoformat(), "end": s["end"].isoformat() if s["end"] else None}
+                for s in stints
+            ],
+            "total_seconds": int(total),
+        })
+    return report
