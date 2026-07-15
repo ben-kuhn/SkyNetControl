@@ -136,6 +136,10 @@ class TestLifecycleRoutes:
     async def test_missing_event_404(self, nc_client):
         assert (await nc_client.get(f"{BASE}/9999")).status_code == 404
 
+    async def test_patch_missing_event_404(self, nc_client):
+        resp = await nc_client.patch(f"{BASE}/9999", json={"name": "X"})
+        assert resp.status_code == 404
+
 
 class TestPostRoutes:
     async def test_post_crud(self, nc_client):

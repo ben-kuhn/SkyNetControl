@@ -212,6 +212,8 @@ async def update_event_route(
         event = update_event_service(db, event_id, **data)
     except EventError as err:
         _raise_for(err)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
     return _event_to_response(event)
 
 
