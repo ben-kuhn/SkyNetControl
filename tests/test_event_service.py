@@ -23,8 +23,10 @@ from backend.modules.events.service import (
     create_post,
     delete_post,
     reopen_event,
+    set_log_pinned,
     update_event,
     update_post,
+    add_note,
 )
 from tests.conftest import make_test_net
 
@@ -209,3 +211,21 @@ class TestPosts:
 
     def test_delete_missing_post_returns_false(self, db, event):
         assert delete_post(db, event.id, 9999) is False
+
+    def test_update_post_on_closed_event_raises(self, db, event):
+        post = create_post(db, event.id, name="EOC")
+        close_event(db, event.id, actor="W0NE")
+        with pytest.raises(EventNotActiveError):
+            update_post(db, event.id, post.id, name="Nope")
+
+    def test_delete_post_on_closed_event_raises(self, db, event):
+        post = create_post(db, event.id, name="EOC")
+        close_event(db, event.id, actor="W0NE")
+        with pytest.raises(EventNotActiveError):
+            delete_post(db, event.id, post.id)
+
+    def test_set_log_pinned_on_closed_event_raises(self, db, event):
+        entry = add_note(db, event.id, actor="W0NC", message="note")
+        close_event(db, event.id, actor="W0NE")
+        with pytest.raises(EventNotActiveError):
+            set_log_pinned(db, event.id, entry.id, True)

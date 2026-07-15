@@ -227,6 +227,12 @@ class TestNotes:
     def test_pin_missing_entry_returns_none(self, db, event):
         assert set_log_pinned(db, event.id, 9999, True) is None
 
+    def test_set_log_pinned_on_closed_event_raises(self, db, event):
+        entry = add_note(db, event.id, actor="W0NC", message="note")
+        close_event(db, event.id, actor="W0NE")
+        with pytest.raises(EventNotActiveError):
+            set_log_pinned(db, event.id, entry.id, True)
+
 
 class TestReport:
     def test_two_stints_hours(self, db, event):

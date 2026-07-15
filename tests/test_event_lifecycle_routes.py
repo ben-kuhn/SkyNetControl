@@ -158,6 +158,44 @@ class TestPostRoutes:
         resp = await nc_client.delete(f"{BASE}/{event_id}/posts/{post_id}")
         assert resp.status_code == 204
 
+    async def test_update_post_on_closed_event_409(self, nc_client):
+        event_id = (await nc_client.post(BASE, json=ACTIVE_BODY)).json()["id"]
+        post_id = (await nc_client.post(f"{BASE}/{event_id}/posts", json={"name": "EOC"})).json()["id"]
+        await nc_client.post(f"{BASE}/{event_id}/close")
+        resp = await nc_client.patch(f"{BASE}/{event_id}/posts/{post_id}", json={"name": "Nope"})
+        assert resp.status_code == 409
+
+    async def test_delete_post_on_closed_event_409(self, nc_client):
+        event_id = (await nc_client.post(BASE, json=ACTIVE_BODY)).json()["id"]
+        post_id = (await nc_client.post(f"{BASE}/{event_id}/posts", json={"name": "EOC"})).json()["id"]
+        await nc_client.post(f"{BASE}/{event_id}/close")
+        resp = await nc_client.delete(f"{BASE}/{event_id}/posts/{post_id}")
+        assert resp.status_code == 409
+
+    async def test_pin_on_closed_event_409(self, nc_client):
+        event_id = (await nc_client.post(BASE, json=ACTIVE_BODY)).json()["id"]
+        note = (await nc_client.post(f"{BASE}/{event_id}/log", json={"message": "x"})).json()
+        await nc_client.post(f"{BASE}/{event_id}/close")
+        resp = await nc_client.patch(f"{BASE}/{event_id}/log/{note['id']}", json={"pinned": True})
+        assert resp.status_code == 409
+
+    async def test_empty_event_name_422(self, nc_client):
+        resp = await nc_client.post(BASE, json={"name": "", "event_type": "emergency"})
+        assert resp.status_code == 422
+
+    async def test_empty_post_name_422(self, nc_client):
+        event_id = (await nc_client.post(BASE, json=ACTIVE_BODY)).json()["id"]
+        resp = await nc_client.post(f"{BASE}/{event_id}/posts", json={"name": ""})
+        assert resp.status_code == 422
+
+    async def test_null_participant_status_422(self, nc_client):
+        event_id = (await nc_client.post(BASE, json=ACTIVE_BODY)).json()["id"]
+        pid = (await nc_client.post(
+            f"{BASE}/{event_id}/participants", json={"callsign": "KE0XYZ"}
+        )).json()["id"]
+        resp = await nc_client.patch(f"{BASE}/{event_id}/participants/{pid}", json={"status": None})
+        assert resp.status_code == 422
+
 
 class TestPermissions:
     async def test_viewer_can_read(self, nc_client, viewer_client):

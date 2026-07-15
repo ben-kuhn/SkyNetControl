@@ -231,6 +231,9 @@ def update_post(
     lat: object = _UNSET,
     lon: object = _UNSET,
 ) -> EventPost | None:
+    event = locked_event(db, event_id)
+    if event is None or event.status == EventStatus.CLOSED:
+        raise EventNotActiveError("Event is closed")
     post = db.query(EventPost).filter(EventPost.id == post_id, EventPost.event_id == event_id).one_or_none()
     if post is None:
         return None
@@ -250,6 +253,9 @@ def update_post(
 
 
 def delete_post(db: Session, event_id: int, post_id: int) -> bool:
+    event = locked_event(db, event_id)
+    if event is None or event.status == EventStatus.CLOSED:
+        raise EventNotActiveError("Event is closed")
     post = db.query(EventPost).filter(EventPost.id == post_id, EventPost.event_id == event_id).one_or_none()
     if post is None:
         return False
@@ -380,6 +386,8 @@ def update_participant(
         return None
     callsign = participant.callsign
 
+    if status is not _UNSET and status is None:
+        raise InvalidStatusTransitionError("status cannot be null")
     if status is not _UNSET and status != participant.current_status:
         if (
             participant.current_status == ParticipantStatus.CHECKED_OUT
@@ -460,6 +468,9 @@ def add_note(
 
 
 def set_log_pinned(db: Session, event_id: int, entry_id: int, pinned: bool) -> EventLogEntry | None:
+    event = locked_event(db, event_id)
+    if event is None or event.status == EventStatus.CLOSED:
+        raise EventNotActiveError("Event is closed")
     entry = (
         db.query(EventLogEntry)
         .filter(EventLogEntry.id == entry_id, EventLogEntry.event_id == event_id)
