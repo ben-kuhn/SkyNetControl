@@ -51,3 +51,7 @@ select = ["E", "F"]
 # Tests legitimately use inline imports (for fixture-local scoping), one-line
 # semicolon-compact setup, and the occasional unused name for clarity.
 "tests/**" = ["E401", "E402", "E501", "E702", "E741", "F401", "F811", "F841"]
+# Alembic migrations are historical, already-applied artifacts. Autogenerate
+# always emits `import sqlalchemy as sa` (often unused), and seed-data SQL is
+# embedded as long string literals that must not be wrapped.
+"alembic/versions/**" = ["E501", "F401"]
