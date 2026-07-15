@@ -300,3 +300,89 @@ export interface ChatSession {
   created_at: string;
   messages: ChatMessage[];
 }
+
+// --- Live events ---
+
+export type EventType = "public_service" | "emergency";
+export type EventStatus = "draft" | "active" | "closed";
+export type ParticipantStatus =
+  | "checked_in"
+  | "at_post"
+  | "en_route"
+  | "out_of_service"
+  | "checked_out";
+export type EventLogType = "system" | "note" | "participant_note";
+
+/** Named NetEvent to avoid clashing with the DOM Event type. */
+export interface NetEvent {
+  id: number;
+  net_id: number;
+  name: string;
+  description: string | null;
+  event_type: EventType;
+  status: EventStatus;
+  scheduled_start: string | null;
+  activated_at: string | null;
+  closed_at: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface EventPost {
+  id: number;
+  event_id: number;
+  name: string;
+  description: string | null;
+  lat: number | null;
+  lon: number | null;
+}
+
+export interface EventParticipant {
+  id: number;
+  event_id: number;
+  callsign: string;
+  name: string | null;
+  post_id: number | null;
+  location: string | null;
+  current_status: ParticipantStatus;
+  checked_in_at: string;
+  checked_out_at: string | null;
+}
+
+export interface EventLogEntry {
+  id: number;
+  seq: number;
+  entry_type: EventLogType;
+  callsign: string | null;
+  actor: string;
+  message: string;
+  new_status: ParticipantStatus | null;
+  pinned: boolean;
+  created_at: string;
+}
+
+export interface EventSnapshot {
+  event: NetEvent;
+  posts: EventPost[];
+  participants: EventParticipant[];
+  log: EventLogEntry[];
+  pinned_seqs: number[];
+}
+
+export interface EventUpdates extends EventSnapshot {
+  latest_seq: number;
+}
+
+export interface EventStint {
+  start: string;
+  end: string | null;
+}
+
+export interface EventReportParticipant {
+  callsign: string;
+  name: string | null;
+  post: string | null;
+  location: string | null;
+  stints: EventStint[];
+  total_seconds: number;
+}
