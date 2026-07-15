@@ -366,6 +366,7 @@ export interface EventSnapshot {
   posts: EventPost[];
   participants: EventParticipant[];
   log: EventLogEntry[];
+  pinned_seqs: number[];
 }
 
 export interface EventUpdates extends EventSnapshot {

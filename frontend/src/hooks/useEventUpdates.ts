@@ -30,6 +30,11 @@ export function useEventUpdates(netSlug: string, eventId: number) {
       // the accumulated log strictly increasing.
       const lastSeq = logRef.current.length > 0 ? logRef.current[logRef.current.length - 1]!.seq : 0;
       logRef.current = [...logRef.current, ...u.log.filter((e) => e!.seq > lastSeq)];
+      // pinned is the one mutable log field, so it rides the un-cursored state, not the log delta
+      const pinnedSet = new Set(u.pinned_seqs);
+      logRef.current = logRef.current.map((e) =>
+        pinnedSet.has(e.seq) === e.pinned ? e : { ...e, pinned: pinnedSet.has(e.seq) },
+      );
       sinceRef.current = Math.max(sinceRef.current, u.latest_seq);
       statusRef.current = u.event.status;
       setUpdates({ ...u, log: logRef.current });

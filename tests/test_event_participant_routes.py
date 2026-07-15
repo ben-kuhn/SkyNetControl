@@ -175,6 +175,27 @@ class TestUpdatesRoute:
         resp = await viewer_client.get(f"{BASE}/{active_event}/updates", params={"since": 2})
         assert resp.json()["log"] == []
 
+    async def test_pinned_seqs_propagate_through_cursor(self, nc_client, viewer_client, active_event):
+        # Create a note and record its seq
+        note_resp = await nc_client.post(f"{BASE}/{active_event}/log", json={"message": "important"})
+        note_id = note_resp.json()["id"]
+        note_seq = note_resp.json()["seq"]
+        latest_seq = note_seq
+
+        # Pin the note
+        await nc_client.patch(f"{BASE}/{active_event}/log/{note_id}", json={"pinned": True})
+
+        # Poll with since=latest_seq: log delta is empty, but pinned_seqs includes the seq
+        resp = await viewer_client.get(f"{BASE}/{active_event}/updates", params={"since": latest_seq})
+        body = resp.json()
+        assert body["log"] == []
+        assert note_seq in body["pinned_seqs"]
+
+        # Unpin and confirm it disappears from pinned_seqs
+        await nc_client.patch(f"{BASE}/{active_event}/log/{note_id}", json={"pinned": False})
+        resp = await viewer_client.get(f"{BASE}/{active_event}/updates", params={"since": latest_seq})
+        assert note_seq not in resp.json()["pinned_seqs"]
+
 
 class TestReportRoute:
     async def test_report(self, nc_client, viewer_client, active_event):

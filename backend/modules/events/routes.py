@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import NetContext, get_db_session, require_net_role
@@ -40,7 +40,7 @@ events_router = APIRouter(prefix="/api/nets/{net_slug}/events", tags=["events"])
 
 
 class EventCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     event_type: EventType
     description: str | None = None
     scheduled_start: datetime | None = None
@@ -54,7 +54,7 @@ class EventUpdate(BaseModel):
 
 
 class PostCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     description: str | None = None
     lat: float | None = None
     lon: float | None = None
@@ -161,6 +161,8 @@ def _snapshot(db: Session, event: Event) -> dict:
         "posts": [_post_to_response(p) for p in posts],
         "participants": [_participant_to_response(p) for p in participants],
         "log": [_log_to_response(e) for e in log],
+        # pinned is the one mutable log field; ride the full-log state, not the delta
+        "pinned_seqs": [e.seq for e in log if e.pinned],
     }
 
 
@@ -426,7 +428,10 @@ async def pin_log_route(
     db: Session = Depends(get_db_session),
 ):
     _get_event_or_404(db, ctx.net.id, event_id)
-    entry = set_log_pinned_service(db, event_id, entry_id, body.pinned)
+    try:
+        entry = set_log_pinned_service(db, event_id, entry_id, body.pinned)
+    except EventError as err:
+        _raise_for(err)
     if entry is None:
         raise HTTPException(status_code=404, detail="Log entry not found")
     return _log_to_response(entry)
