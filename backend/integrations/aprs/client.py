@@ -83,13 +83,15 @@ async def _send(writer, line: str) -> None:
 
 
 async def _send_objects(state, writer, config, *, force: bool = False) -> None:
-    """Object beaconing — implemented in the beaconer task (Task 5)."""
-    return None
+    from backend.integrations.aprs.beacon import send_objects
+
+    await send_objects(state, writer, config, force=force)
 
 
 async def _kill_all_objects(state, writer, config) -> None:
-    """Kill packets on shutdown — implemented in the beaconer task (Task 5)."""
-    return None
+    from backend.integrations.aprs.beacon import kill_all
+
+    await kill_all(state, writer, config)
 
 
 async def run_event_client(state, config) -> None:
