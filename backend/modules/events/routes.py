@@ -577,9 +577,15 @@ async def list_messages_route(
     if not include_dismissed:
         query = query.filter(EventMessage.status != MessageStatus.DISMISSED)
     messages = query.order_by(EventMessage.msg_seq).all()
+    from backend.modules.nets.config_service import get_net_config as _get_net_config
+
+    pat_mailbox = _get_net_config(db, event.net_id, "pat_mailbox_path", "") or ""
+    net_addr = _get_net_config(db, event.net_id, "net_address", "") or ""
+    messaging_configured = bool(pat_mailbox and net_addr)
     return {
         "messages": [_message_to_response(m) for m in messages],
         "latest_msg_seq": event.msg_seq,
+        "messaging_configured": messaging_configured,
     }
 
 
@@ -617,7 +623,9 @@ async def patch_message_route(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    _get_event_or_404(db, ctx.net.id, event_id)
+    event = _get_event_or_404(db, ctx.net.id, event_id)
+    if event.status != EventStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail="Event is not active")
     message = set_message_status(db, event_id, message_id, body.status)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -641,7 +649,7 @@ async def rescan_route(
 
     mailbox = get_net_config(db, ctx.net.id, "pat_mailbox_path", "") or ""
     net_address = get_net_config(db, ctx.net.id, "net_address", "") or ""
-    if not net_address:
+    if not mailbox or not net_address:
         return {"new_messages": 0}
 
     messages = read_mailbox(os.path.join(mailbox, "in"), net_address)

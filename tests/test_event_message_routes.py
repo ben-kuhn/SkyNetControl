@@ -156,9 +156,15 @@ class TestPatchStatus:
 
 
 class TestRescan:
-    async def test_rescan_reports_count(self, nc_client, active_event, monkeypatch):
+    async def test_rescan_reports_count(self, nc_client, active_event, monkeypatch, db_setup):
         from datetime import datetime, timezone
         import backend.modules.events.routes as events_routes
+        from backend.modules.nets.config_service import set_net_config
+
+        # rescan_route requires both pat_mailbox_path and net_address to be set
+        with db_setup["factory"]() as db:
+            set_net_config(db, db_setup["net_id"], "pat_mailbox_path", "/tmp/fake-mailbox")
+            db.commit()
 
         def fake_read(inbox_path, net_address):
             return [{
@@ -174,3 +180,34 @@ class TestRescan:
         await nc_client.post(f"{BASE}/{active_event}/close")
         resp = await nc_client.post(f"{BASE}/{active_event}/rescan")
         assert resp.status_code == 409
+
+
+class TestPatchStatusClosedEvent:
+    async def test_closed_event_patch_409(self, nc_client, active_event, db_setup):
+        """IMPORTANT 3: PATCH message status on a closed event must return 409."""
+        _seed_inbound(db_setup, active_event)
+        mid = (await nc_client.get(f"{BASE}/{active_event}/messages")).json()["messages"][0]["id"]
+        # Close the event
+        await nc_client.post(f"{BASE}/{active_event}/close")
+        # Now PATCH status on closed event should 409
+        resp = await nc_client.patch(f"{BASE}/{active_event}/messages/{mid}", json={"status": "read"})
+        assert resp.status_code == 409
+
+
+class TestMessagingConfigured:
+    async def test_messaging_configured_true_when_both_set(self, nc_client, active_event, db_setup):
+        """messaging_configured=True when pat_mailbox_path and net_address both set."""
+        from backend.modules.nets.config_service import set_net_config
+        with db_setup["factory"]() as db:
+            set_net_config(db, db_setup["net_id"], "pat_mailbox_path", "/tmp/mailbox")
+            db.commit()
+        resp = await nc_client.get(f"{BASE}/{active_event}/messages")
+        assert resp.status_code == 200
+        assert resp.json()["messaging_configured"] is True
+
+    async def test_messaging_configured_false_when_mailbox_missing(self, nc_client, active_event):
+        """messaging_configured=False when pat_mailbox_path is not set (net_address only)."""
+        resp = await nc_client.get(f"{BASE}/{active_event}/messages")
+        assert resp.status_code == 200
+        # net_address is set (W0NE@winlink.org) but pat_mailbox_path is not
+        assert resp.json()["messaging_configured"] is False
