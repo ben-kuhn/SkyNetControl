@@ -92,3 +92,32 @@ class TestOthers:
         stations = store.snapshot()["stations"]
         assert len(stations) == 1
         assert stations[0]["kind"] == "participant"
+
+
+class TestKindPromotion:
+    def test_other_promoted_to_participant_keeps_trail(self):
+        store = EventPositionStore()
+        store.add_point("N0DES-7", 39.0, -94.0, kind="other")
+        store.add_point("N0DES-7", 39.1, -94.1, kind="participant", callsign="N0DES")
+        stations = store.snapshot()["stations"]
+        assert len(stations) == 1
+        assert stations[0]["kind"] == "participant"
+        assert stations[0]["callsign"] == "N0DES"
+        assert len(stations[0]["points"]) == 2
+
+    def test_participant_never_demoted(self):
+        store = EventPositionStore()
+        store.add_point("KE0XYZ-9", 39.0, -94.0, kind="participant", callsign="KE0XYZ")
+        store.add_point("KE0XYZ-9", 39.1, -94.1, kind="other")
+        stations = store.snapshot()["stations"]
+        assert len(stations) == 1
+        assert stations[0]["kind"] == "participant"
+
+    def test_promoted_station_not_evicted_by_lru(self):
+        store = EventPositionStore()
+        store.add_point("N0DES-7", 39.0, -94.0, kind="other")
+        store.add_point("N0DES-7", 39.1, -94.1, kind="participant", callsign="N0DES")
+        for i in range(OTHER_STATIONS_CAP + 5):
+            store.add_point(f"X{i}", 39.0, -94.0, kind="other")
+        ids = {s["station_id"] for s in store.snapshot()["stations"]}
+        assert "N0DES-7" in ids

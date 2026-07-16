@@ -55,6 +55,16 @@ class EventPositionStore:
     ) -> int:
         ts = ts or _utcnow()
         self._seq += 1
+        # A station already known as a participant stays one regardless of
+        # the caller's kind (participant_calls lag packets briefly); a station
+        # promoted other→participant moves pools and keeps its trail.
+        if station_id in self._participants:
+            kind = "participant"
+        elif kind == "participant" and station_id in self._others:
+            promoted = self._others.pop(station_id)
+            promoted.kind = "participant"
+            promoted.callsign = callsign
+            self._participants[station_id] = promoted
         pool = self._participants if kind == "participant" else self._others
         station = pool.get(station_id)
         if station is None:
@@ -80,6 +90,10 @@ class EventPositionStore:
         self._others.clear()
 
     def snapshot(self, since: int = 0) -> dict:
+        """Complete station roster with each station's points where
+        pos_seq > since. NOT lossless: trails are bounded deques, so points
+        older than the last TRAIL_MAX_POINTS per station are gone — a client
+        resuming from a very old cursor sees a trail gap, by design."""
         stations = []
         for station in list(self._participants.values()) + list(self._others.values()):
             stations.append({
