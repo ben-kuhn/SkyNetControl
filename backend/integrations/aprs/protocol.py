@@ -15,10 +15,17 @@ BEACON_INTERVAL_S = 600  # normal object re-beacon cadence
 APP_VERSION = "0.1.0"
 
 
+def _sanitize_comment(comment: str, max_len: int = 43) -> str:
+    """Strip control characters (CR/LF would let a comment inject extra
+    packets into the TCP stream) and cap to APRS comment-length convention."""
+    cleaned = "".join(ch for ch in comment if ch.isprintable())
+    return cleaned[:max_len]
+
+
 def login_line(callsign: str, filter_spec: str) -> str:
     """APRS-IS login. The passcode is the public 15-bit hash of the base
     callsign (aprslib implements it) — verified login, since we transmit."""
-    callsign = callsign.upper()
+    callsign = re.sub(r"[^A-Z0-9-]", "", callsign.upper())
     line = f"user {callsign} pass {aprslib.passcode(callsign)} vers SkyNetControl {APP_VERSION}"
     if filter_spec:
         line += f" filter {filter_spec}"
@@ -40,7 +47,10 @@ def build_filter(
     """Server-side filter: wildcarded buddy terms for each participant's base
     callsign (matches every SSID), plus an optional range term. Empty string
     when there is nothing to ask for — the filtered port sends nothing then."""
-    bases = sorted({cs.split("-")[0].upper() for cs in callsigns if cs.strip()})
+    bases = sorted({
+        re.sub(r"[^A-Z0-9]", "", cs.split("-")[0].upper())
+        for cs in callsigns if cs.strip()
+    } - {""})
     terms = [f"b/{base}*" for base in bases]
     if range_lat is not None and range_lon is not None and range_km is not None:
         terms.append(f"r/{range_lat:.4f}/{range_lon:.4f}/{range_km:.0f}")
@@ -89,6 +99,7 @@ def object_packet(
 ) -> str:
     """APRS object report as a full TNC2 frame. kill=True emits the object
     with the '_' flag so other clients delete it."""
+    comment = _sanitize_comment(comment)
     flag = "_" if kill else "*"
     ts = (now or datetime.now(timezone.utc)).strftime("%d%H%M")
     body = (
