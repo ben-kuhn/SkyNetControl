@@ -59,6 +59,27 @@ class ScannerState:
 scanner_state = ScannerState()
 
 
+def _persist_raw_messages(db, messages):
+    """Upsert RawMessage rows (deduped by message_id) without creating check-ins.
+    Used when an event is active but no check-in session window is open, so event
+    routing still has RawMessage rows to reference."""
+    from backend.modules.checkins.models import MessageType, RawMessage
+
+    ids = [m["message_id"] for m in messages]
+    existing = {
+        r[0] for r in db.query(RawMessage.message_id).filter(RawMessage.message_id.in_(ids)).all()
+    }
+    for m in messages:
+        if m["message_id"] in existing:
+            continue
+        db.add(RawMessage(
+            message_id=m["message_id"], from_address=m["from_address"],
+            received_at=m["received_at"], subject=m["subject"], body=m["body"],
+            message_type=MessageType.UNKNOWN, parsed=False, source_path=m.get("path"),
+        ))
+    db.commit()
+
+
 def run_scan(db: Session, now: datetime) -> int | None:
     """Run a single scan cycle against the default net (global app_config).
 
@@ -104,21 +125,31 @@ def scan_one(db: Session, net_id: int, mailbox: str, now: datetime) -> int:
         logger.info("Scanner skipped for net_id=%d: net_address not configured", net_id)
         return 0
 
-    session = find_active_session(db, now, net_id=net_id)
-    if session is None:
-        logger.debug("Scanner skipped for net_id=%d: no active session window", net_id)
-        return 0
-
     inbox_path = os.path.join(mailbox, "in")
     messages = read_mailbox(inbox_path, net_address)
-    checkins = scan_and_import_messages(db, messages, session, net_id=net_id)
+
+    session = find_active_session(db, now, net_id=net_id)
+    checkins = []
+    if session is not None:
+        checkins = scan_and_import_messages(db, messages, session, net_id=net_id)
+    else:
+        # No check-in session window, but we still need RawMessage rows persisted
+        # so active events can route. Upsert raw messages without creating check-ins.
+        _persist_raw_messages(db, messages)
+
+    from backend.modules.events.messages import route_event_messages
+
+    routed = route_event_messages(db, net_id, messages)
 
     count = len(checkins)
     scanner_state.last_scan_time = now
     scanner_state.last_scan_count = count
-    scanner_state.active_session_id = session.id
+    if session is not None:
+        scanner_state.active_session_id = session.id
 
-    logger.info("Scanner completed for net_id=%d: %d new check-ins imported", net_id, count)
+    logger.info(
+        "Scanner completed for net_id=%d: %d check-ins, %d event messages", net_id, count, routed
+    )
     return count
 
 
