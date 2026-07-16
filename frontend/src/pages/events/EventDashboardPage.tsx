@@ -12,9 +12,11 @@ import { Button } from "../../components/Button";
 import { Spinner } from "../../components/Spinner";
 import { useToast } from "../../context/ToastContext";
 import { useCurrentNet } from "../../hooks/useCurrentNet";
+import { useEventPositions } from "../../hooks/useEventPositions";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
 import type { ParticipantStatus } from "../../types";
 import { CheckInBar } from "./CheckInBar";
+import { MapPanel } from "./MapPanel";
 import { NetLogPanel } from "./NetLogPanel";
 import { ParticipantBoard, STATUS_LABEL } from "./ParticipantBoard";
 import { PostsPanel } from "./PostsPanel";
@@ -28,6 +30,12 @@ export function EventDashboardPage() {
   const [noteText, setNoteText] = useState("");
   const [participantNote, setParticipantNote] = useState("");
   const [pinNote, setPinNote] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const positions = useEventPositions(
+    slug!,
+    Number(eventId),
+    mapExpanded || (updates?.event.aprs_beacon_posts ?? false),
+  );
 
   // Point 3: toast-driven error reporter and generic action helper
   const { addToast } = useToast();
@@ -106,6 +114,19 @@ export function EventDashboardPage() {
       {canWrite && event.status === "active" && (
         <CheckInBar netSlug={slug!} eventId={event.id} posts={posts} onDone={refresh} onError={onError} />
       )}
+
+      <MapPanel
+        netSlug={slug!}
+        event={event}
+        participants={participants}
+        posts={posts}
+        canWrite={canWrite}
+        expanded={mapExpanded}
+        onToggleExpanded={() => setMapExpanded(!mapExpanded)}
+        positions={positions}
+        onEventChanged={refresh}
+        onError={onError}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Participant board */}
@@ -211,7 +232,16 @@ export function EventDashboardPage() {
           {/* Point 9: posts panel below participant detail */}
           {canWrite && event.status !== "closed" && (
             <div className="mt-4">
-              <PostsPanel netSlug={slug!} eventId={event.id} posts={posts} onChanged={refresh} onError={onError} />
+              <PostsPanel
+                netSlug={slug!}
+                eventId={event.id}
+                posts={posts}
+                onChanged={refresh}
+                onError={onError}
+                event={event}
+                canWrite={canWrite}
+                objects={positions.objects}
+              />
             </div>
           )}
         </div>

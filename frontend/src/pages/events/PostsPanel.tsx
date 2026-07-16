@@ -1,9 +1,9 @@
 // frontend/src/pages/events/PostsPanel.tsx
 import { useState } from "react";
-import { createEventPost, deleteEventPost } from "../../api/events";
+import { createEventPost, deleteEventPost, updateEvent } from "../../api/events";
 import { Button } from "../../components/Button";
 import { Input } from "../../components/Input";
-import type { EventPost } from "../../types";
+import type { BeaconedObject, EventPost, NetEvent } from "../../types";
 
 interface PostsPanelProps {
   netSlug: string;
@@ -11,13 +11,18 @@ interface PostsPanelProps {
   posts: EventPost[];
   onChanged: () => Promise<void>;
   onError: (message: string) => void;
+  event: NetEvent;
+  canWrite: boolean;
+  objects: BeaconedObject[];
 }
 
-export function PostsPanel({ netSlug, eventId, posts, onChanged, onError }: PostsPanelProps) {
+export function PostsPanel({ netSlug, eventId, posts, onChanged, onError, event, canWrite, objects }: PostsPanelProps) {
   const [name, setName] = useState("");
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const objectName = (postId: number) => objects.find((o) => o.post_id === postId)?.name;
 
   async function add() {
     if (!name.trim() || busy) return;
@@ -55,6 +60,23 @@ export function PostsPanel({ netSlug, eventId, posts, onChanged, onError }: Post
   return (
     <div className="rounded-md border border-border bg-bg-surface p-3">
       <h3 className="text-sm font-semibold text-text-primary mb-2">Posts</h3>
+      {canWrite && (
+        <label className="flex items-center gap-2 text-xs text-text-muted mb-2">
+          <input
+            type="checkbox"
+            checked={event.aprs_beacon_posts}
+            onChange={async (e) => {
+              try {
+                await updateEvent(event.id, { aprs_beacon_posts: e.target.checked }, netSlug);
+                await onChanged();
+              } catch (err) {
+                onError(err instanceof Error ? err.message : "Failed to toggle beaconing");
+              }
+            }}
+          />
+          Beacon posts as APRS objects (transmits under the net's callsign)
+        </label>
+      )}
       {posts.length > 0 && (
         <ul className="mb-3 flex flex-col gap-1">
           {posts.map((p) => (
@@ -63,6 +85,9 @@ export function PostsPanel({ netSlug, eventId, posts, onChanged, onError }: Post
                 {p.name}
                 {p.lat != null && p.lon != null && (
                   <span className="text-xs text-text-muted ml-2">({p.lat}, {p.lon})</span>
+                )}
+                {event.aprs_beacon_posts && objectName(p.id) && (
+                  <span className="text-xs text-accent font-mono ml-2">on air: {objectName(p.id)}</span>
                 )}
               </span>
               <button
