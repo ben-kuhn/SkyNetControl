@@ -12,11 +12,13 @@ import { Button } from "../../components/Button";
 import { Spinner } from "../../components/Spinner";
 import { useToast } from "../../context/ToastContext";
 import { useCurrentNet } from "../../hooks/useCurrentNet";
+import { useEventMessages } from "../../hooks/useEventMessages";
 import { useEventPositions } from "../../hooks/useEventPositions";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
 import type { ParticipantStatus } from "../../types";
 import { CheckInBar } from "./CheckInBar";
 import { MapPanel } from "./MapPanel";
+import { MessagesPanel } from "./MessagesPanel";
 import { NetLogPanel } from "./NetLogPanel";
 import { ParticipantBoard, STATUS_LABEL } from "./ParticipantBoard";
 import { PostsPanel } from "./PostsPanel";
@@ -35,6 +37,12 @@ export function EventDashboardPage() {
     slug!,
     Number(eventId),
     mapExpanded || (updates?.event.aprs_beacon_posts ?? false),
+  );
+  const [messagesOpen, setMessagesOpen] = useState(false);
+  const eventMessages = useEventMessages(
+    slug!,
+    Number(eventId),
+    messagesOpen || (updates?.event.status === "active"),
   );
 
   // Point 3: toast-driven error reporter and generic action helper
@@ -283,6 +291,33 @@ export function EventDashboardPage() {
             ) : undefined}
           />
         </div>
+      </div>
+
+      {/* Messages panel */}
+      <div className="mt-6">
+        <button
+          onClick={() => setMessagesOpen(!messagesOpen)}
+          className="text-sm font-semibold text-text-primary hover:text-accent flex items-center gap-2"
+        >
+          {messagesOpen ? "▾" : "▸"} Messages
+          {eventMessages.unreadCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-xs bg-accent text-bg-base">
+              {eventMessages.unreadCount}
+            </span>
+          )}
+        </button>
+        {messagesOpen && (
+          <div className="mt-2">
+            <MessagesPanel
+              netSlug={slug!}
+              event={event}
+              messages={eventMessages.messages}
+              canWrite={canWrite}
+              onChanged={eventMessages.refresh}
+              onError={onError}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
