@@ -1,5 +1,6 @@
 // frontend/src/pages/events/MessagesPanel.tsx
 import { useMemo, useState } from "react";
+import { retryDelivery } from "../../api/delivery";
 import { rescanEventMailbox, setEventMessageStatus } from "../../api/events";
 import { Button } from "../../components/Button";
 import type { EventMessage, NetEvent } from "../../types";
@@ -11,12 +12,23 @@ interface MessagesPanelProps {
   netSlug: string;
   event: NetEvent;
   messages: EventMessage[];
+  messagingConfigured: boolean;
   canWrite: boolean;
   onChanged: () => Promise<void>;
   onError: (message: string) => void;
+  onInfo?: (message: string) => void;
 }
 
-export function MessagesPanel({ netSlug, event, messages, canWrite, onChanged, onError }: MessagesPanelProps) {
+export function MessagesPanel({
+  netSlug,
+  event,
+  messages,
+  messagingConfigured,
+  canWrite,
+  onChanged,
+  onError,
+  onInfo,
+}: MessagesPanelProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [includeDismissed, setIncludeDismissed] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -36,7 +48,7 @@ export function MessagesPanel({ netSlug, event, messages, canWrite, onChanged, o
 
   const active = event.status === "active";
 
-  async function open(m: EventMessage) {
+  async function handleOpen(m: EventMessage) {
     setOpenId(openId === m.id ? null : m.id);
     if (m.status === "unread" && m.direction === "inbound" && canWrite && active) {
       try {
@@ -60,11 +72,22 @@ export function MessagesPanel({ netSlug, event, messages, canWrite, onChanged, o
     try {
       const { new_messages } = await rescanEventMailbox(event.id, netSlug);
       await onChanged();
-      onError(new_messages > 0 ? `${new_messages} new message(s)` : "No new mail");
+      const msg = new_messages > 0 ? `${new_messages} new message(s)` : "No new mail";
+      (onInfo ?? onError)(msg);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Re-scan failed");
     } finally {
       setRescanning(false);
+    }
+  }
+
+  async function retry(m: EventMessage) {
+    try {
+      await retryDelivery("event_message", m.id, netSlug);
+      await onChanged();
+      (onInfo ?? onError)("Retry attempted");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Retry failed");
     }
   }
 
@@ -99,6 +122,15 @@ export function MessagesPanel({ netSlug, event, messages, canWrite, onChanged, o
         )}
       </div>
 
+      {!messagingConfigured && (
+        <p className="text-xs text-text-muted mb-2">
+          No PAT mailbox configured for this net — inbound Winlink is off.{" "}
+          <a href={`/nets/${netSlug}/settings`} className="text-accent hover:underline">
+            Configure it in net settings.
+          </a>
+        </p>
+      )}
+
       {visible.length === 0 ? (
         <p className="text-text-muted text-sm">No messages.</p>
       ) : (
@@ -106,7 +138,7 @@ export function MessagesPanel({ netSlug, event, messages, canWrite, onChanged, o
           {visible.map((m) => (
             <div key={m.id} className="border-b border-border pb-1">
               <div
-                onClick={() => void open(m)}
+                onClick={() => void handleOpen(m)}
                 className="flex items-center gap-2 cursor-pointer py-1 text-sm"
               >
                 {m.status === "unread" && m.direction === "inbound" && (
@@ -131,6 +163,11 @@ export function MessagesPanel({ netSlug, event, messages, canWrite, onChanged, o
                           className="text-xs text-accent hover:underline"
                         >
                           Reply
+                        </button>
+                      )}
+                      {m.direction === "outbound" && (
+                        <button onClick={() => void retry(m)} className="text-xs text-text-muted hover:text-accent">
+                          Retry send
                         </button>
                       )}
                       {m.status !== "dismissed" && (

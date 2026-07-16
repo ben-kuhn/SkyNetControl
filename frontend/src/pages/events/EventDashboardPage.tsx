@@ -48,6 +48,7 @@ export function EventDashboardPage() {
   // Point 3: toast-driven error reporter and generic action helper
   const { addToast } = useToast();
   const onError = (message: string) => addToast(message, "error");
+  const onInfo = (message: string) => addToast(message, "success");
 
   async function act(fn: () => Promise<unknown>, failMessage: string) {
     try {
@@ -312,9 +313,11 @@ export function EventDashboardPage() {
               netSlug={slug!}
               event={event}
               messages={eventMessages.messages}
+              messagingConfigured={eventMessages.messagingConfigured}
               canWrite={canWrite}
               onChanged={eventMessages.refresh}
               onError={onError}
+              onInfo={onInfo}
             />
           </div>
         )}

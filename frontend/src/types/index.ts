@@ -451,4 +451,5 @@ export interface EventMessage {
 export interface EventMessages {
   messages: EventMessage[];
   latest_msg_seq: number;
+  messaging_configured: boolean;
 }
