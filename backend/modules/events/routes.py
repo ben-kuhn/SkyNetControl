@@ -6,13 +6,18 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import NetContext, get_db_session, require_net_role
 from backend.integrations.aprs import manager as aprs_manager
+from backend.modules.checkins.mailbox_reader import read_mailbox
+from backend.modules.events.message_service import send_event_message, set_message_status
+from backend.modules.events.messages import route_event_messages
 from backend.modules.events.models import (
     Event,
     EventLogEntry,
+    EventMessage,
     EventParticipant,
     EventPost,
     EventStatus,
     EventType,
+    MessageStatus,
     ParticipantStatus,
 )
 from backend.modules.events.service import (
@@ -72,6 +77,17 @@ class PostUpdate(BaseModel):
     description: str | None = None
     lat: float | None = None
     lon: float | None = None
+
+
+class MessageCompose(BaseModel):
+    to_address: str
+    subject: str = ""
+    body: str = ""
+    reply_to_id: int | None = None
+
+
+class MessageStatusUpdate(BaseModel):
+    status: MessageStatus
 
 
 # --- Helpers ---
@@ -138,6 +154,25 @@ def _log_to_response(entry: EventLogEntry) -> dict:
         "new_status": entry.new_status.value if entry.new_status else None,
         "pinned": entry.pinned,
         "created_at": _iso(entry.created_at),
+    }
+
+
+def _message_to_response(m: EventMessage) -> dict:
+    return {
+        "id": m.id,
+        "msg_seq": m.msg_seq,
+        "direction": m.direction.value,
+        "raw_message_id": m.raw_message_id,
+        "participant_id": m.participant_id,
+        "from_callsign": m.from_callsign,
+        "to_address": m.to_address,
+        "subject": m.subject,
+        "body": m.body,
+        "status": m.status.value,
+        "reply_to_id": m.reply_to_id,
+        "actor": m.actor,
+        "received_at": _iso(m.received_at),
+        "created_at": _iso(m.created_at),
     }
 
 
@@ -522,3 +557,96 @@ async def positions_route(
         {"post_id": post_id, "name": name} for post_id, name in sorted(state.objects_by_post.items())
     ]
     return snapshot
+
+
+# --- Message routes ---
+
+
+@events_router.get("/{event_id}/messages")
+async def list_messages_route(
+    event_id: int,
+    since: int = Query(default=0, ge=0),
+    include_dismissed: bool = Query(default=False),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
+):
+    event = _get_event_or_404(db, ctx.net.id, event_id)
+    query = db.query(EventMessage).filter(
+        EventMessage.event_id == event.id, EventMessage.msg_seq > since
+    )
+    if not include_dismissed:
+        query = query.filter(EventMessage.status != MessageStatus.DISMISSED)
+    messages = query.order_by(EventMessage.msg_seq).all()
+    return {
+        "messages": [_message_to_response(m) for m in messages],
+        "latest_msg_seq": event.msg_seq,
+    }
+
+
+@events_router.post("/{event_id}/messages", status_code=201)
+async def compose_message_route(
+    event_id: int,
+    body: MessageCompose,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    try:
+        message = send_event_message(
+            db, event_id, actor=ctx.user.callsign,
+            to_address=body.to_address, subject=body.subject, body=body.body,
+            reply_to_id=body.reply_to_id,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    except EventError as err:
+        _raise_for(err)
+    from backend.integrations.delivery.models import DeliveryStatus
+    from backend.integrations.delivery.service import get_delivery_status
+
+    logs = get_delivery_status(db, "event_message", message.id)
+    delivered = any(log.status == DeliveryStatus.SENT for log in logs)
+    return {"message": _message_to_response(message), "delivered": delivered}
+
+
+@events_router.patch("/{event_id}/messages/{message_id}")
+async def patch_message_route(
+    event_id: int,
+    message_id: int,
+    body: MessageStatusUpdate,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    message = set_message_status(db, event_id, message_id, body.status)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return _message_to_response(message)
+
+
+@events_router.post("/{event_id}/rescan")
+async def rescan_route(
+    event_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    import os
+
+    from backend.integrations.scanner.service import _persist_raw_messages
+    from backend.modules.nets.config_service import get_net_config
+
+    event = _get_event_or_404(db, ctx.net.id, event_id)
+    if event.status != EventStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail="Event is not active")
+
+    mailbox = get_net_config(db, ctx.net.id, "pat_mailbox_path", "") or ""
+    net_address = get_net_config(db, ctx.net.id, "net_address", "") or ""
+    if not net_address:
+        return {"new_messages": 0}
+
+    messages = read_mailbox(os.path.join(mailbox, "in"), net_address)
+    _persist_raw_messages(db, messages)
+    before = event.msg_seq
+    route_event_messages(db, ctx.net.id, messages)
+    db.refresh(event)
+    return {"new_messages": event.msg_seq - before}
