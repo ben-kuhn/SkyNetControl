@@ -1,6 +1,8 @@
 import { apiFetch } from "./client";
 import type {
   EventLogEntry,
+  EventMessage,
+  EventMessages,
   EventParticipant,
   EventPositions,
   EventPost,
@@ -8,6 +10,7 @@ import type {
   EventSnapshot,
   EventType,
   EventUpdates,
+  MessageStatus,
   NetEvent,
   ParticipantStatus,
 } from "../types";
@@ -205,4 +208,56 @@ export async function fetchEventPositions(
   netSlug: string,
 ): Promise<EventPositions> {
   return apiFetch<EventPositions>(`/nets/${netSlug}/events/${eventId}/positions?since=${since}`);
+}
+
+// --- Event messages (Winlink) ---
+
+export async function fetchEventMessages(
+  eventId: number,
+  since: number,
+  netSlug: string,
+  includeDismissed = false,
+): Promise<EventMessages> {
+  const params = new URLSearchParams({ since: String(since) });
+  if (includeDismissed) params.set("include_dismissed", "true");
+  return apiFetch<EventMessages>(`/nets/${netSlug}/events/${eventId}/messages?${params}`);
+}
+
+export interface ComposeMessageInput {
+  to_address: string;
+  subject: string;
+  body: string;
+  reply_to_id?: number | null;
+}
+
+export async function composeEventMessage(
+  eventId: number,
+  input: ComposeMessageInput,
+  netSlug: string,
+): Promise<{ message: EventMessage; delivered: boolean }> {
+  return apiFetch<{ message: EventMessage; delivered: boolean }>(
+    `/nets/${netSlug}/events/${eventId}/messages`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function setEventMessageStatus(
+  eventId: number,
+  messageId: number,
+  status: MessageStatus,
+  netSlug: string,
+): Promise<EventMessage> {
+  return apiFetch<EventMessage>(`/nets/${netSlug}/events/${eventId}/messages/${messageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function rescanEventMailbox(
+  eventId: number,
+  netSlug: string,
+): Promise<{ new_messages: number }> {
+  return apiFetch<{ new_messages: number }>(`/nets/${netSlug}/events/${eventId}/rescan`, {
+    method: "POST",
+  });
 }

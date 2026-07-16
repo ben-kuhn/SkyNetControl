@@ -425,3 +425,30 @@ export interface EventPositions {
   aprs_status_detail: string;
   objects: BeaconedObject[];
 }
+
+// --- Event Winlink messages ---
+
+export type MessageDirection = "inbound" | "outbound";
+export type MessageStatus = "unread" | "read" | "dismissed";
+
+export interface EventMessage {
+  id: number;
+  msg_seq: number;
+  direction: MessageDirection;
+  raw_message_id: number | null;
+  participant_id: number | null;
+  from_callsign: string;
+  to_address: string;
+  subject: string;
+  body: string;
+  status: MessageStatus;
+  reply_to_id: number | null;
+  actor: string | null;
+  received_at: string;
+  created_at: string;
+}
+
+export interface EventMessages {
+  messages: EventMessage[];
+  latest_msg_seq: number;
+}
