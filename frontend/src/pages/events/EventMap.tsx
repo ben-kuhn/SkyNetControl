@@ -33,9 +33,14 @@ export interface EventMapProps {
 
 function popupContent(title: string, lines: string[], hideId: string | null, onHide: (id: string) => void) {
   const el = document.createElement("div");
-  el.innerHTML =
-    `<strong style="font-family:monospace">${title}</strong>` +
-    lines.map((l) => `<br/>${l}`).join("");
+  const strong = document.createElement("strong");
+  strong.style.fontFamily = "monospace";
+  strong.textContent = title;
+  el.appendChild(strong);
+  for (const line of lines) {
+    el.appendChild(document.createElement("br"));
+    el.appendChild(document.createTextNode(line));
+  }
   if (hideId !== null) {
     const btn = document.createElement("button");
     btn.textContent = "hide";
