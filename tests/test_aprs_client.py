@@ -35,6 +35,12 @@ class FakeAprsServer:
         self.writers.append(writer)
         writer.write(b"# aprsc test server\r\n")
         await writer.drain()
+        # Read the login line and send a verified logresp
+        login = await reader.readline()
+        self.received.append(login.decode().strip())
+        callsign = login.decode().split()[1] if login else "NOCALL"
+        writer.write(f"# logresp {callsign} verified, server T2TEST\r\n".encode())
+        await writer.drain()
         while True:
             line = await reader.readline()
             if not line:
@@ -225,3 +231,43 @@ class TestClientLoop:
             )
         manager.ensure_started(db_factory, event.id)
         assert manager.get_state(event.id) is None
+
+    async def test_unverified_login_sets_error_status(self, db_factory, aprs_event):
+        """An unverified logresp must set status=error and disable TX."""
+
+        class UnverifiedFakeAprsServer(FakeAprsServer):
+            async def _handle(self, reader, writer):
+                self.connections += 1
+                self.writers.append(writer)
+                writer.write(b"# aprsc test server\r\n")
+                await writer.drain()
+                login = await reader.readline()
+                self.received.append(login.decode().strip())
+                callsign = login.decode().split()[1] if login else "NOCALL"
+                writer.write(f"# logresp {callsign} unverified, server T2TEST\r\n".encode())
+                await writer.drain()
+                while True:
+                    line = await reader.readline()
+                    if not line:
+                        break
+                    self.received.append(line.decode().strip())
+
+        server = UnverifiedFakeAprsServer()
+        await server.start()
+        try:
+            with db_factory() as db:
+                net_id = db.get(Event, aprs_event).net_id
+                set_net_config_bulk(db, net_id, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
+
+            manager.ensure_started(db_factory, aprs_event)
+            state = manager.get_state(aprs_event)
+            assert state is not None
+
+            await _wait_for(lambda: state.status == "error")
+            assert "unverified" in state.status_detail
+        finally:
+            manager.stop(aprs_event)
+            state = manager.get_state(aprs_event)
+            if state and state.task:
+                await asyncio.wait_for(state.task, timeout=5)
+            await server.stop()

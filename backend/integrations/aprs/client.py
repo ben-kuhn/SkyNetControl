@@ -105,12 +105,20 @@ async def run_event_client(state, config) -> None:
                 await reader.readline()  # server banner
                 current_spec = refresh_config(state)
                 await _send(writer, login_line(config["callsign"], current_spec))
-                state.status = "connected"
-                state.status_detail = ""
+                logresp = (await asyncio.wait_for(reader.readline(), timeout=10)).decode("utf-8", errors="replace")
+                if "unverified" in logresp:
+                    # Verified login is required for object TX; APRS-IS silently
+                    # drops transmissions from unverified logins.
+                    state.status = "error"
+                    state.status_detail = "APRS-IS login unverified (check callsign) — transmit disabled"
+                else:
+                    state.status = "connected"
+                    state.status_detail = ""
                 backoff = RECONNECT_BASE_S
                 state.announced.clear()
                 state.objects_by_post.clear()
-                await _send_objects(state, writer, config, force=True)
+                if state.status == "connected":
+                    await _send_objects(state, writer, config, force=True)
                 next_beacon = loop.time() + BEACON_INTERVAL_S
 
                 while state.running:
@@ -132,14 +140,17 @@ async def run_event_client(state, config) -> None:
                             await _send(writer, filter_command(new_spec or "b/NOCALL"))
                         if not state.other_enabled:
                             state.store.drop_others()
-                        await _send_objects(state, writer, config)
+                        if state.status == "connected":
+                            await _send_objects(state, writer, config)
 
                     if loop.time() >= next_beacon:
-                        await _send_objects(state, writer, config, force=True)
+                        if state.status == "connected":
+                            await _send_objects(state, writer, config, force=True)
                         next_beacon = loop.time() + BEACON_INTERVAL_S
 
                 # Clean stop: remove our objects from the network first.
-                await _kill_all_objects(state, writer, config)
+                if state.status == "connected":
+                    await _kill_all_objects(state, writer, config)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
