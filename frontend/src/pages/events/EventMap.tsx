@@ -58,6 +58,8 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
     others: L.LayerGroup;
   } | null>(null);
   const fittedRef = useRef(false);
+  const markersRef = useRef<Map<string, L.CircleMarker>>(new Map());
+  const openPopupRef = useRef<string | null>(null);
 
   // Init once (same conventions as CheckInMap: invalidateSize on settle/resize)
   useEffect(() => {
@@ -108,6 +110,12 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
     const map = mapRef.current;
     const groups = layersRef.current;
     if (!map || !groups) return;
+
+    // Capture which popup was open before teardown; clearLayers() will fire
+    // popupclose which would otherwise clear openPopupRef.
+    const wasOpen = openPopupRef.current;
+    markersRef.current.clear();
+
     groups.participants.clearLayers();
     groups.trails.clearLayers();
     groups.posts.clearLayers();
@@ -174,7 +182,16 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
         ),
         { closeButton: false },
       );
+      marker.on("popupopen", () => {
+        openPopupRef.current = station.station_id;
+      });
+      marker.on("popupclose", () => {
+        if (openPopupRef.current === station.station_id) {
+          openPopupRef.current = null;
+        }
+      });
       marker.addTo(isParticipant ? groups.participants : groups.others);
+      markersRef.current.set(station.station_id, marker);
 
       if (station.points.length > 1) {
         L.polyline(
@@ -190,6 +207,15 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
     if (!fittedRef.current && allPoints.length > 0) {
       fittedRef.current = true;
       map.fitBounds(L.latLngBounds(allPoints), { padding: [40, 40], maxZoom: 13 });
+    }
+
+    // Re-open popup that was open before redraw, if the station still exists.
+    if (wasOpen) {
+      const marker = markersRef.current.get(wasOpen);
+      if (marker) {
+        openPopupRef.current = wasOpen;
+        marker.openPopup();
+      }
     }
   }, [stations, participants, posts, objects, hidden, onToggleHide]);
 

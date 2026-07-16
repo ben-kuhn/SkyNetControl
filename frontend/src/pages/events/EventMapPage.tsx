@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Spinner } from "../../components/Spinner";
 import { useEventPositions } from "../../hooks/useEventPositions";
@@ -30,13 +30,13 @@ export function EventMapPage() {
     );
   }
 
-  const toggleHide = (id: string) =>
+  const toggleHide = useCallback((id: string) =>
     setHidden((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
-    });
+    }), []);
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] p-2 gap-2">
