@@ -2,6 +2,7 @@ import { apiFetch } from "./client";
 import type {
   EventLogEntry,
   EventParticipant,
+  EventPositions,
   EventPost,
   EventReportParticipant,
   EventSnapshot,
@@ -38,7 +39,19 @@ export async function fetchEvent(id: number, netSlug: string): Promise<EventSnap
 
 export async function updateEvent(
   id: number,
-  body: Partial<Pick<NetEvent, "name" | "description" | "scheduled_start">>,
+  body: Partial<
+    Pick<
+      NetEvent,
+      | "name"
+      | "description"
+      | "scheduled_start"
+      | "aprs_other_stations"
+      | "aprs_range_lat"
+      | "aprs_range_lon"
+      | "aprs_range_km"
+      | "aprs_beacon_posts"
+    >
+  >,
   netSlug: string,
 ): Promise<NetEvent> {
   return apiFetch<NetEvent>(`/nets/${netSlug}/events/${id}`, {
@@ -182,4 +195,14 @@ export async function fetchEventReport(
   return apiFetch<{ participants: EventReportParticipant[] }>(
     `/nets/${netSlug}/events/${eventId}/report`,
   );
+}
+
+// --- APRS positions ---
+
+export async function fetchEventPositions(
+  eventId: number,
+  since: number,
+  netSlug: string,
+): Promise<EventPositions> {
+  return apiFetch<EventPositions>(`/nets/${netSlug}/events/${eventId}/positions?since=${since}`);
 }

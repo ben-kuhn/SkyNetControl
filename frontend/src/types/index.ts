@@ -326,6 +326,11 @@ export interface NetEvent {
   closed_at: string | null;
   created_by: string;
   created_at: string;
+  aprs_other_stations: boolean;
+  aprs_range_lat: number | null;
+  aprs_range_lon: number | null;
+  aprs_range_km: number | null;
+  aprs_beacon_posts: boolean;
 }
 
 export interface EventPost {
@@ -385,4 +390,38 @@ export interface EventReportParticipant {
   location: string | null;
   stints: EventStint[];
   total_seconds: number;
+}
+
+// --- APRS live positions ---
+
+export type StationKind = "participant" | "other";
+
+export interface EventTrackPoint {
+  lat: number;
+  lon: number;
+  ts: string;
+  pos_seq: number;
+}
+
+export interface EventStation {
+  station_id: string;
+  kind: StationKind;
+  callsign: string | null;
+  symbol: string | null;
+  comment: string | null;
+  last_heard: string;
+  points: EventTrackPoint[];
+}
+
+export interface BeaconedObject {
+  post_id: number;
+  name: string;
+}
+
+export interface EventPositions {
+  stations: EventStation[];
+  latest_pos_seq: number;
+  aprs_status: string;
+  aprs_status_detail: string;
+  objects: BeaconedObject[];
 }

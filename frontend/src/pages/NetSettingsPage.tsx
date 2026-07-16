@@ -64,6 +64,39 @@ const PAT_FIELDS: ConfigField[] = [
   },
 ];
 
+const APRS_FIELDS: ConfigField[] = [
+  {
+    key: "aprs.enabled",
+    label: "APRS-IS",
+    type: "boolean",
+    helpText: "Connect to APRS-IS during active events to show live positions and beacon event posts.",
+  },
+  {
+    key: "aprs.callsign",
+    label: "APRS Callsign",
+    placeholder: "W0NE",
+    mono: true,
+    helpText:
+      "Callsign used to log in and transmit objects — must be a callsign you are licensed to use.",
+    visibleWhen: (v) => v["aprs.enabled"] === "true",
+  },
+  {
+    key: "aprs.server",
+    label: "APRS-IS Server",
+    placeholder: "rotate.aprs2.net",
+    mono: true,
+    helpText: "Leave default unless you run your own server.",
+    visibleWhen: (v) => v["aprs.enabled"] === "true",
+  },
+  {
+    key: "aprs.port",
+    label: "APRS-IS Port",
+    placeholder: "14580",
+    helpText: "Filtered-feed port.",
+    visibleWhen: (v) => v["aprs.enabled"] === "true",
+  },
+];
+
 function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
   const backendOptions = [
     { value: "email", label: "Email" },
@@ -320,6 +353,16 @@ export function NetSettingsPage() {
               </Button>
             )}
           </SettingsSection>
+
+          <SettingsSection
+            title="APRS"
+            fields={APRS_FIELDS}
+            values={config}
+            savedValues={savedConfig}
+            onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+            onSave={handleSectionSave("aprs")}
+            saving={savingSection === "aprs"}
+          />
         </>
       )}
     </div>
