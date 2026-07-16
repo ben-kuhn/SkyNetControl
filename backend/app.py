@@ -148,6 +148,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             pass
 
+        try:
+            from backend.integrations.aprs.manager import start_for_active_events
+
+            start_for_active_events(session_factory)
+        except Exception:
+            pass
+
         yield
 
         if scanner_task is not None:
@@ -159,6 +166,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await scanner_task
             except asyncio.CancelledError:
                 pass
+
+        try:
+            from backend.integrations.aprs.manager import shutdown_all
+
+            await shutdown_all()
+        except Exception:
+            pass
 
     app = FastAPI(title="SkyNetControl", version="0.1.0", lifespan=lifespan)
     app.state.engine = engine

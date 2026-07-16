@@ -1,15 +1,17 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import NetContext, get_db_session, require_net_role
+from backend.integrations.aprs import manager as aprs_manager
 from backend.modules.events.models import (
     Event,
     EventLogEntry,
     EventParticipant,
     EventPost,
+    EventStatus,
     EventType,
     ParticipantStatus,
 )
@@ -190,6 +192,7 @@ async def list_events_route(
 
 @events_router.post("", status_code=201)
 async def create_event_route(
+    request: Request,
     body: EventCreate,
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
@@ -204,6 +207,8 @@ async def create_event_route(
         scheduled_start=body.scheduled_start,
         activate=body.activate,
     )
+    if event.status == EventStatus.ACTIVE:
+        aprs_manager.ensure_started(request.app.state.session_factory, event.id)
     return _event_to_response(event)
 
 
@@ -219,6 +224,7 @@ async def get_event_route(
 
 @events_router.patch("/{event_id}")
 async def update_event_route(
+    request: Request,
     event_id: int,
     body: EventUpdate,
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
@@ -232,11 +238,14 @@ async def update_event_route(
         _raise_for(err)
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
+    aprs_manager.ensure_started(request.app.state.session_factory, event_id)
+    aprs_manager.nudge(event_id)
     return _event_to_response(event)
 
 
 @events_router.post("/{event_id}/activate")
 async def activate_event_route(
+    request: Request,
     event_id: int,
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
@@ -246,6 +255,7 @@ async def activate_event_route(
         event = activate_event_service(db, event_id, actor=ctx.user.callsign)
     except EventError as err:
         _raise_for(err)
+    aprs_manager.ensure_started(request.app.state.session_factory, event_id)
     return _event_to_response(event)
 
 
@@ -260,11 +270,13 @@ async def close_event_route(
         event = close_event_service(db, event_id, actor=ctx.user.callsign)
     except EventError as err:
         _raise_for(err)
+    aprs_manager.stop(event_id)
     return _event_to_response(event)
 
 
 @events_router.post("/{event_id}/reopen")
 async def reopen_event_route(
+    request: Request,
     event_id: int,
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
@@ -274,6 +286,7 @@ async def reopen_event_route(
         event = reopen_event_service(db, event_id, actor=ctx.user.callsign)
     except EventError as err:
         _raise_for(err)
+    aprs_manager.ensure_started(request.app.state.session_factory, event_id)
     return _event_to_response(event)
 
 
@@ -294,6 +307,7 @@ async def create_post_route(
         )
     except EventError as err:
         _raise_for(err)
+    aprs_manager.nudge(event_id)
     return _post_to_response(post)
 
 
@@ -313,6 +327,7 @@ async def update_post_route(
         _raise_for(err)
     if post is None:
         raise HTTPException(status_code=404, detail="Post not found")
+    aprs_manager.nudge(event_id)
     return _post_to_response(post)
 
 
@@ -330,6 +345,7 @@ async def delete_post_route(
         _raise_for(err)
     if not deleted:
         raise HTTPException(status_code=404, detail="Post not found")
+    aprs_manager.nudge(event_id)
 
 
 # --- Participant / log schemas ---
@@ -381,6 +397,7 @@ async def check_in_route(
         )
     except EventError as err:
         _raise_for(err)
+    aprs_manager.nudge(event_id)
     return _participant_to_response(participant)
 
 
@@ -402,6 +419,7 @@ async def update_participant_route(
         _raise_for(err)
     if participant is None:
         raise HTTPException(status_code=404, detail="Participant not found")
+    aprs_manager.nudge(event_id)
     return _participant_to_response(participant)
 
 
@@ -478,3 +496,29 @@ async def report_route(
 ):
     event = _get_event_or_404(db, ctx.net.id, event_id)
     return {"participants": compute_report_service(db, event)}
+
+
+# --- APRS positions (sub-project 2) ---
+
+
+@events_router.get("/{event_id}/positions")
+async def positions_route(
+    event_id: int,
+    since: int = Query(default=0, ge=0),
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    state = aprs_manager.get_state(event_id)
+    if state is None:
+        return {
+            "stations": [], "latest_pos_seq": 0,
+            "aprs_status": "disabled", "aprs_status_detail": "", "objects": [],
+        }
+    snapshot = state.store.snapshot(since)
+    snapshot["aprs_status"] = state.status
+    snapshot["aprs_status_detail"] = state.status_detail
+    snapshot["objects"] = [
+        {"post_id": post_id, "name": name} for post_id, name in sorted(state.objects_by_post.items())
+    ]
+    return snapshot
