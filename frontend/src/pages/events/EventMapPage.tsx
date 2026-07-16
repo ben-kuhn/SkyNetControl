@@ -22,14 +22,6 @@ export function EventMapPage() {
   );
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
-  if (!updates) {
-    return (
-      <div className="flex justify-center py-16">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
   const toggleHide = useCallback((id: string) =>
     setHidden((prev) => {
       const next = new Set(prev);
@@ -37,6 +29,14 @@ export function EventMapPage() {
       else next.add(id);
       return next;
     }), []);
+
+  if (!updates) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] p-2 gap-2">
