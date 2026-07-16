@@ -156,6 +156,12 @@ def _lookup_content(db: Session, content_type: str, content_id: int) -> tuple[st
         if log:
             body = assemble_roster(db, content_id) or ""
             return log.content_subject, body
+    elif content_type == "event_message":
+        from backend.modules.events.models import EventMessage
+
+        msg = db.get(EventMessage, content_id)
+        if msg:
+            return msg.subject, msg.body
     return "", ""
 
 

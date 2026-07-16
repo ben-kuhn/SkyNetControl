@@ -20,6 +20,17 @@ def _verify_content_belongs_to_net(
     from backend.modules.roster.models import RosterLog
     from backend.modules.schedule.models import NetSession
 
+    if content_type == "event_message":
+        from backend.modules.events.models import Event, EventMessage
+
+        msg = db.get(EventMessage, content_id)
+        if msg is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        event = db.get(Event, msg.event_id)
+        if event is None or event.net_id != net_id:
+            raise HTTPException(status_code=404, detail="Not found")
+        return
+
     if content_type == "roster":
         log = db.get(RosterLog, content_id)
     elif content_type == "reminder":
