@@ -333,21 +333,42 @@ def scan_and_import_messages(
     net_session: NetSession,
     net_id: int | None = None,
 ) -> list[CheckIn]:
-    """Import raw message dicts, deduplicate by callsign (keep latest), skip existing."""
+    """Import raw message dicts, deduplicate by callsign (keep latest), skip existing.
+
+    Dedup semantics:
+      - parsed=True rows are fully done; skip them.
+      - parsed=False rows were pre-persisted by _persist_raw_messages during an
+        event-active / no-session window.  Reuse the existing RawMessage row and
+        run process_raw_message on it so the check-in is created.  Do NOT insert
+        a duplicate (message_id is UNIQUE).
+    """
     # Resolve net_id if not provided
     if net_id is None:
         net_id = get_net_id_for_session(db, net_session)
 
     all_msg_ids = [msg["message_id"] for msg in raw_messages]
-    existing_ids = set(
-        row[0] for row in db.query(RawMessage.message_id).filter(RawMessage.message_id.in_(all_msg_ids)).all()
+
+    # Rows that are truly done — parsed=True, already have a CheckIn.
+    done_ids = set(
+        row[0]
+        for row in db.query(RawMessage.message_id)
+        .filter(RawMessage.message_id.in_(all_msg_ids), RawMessage.parsed == True)  # noqa: E712
+        .all()
     )
 
-    new_messages = [m for m in raw_messages if m["message_id"] not in existing_ids]
-    already_imported = [m for m in raw_messages if m["message_id"] in existing_ids]
+    # Rows that exist but haven't been parsed yet (pre-persisted for event routing).
+    orphan_rows: dict[str, RawMessage] = {
+        row.message_id: row
+        for row in db.query(RawMessage)
+        .filter(RawMessage.message_id.in_(all_msg_ids), RawMessage.parsed == False)  # noqa: E712
+        .all()
+    }
+
+    new_messages = [m for m in raw_messages if m["message_id"] not in done_ids]
+    already_imported = [m for m in raw_messages if m["message_id"] in done_ids]
 
     if not new_messages:
-        # All messages already in DB. Backfill source_path for any rows
+        # All messages already fully processed. Backfill source_path for any rows
         # that were imported before this field existed.
         _upsert_source_paths(db, already_imported)
         db.commit()
@@ -366,18 +387,25 @@ def scan_and_import_messages(
 
     parsed_checkins: dict[str, CheckIn] = {}
     for msg_dict in new_messages:
-        raw = RawMessage(
-            message_id=msg_dict["message_id"],
-            from_address=msg_dict["from_address"],
-            received_at=msg_dict["received_at"],
-            subject=msg_dict["subject"],
-            body=msg_dict["body"],
-            message_type=MessageType.UNKNOWN,
-            parsed=False,
-            source_path=msg_dict.get("path"),
-        )
-        db.add(raw)
-        db.flush()
+        if msg_dict["message_id"] in orphan_rows:
+            # Reuse the pre-persisted RawMessage row — do not insert a duplicate.
+            raw = orphan_rows[msg_dict["message_id"]]
+            # Backfill source_path if it was missing (pre-migration row).
+            if raw.source_path is None and msg_dict.get("path"):
+                raw.source_path = msg_dict["path"]
+        else:
+            raw = RawMessage(
+                message_id=msg_dict["message_id"],
+                from_address=msg_dict["from_address"],
+                received_at=msg_dict["received_at"],
+                subject=msg_dict["subject"],
+                body=msg_dict["body"],
+                message_type=MessageType.UNKNOWN,
+                parsed=False,
+                source_path=msg_dict.get("path"),
+            )
+            db.add(raw)
+            db.flush()
 
         checkin = process_raw_message(db, raw, net_session, net_id=net_id)
         if checkin.callsign:

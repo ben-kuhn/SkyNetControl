@@ -59,6 +59,17 @@ class ScannerState:
 scanner_state = ScannerState()
 
 
+def _has_active_event(db: Session, net_id: int) -> bool:
+    """Return True if the net has at least one ACTIVE event."""
+    from backend.modules.events.models import Event, EventStatus
+
+    return (
+        db.query(Event)
+        .filter(Event.net_id == net_id, Event.status == EventStatus.ACTIVE)
+        .first()
+    ) is not None
+
+
 def _persist_raw_messages(db, messages):
     """Upsert RawMessage rows (deduped by message_id) without creating check-ins.
     Used when an event is active but no check-in session window is open, so event
@@ -133,13 +144,25 @@ def scan_one(db: Session, net_id: int, mailbox: str, now: datetime) -> int:
     if session is not None:
         checkins = scan_and_import_messages(db, messages, session, net_id=net_id)
     else:
-        # No check-in session window, but we still need RawMessage rows persisted
-        # so active events can route. Upsert raw messages without creating check-ins.
-        _persist_raw_messages(db, messages)
+        # No check-in session window. Only persist raw messages if there is an
+        # active event — raw rows are needed for event routing. Without an active
+        # event there is nothing to route to, and pre-persisting would permanently
+        # block check-in import once a session window opens (dedup by message_id
+        # skips already-persisted rows).
+        if _has_active_event(db, net_id):
+            _persist_raw_messages(db, messages)
 
     from backend.modules.events.messages import route_event_messages
 
-    routed = route_event_messages(db, net_id, messages)
+    try:
+        routed = route_event_messages(db, net_id, messages)
+    except Exception:
+        # Event routing failure must not discard already-committed check-ins or
+        # prevent scan_all_enabled from processing remaining nets.
+        logger.exception(
+            "Scanner: event routing failed for net_id=%d (check-ins preserved)", net_id
+        )
+        routed = 0
 
     count = len(checkins)
     scanner_state.last_scan_time = now
