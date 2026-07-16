@@ -50,13 +50,25 @@ def dispatch_delivery(
     subject: str,
     body: str,
     net_id: int,
+    *,
+    backends: list[str] | None = None,
+    config_overrides: dict | None = None,
 ) -> bool:
     """Dispatch content to all enabled delivery backends.
 
     Returns True if at least one backend succeeds.
+
+    Optional keyword args:
+      backends: if provided, use this list instead of reading delivery.backends
+                from net config.
+      config_overrides: a dict merged into the per-backend config after
+                        _build_config (e.g. {"target_address": to_address}).
     """
-    backends_json = get_net_config(db, net_id, "delivery.backends", "[]")
-    backend_names = json.loads(backends_json)
+    if backends is not None:
+        backend_names = backends
+    else:
+        backends_json = get_net_config(db, net_id, "delivery.backends", "[]")
+        backend_names = json.loads(backends_json)
 
     if not backend_names:
         logger.info("No delivery backends configured")
@@ -66,6 +78,8 @@ def dispatch_delivery(
 
     for name in backend_names:
         config = _build_config(db, name, net_id)
+        if config_overrides:
+            config.update(config_overrides)
         # UNIQUE(content_type, content_id, backend) constrains delivery_logs
         # to one row per backend per piece of content — that row represents
         # the most recent attempt's state. On re-dispatch (e.g. resend_roster)
@@ -165,13 +179,29 @@ def _lookup_content(db: Session, content_type: str, content_id: int) -> tuple[st
     return "", ""
 
 
-def retry_failed(db: Session, content_type: str, content_id: int, net_id: int) -> bool:
-    """Retry only failed delivery attempts for a piece of content."""
-    failed_logs = (
-        db.query(DeliveryLog)
-        .filter_by(content_type=content_type, content_id=content_id, status=DeliveryStatus.FAILED)
-        .all()
+def retry_failed(
+    db: Session,
+    content_type: str,
+    content_id: int,
+    net_id: int,
+    *,
+    backends: list[str] | None = None,
+    config_overrides: dict | None = None,
+) -> bool:
+    """Retry only failed delivery attempts for a piece of content.
+
+    Optional keyword args:
+      backends: if provided, only retry failed attempts for these backends
+                (used for event_message retries that must go winlink-only).
+      config_overrides: a dict merged into the per-backend config after
+                        _build_config (e.g. {"target_address": to_address}).
+    """
+    query = db.query(DeliveryLog).filter_by(
+        content_type=content_type, content_id=content_id, status=DeliveryStatus.FAILED
     )
+    if backends is not None:
+        query = query.filter(DeliveryLog.backend.in_(backends))
+    failed_logs = query.all()
 
     if not failed_logs:
         return False
@@ -181,6 +211,8 @@ def retry_failed(db: Session, content_type: str, content_id: int, net_id: int) -
     any_success = False
     for log in failed_logs:
         config = _build_config(db, log.backend, net_id)
+        if config_overrides:
+            config.update(config_overrides)
         try:
             backend = get_backend(log.backend)
             result = backend.send(subject, body, config)

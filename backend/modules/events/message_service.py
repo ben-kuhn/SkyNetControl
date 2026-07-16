@@ -2,7 +2,9 @@
 
 Outbound send reuses the existing delivery pipeline (dispatch_delivery) with the
 'event_message' content type — no new backend. Messages go out under the net
-callsign (derived from net_address by _build_config in the delivery service)."""
+callsign (derived from net_address by _build_config in the delivery service).
+Outbound event messages are always delivered via the winlink backend only,
+addressed directly to the composed recipient (to_address)."""
 from sqlalchemy.orm import Session
 
 from backend.integrations.delivery.service import dispatch_delivery
@@ -69,9 +71,15 @@ def send_event_message(
     db.commit()
     db.refresh(message)
 
-    # Send through the existing delivery pipeline. A failure is non-fatal: the
-    # row persists and the operator can retry via the delivery routes.
-    dispatch_delivery(db, "event_message", message.id, subject, body, event.net_id)
+    # Private Winlink reply: always goes to the composed recipient via winlink
+    # backend only, regardless of the net's delivery.backends configuration.
+    # A failure is non-fatal: the row persists and the operator can retry via
+    # the delivery routes.
+    dispatch_delivery(
+        db, "event_message", message.id, subject, body, event.net_id,
+        backends=["winlink"],
+        config_overrides={"target_address": to_address},
+    )
     db.refresh(message)
     return message
 

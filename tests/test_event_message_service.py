@@ -110,3 +110,95 @@ class TestStatus:
 
     def test_missing_returns_none(self, db, event):
         assert set_message_status(db, event.id, 9999, MessageStatus.READ) is None
+
+
+class TestDeliveryRouting:
+    """Critical 1: outbound send uses winlink backend only, addressed to the composed recipient."""
+
+    def test_sends_to_composed_recipient_not_roster_address(self, db, tmp_path):
+        """The .b2f file written to the mailbox out/ dir must be addressed to
+        the composed to_address, NOT the net's roster delivery target_address."""
+        from pathlib import Path
+        from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        net = make_test_net(db, slug="dr1")
+        set_net_config_bulk(db, net.id, {
+            "net_address": "W0NE@winlink.org",
+            "pat_mailbox_path": str(tmp_path),
+            # net has email configured as its roster delivery backend,
+            # but event messages must override this with winlink-only
+            "delivery.backends": '["email"]',
+            "delivery.winlink.target_address": "ROSTER@winlink.org",
+        })
+
+        event = create_event(db, net_id=net.id, name="E", event_type=EventType.EMERGENCY,
+                             created_by="W0NE", activate=True)
+
+        msg = send_event_message(
+            db, event.id, actor="W0NC", to_address="jane@redcross.org",
+            subject="Status update", body="All clear",
+        )
+
+        # Exactly one .b2f file in out/ dir
+        b2f_files = list(out_dir.glob("*.b2f"))
+        assert len(b2f_files) == 1, "Expected exactly one .b2f file written"
+
+        content = b2f_files[0].read_text()
+        # The To: line must be the composed recipient, not the roster address
+        assert "jane@redcross.org" in content
+        to_lines = [line for line in content.splitlines() if line.startswith("To:")]
+        assert len(to_lines) == 1
+        assert "jane@redcross.org" in to_lines[0]
+        assert "ROSTER@winlink.org" not in to_lines[0]
+
+        # Delivery log must show winlink as the backend used
+        logs = db.query(DeliveryLog).filter_by(content_type="event_message", content_id=msg.id).all()
+        assert len(logs) == 1
+        assert logs[0].backend == "winlink"
+        assert logs[0].status == DeliveryStatus.SENT
+
+    def test_email_backend_not_invoked_even_when_configured(self, db, tmp_path):
+        """Even if the net's delivery.backends includes email, event messages
+        go to winlink only (backends override)."""
+        from unittest.mock import patch, MagicMock
+        from backend.integrations.delivery.backends.base import DeliveryResult
+        from backend.integrations.delivery.models import DeliveryLog
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+
+        net = make_test_net(db, slug="dr2")
+        set_net_config_bulk(db, net.id, {
+            "net_address": "W0NE@winlink.org",
+            "pat_mailbox_path": str(tmp_path),
+            "delivery.backends": '["email"]',
+            "delivery.email.to_address": "net@example.com",
+        })
+
+        event = create_event(db, net_id=net.id, name="E2", event_type=EventType.EMERGENCY,
+                             created_by="W0NE", activate=True)
+
+        email_send_called = []
+
+        original_get_backend = None
+
+        def mock_get_backend(name):
+            from backend.integrations.delivery.backends import get_backend as _real
+            if name == "email":
+                m = MagicMock()
+                m.send.side_effect = lambda *a, **kw: email_send_called.append(True) or DeliveryResult(success=True, error=None)
+                return m
+            return _real(name)
+
+        with patch("backend.integrations.delivery.service.get_backend", side_effect=mock_get_backend):
+            send_event_message(
+                db, event.id, actor="W0NC", to_address="jane@redcross.org",
+                subject="Status", body="all clear",
+            )
+
+        assert not email_send_called, "Email backend must NOT be invoked for event messages"
+        # But the winlink .b2f must still be written (real backend ran)
+        assert list((tmp_path / "out").glob("*.b2f")), "Winlink .b2f must be written"

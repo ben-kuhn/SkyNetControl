@@ -75,5 +75,21 @@ def retry_delivery(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
 ):
     _verify_content_belongs_to_net(db, content_type, content_id, ctx.net.id)
-    success = retry_failed(db, content_type, content_id, ctx.net.id)
+
+    if content_type == "event_message":
+        # Event messages must retry winlink-only, addressed to the original
+        # composed recipient (to_address on the EventMessage row).
+        from backend.modules.events.models import EventMessage
+
+        msg = db.get(EventMessage, content_id)
+        if msg is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        success = retry_failed(
+            db, content_type, content_id, ctx.net.id,
+            backends=["winlink"],
+            config_overrides={"target_address": msg.to_address},
+        )
+    else:
+        success = retry_failed(db, content_type, content_id, ctx.net.id)
+
     return {"retried": success}
