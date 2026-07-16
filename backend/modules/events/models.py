@@ -93,7 +93,7 @@ class Event(Base):
     )
     log_entries: Mapped[list["EventLogEntry"]] = relationship(back_populates="event", cascade="all, delete-orphan")
     messages: Mapped[list["EventMessage"]] = relationship(
-        back_populates=None, cascade="all, delete-orphan", overlaps="event"
+        back_populates="event", cascade="all, delete-orphan"
     )
 
 
@@ -186,4 +186,4 @@ class EventMessage(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
-    event: Mapped["Event"] = relationship()
+    event: Mapped["Event"] = relationship(back_populates="messages")
