@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column('content_type', sa.String(length=255), nullable=False),
         sa.Column('data', sa.LargeBinary(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(['raw_message_id'], ['raw_messages.id'], ),
+        sa.ForeignKeyConstraint(['raw_message_id'], ['raw_messages.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
 

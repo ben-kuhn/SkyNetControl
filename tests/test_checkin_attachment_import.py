@@ -93,3 +93,35 @@ def test_persist_failure_does_not_block_import(db, monkeypatch):
     raw = db.query(RawMessage).filter_by(message_id="M1").one()
     assert raw is not None
     assert db.query(CheckIn).filter_by(raw_message_id=raw.id).count() == 1
+
+
+def test_savepoint_rollback_on_flush_time_failure(db):
+    """Savepoint variant that triggers a FLUSH-time integrity failure (data=None
+    violates NOT NULL). The savepoint must roll back only the attachment inserts;
+    the RawMessage and CheckIn must still exist after the commit.
+
+    This genuinely exercises db.begin_nested() — a construction-time failure
+    would pass even without the savepoint guard.
+    """
+    from backend.modules.checkins.models import CheckIn, RawMessageAttachment
+    from backend.modules.checkins.service import _persist_attachments
+
+    net = make_test_net(db)
+    session = _session(db, net)
+
+    # Import the message normally first to get a RawMessage + CheckIn.
+    scan_and_import_messages(db, [_msg(mid="SP1")], session, net_id=net.id)
+    raw = db.query(RawMessage).filter_by(message_id="SP1").one()
+    assert raw is not None
+
+    # Now call _persist_attachments directly with data=None — this causes a
+    # NOT NULL constraint violation at flush time, inside the savepoint.
+    bad_att = {"filename": "bad.xml", "content_type": "application/xml", "data": None}
+    _persist_attachments(db, raw, [bad_att])
+
+    # The session must still be usable and the existing rows intact.
+    db.commit()
+    assert db.query(RawMessage).filter_by(message_id="SP1").count() == 1
+    assert db.query(CheckIn).filter_by(raw_message_id=raw.id).count() == 1
+    # The bad attachment must not have been persisted.
+    assert db.query(RawMessageAttachment).filter_by(raw_message_id=raw.id).count() == 0

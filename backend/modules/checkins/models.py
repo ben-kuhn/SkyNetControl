@@ -94,7 +94,7 @@ class RawMessageAttachment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     raw_message_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("raw_messages.id"), nullable=False
+        Integer, ForeignKey("raw_messages.id", ondelete="CASCADE"), nullable=False
     )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)
