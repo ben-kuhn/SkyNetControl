@@ -160,21 +160,49 @@ def _log_to_response(entry: EventLogEntry) -> dict:
 
 def _message_extras(db: Session, m: EventMessage) -> dict:
     """Attachment summary + received-form metadata for a message, from its
-    linked RawMessage. Empty/None for outbound or attachment-less messages."""
+    linked RawMessage. Empty/None for outbound or attachment-less messages.
+
+    Avoids loading BLOB data for the summary — only fetches sizes via
+    func.length() so polling never materialises multi-MB payloads. For the
+    form block, only the data of RMS_Express_Form_*.xml attachments is read.
+    """
     import xml.etree.ElementTree as ET
+
+    from sqlalchemy import func
 
     from backend.modules.checkins.message_parser import find_form_xml
     from backend.modules.checkins.models import RawMessage, RawMessageAttachment
 
     if m.raw_message_id is None:
         return {"attachments": [], "form": None}
-    atts = db.query(RawMessageAttachment).filter_by(raw_message_id=m.raw_message_id).all()
+
+    # Summary: id, filename, content_type, size — no BLOB bytes fetched.
+    rows = (
+        db.query(
+            RawMessageAttachment.id,
+            RawMessageAttachment.filename,
+            RawMessageAttachment.content_type,
+            func.length(RawMessageAttachment.data).label("size"),
+        )
+        .filter(RawMessageAttachment.raw_message_id == m.raw_message_id)
+        .all()
+    )
     summary = [
-        {"id": a.id, "filename": a.filename, "content_type": a.content_type, "size": len(a.data)}
-        for a in atts
+        {"id": r.id, "filename": r.filename, "content_type": r.content_type, "size": r.size}
+        for r in rows
     ]
+
+    # Form block: only fetch data for RMS_Express_Form_*.xml attachments.
     raw = db.get(RawMessage, m.raw_message_id)
-    att_dicts = [{"filename": a.filename, "content_type": a.content_type, "data": a.data} for a in atts]
+    form_atts = (
+        db.query(RawMessageAttachment)
+        .filter(
+            RawMessageAttachment.raw_message_id == m.raw_message_id,
+            RawMessageAttachment.filename.ilike("RMS_Express_Form_%.xml"),
+        )
+        .all()
+    )
+    att_dicts = [{"filename": a.filename, "content_type": a.content_type, "data": a.data} for a in form_atts]
     xml_text = find_form_xml(att_dicts, raw.body if raw else "")
     form = None
     if xml_text:
@@ -726,7 +754,12 @@ async def download_attachment_route(
         raise HTTPException(status_code=404, detail="Not found")
     # Sanitize the download filename; never serve the claimed content-type
     # (a hostile form XML must download, never render).
-    safe_name = att.filename.replace("\r", "").replace("\n", "").replace('"', "")
+    # Strip control chars and header-injection sequences, then ASCII-fold to
+    # avoid latin-1 encoding errors at the HTTP header boundary.
+    safe_name = att.filename.replace("\r", "").replace("\n", "").replace('"', "").replace("\\", "")
+    safe_name = safe_name.encode("ascii", errors="replace").decode("ascii").replace("?", "_")
+    if not safe_name:
+        safe_name = "attachment"
     return Response(
         content=att.data,
         media_type="application/octet-stream",

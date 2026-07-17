@@ -108,3 +108,32 @@ class TestDownload:
             f"{BASE}/{db_setup['event_id']}/messages/{db_setup['message_id']}/attachments/9999"
         )
         assert resp.status_code == 404
+
+    async def test_download_non_ascii_filename_no_500(self, nc_client, db_setup):
+        """An attachment with a non-ASCII filename must download (200) without a 500."""
+        from datetime import datetime, timezone
+        from backend.modules.checkins.models import RawMessageAttachment
+
+        with db_setup["factory"]() as session:
+            att = RawMessageAttachment(
+                raw_message_id=db_setup["attachment_id"],  # reuse raw_message_id from fixture
+                filename="Ünïcödé_form.xml",
+                content_type="application/xml",
+                data=b"<unicode/>",
+            )
+            # Get the raw_message_id from the existing attachment
+            existing = session.get(RawMessageAttachment, db_setup["attachment_id"])
+            att.raw_message_id = existing.raw_message_id
+            session.add(att)
+            session.commit()
+            unicode_att_id = att.id
+
+        resp = await nc_client.get(
+            f"{BASE}/{db_setup['event_id']}/messages/{db_setup['message_id']}"
+            f"/attachments/{unicode_att_id}"
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/octet-stream"
+        # Filename must be in the Content-Disposition header (ASCII-folded, no crash)
+        cd = resp.headers.get("content-disposition", "")
+        assert "attachment" in cd
