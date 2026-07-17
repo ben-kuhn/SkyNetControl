@@ -158,3 +158,56 @@ def test_read_mailbox_rejects_bare_callsign_for_different_net(tmp_path):
     (tmp_path / "WRONG001.b2f").write_text(msg)
     messages = read_mailbox(str(tmp_path), net_address="kd0tst@winlink.org")
     assert messages == []
+
+
+from pathlib import Path
+
+from backend.modules.checkins.mailbox_reader import read_message_file
+
+
+def _write(tmp_path, name, content: bytes) -> Path:
+    p = Path(tmp_path) / name
+    p.write_bytes(content)
+    return p
+
+
+def test_b2f_attachment_extracted(tmp_path):
+    from backend.integrations.winlink.b2f import B2FAttachment, build_b2f
+
+    att = B2FAttachment("RMS_Express_Form_ICS213.xml", "application/xml", b"<RMS_Express_Form/>")
+    raw = build_b2f(
+        message_id="M1", from_addr="KE0XYZ@winlink.org", to_addr="W0NE",
+        subject="ICS213", mbo="KE0XYZ", date="2026/07/16 18:30",
+        body="see attached form", attachments=[att],
+    )
+    p = _write(tmp_path, "M1.b2f", raw)
+    parsed = read_message_file(p)
+    assert parsed["body"] == "see attached form"
+    assert len(parsed["attachments"]) == 1
+    assert parsed["attachments"][0]["filename"] == "RMS_Express_Form_ICS213.xml"
+    assert parsed["attachments"][0]["data"] == b"<RMS_Express_Form/>"
+
+
+def test_b2f_body_only_has_empty_attachments(tmp_path):
+    from backend.integrations.winlink.b2f import build_b2f
+
+    raw = build_b2f(
+        message_id="M2", from_addr="KE0XYZ", to_addr="W0NE", subject="s",
+        mbo="KE0XYZ", date="2026/07/16 18:30", body="plain",
+    )
+    p = _write(tmp_path, "M2.b2f", raw)
+    parsed = read_message_file(p)
+    assert parsed["body"] == "plain"
+    assert parsed["attachments"] == []
+
+
+def test_malformed_b2f_falls_back_to_body_only(tmp_path):
+    # A .b2f whose File section is corrupt must still yield the message (body)
+    # via the email fallback, never None, with empty attachments.
+    raw = b"Mid: M3\nFrom: KE0XYZ\nTo: W0NE\nSubject: s\nBody: 5\n\nhelloFile: 999 x\nshort"
+    p = _write(tmp_path, "M3.b2f", raw)
+    parsed = read_message_file(p)
+    assert parsed is not None
+    assert parsed["attachments"] == []
+    # body recovered via the email fallback (may include the trailing text)
+    assert "hello" in parsed["body"]

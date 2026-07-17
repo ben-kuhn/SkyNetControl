@@ -59,6 +59,40 @@ def purge_session_source_files(db: Session, session_id: int) -> int:
     return len(paths)
 
 
+def _persist_attachments(db: Session, raw: RawMessage, attachment_dicts) -> None:
+    """Best-effort attachment persistence — never blocks message import."""
+    from backend.modules.checkins.models import RawMessageAttachment
+
+    if not attachment_dicts:
+        return
+    try:
+        for att in attachment_dicts:
+            db.add(RawMessageAttachment(
+                raw_message_id=raw.id,
+                filename=att["filename"][:255],
+                content_type=att["content_type"][:255],
+                data=att["data"],
+            ))
+        db.flush()
+    except Exception:
+        logger.warning("Failed to persist attachments for message %s", raw.message_id, exc_info=True)
+        db.rollback()
+
+
+def _backfill_attachments(db: Session, message_dicts: list[dict]) -> None:
+    """For already-imported messages with no attachment rows yet, add them."""
+    from backend.modules.checkins.models import RawMessage, RawMessageAttachment
+
+    by_id = {m["message_id"]: m for m in message_dicts if m.get("attachments")}
+    if not by_id:
+        return
+    rows = db.query(RawMessage).filter(RawMessage.message_id.in_(by_id.keys())).all()
+    for raw in rows:
+        existing = db.query(RawMessageAttachment).filter_by(raw_message_id=raw.id).count()
+        if existing == 0:
+            _persist_attachments(db, raw, by_id[raw.message_id]["attachments"])
+
+
 def _upsert_source_paths(db: Session, message_dicts: list[dict]) -> None:
     """For each already-imported message dict that has a 'path', backfill
     RawMessage.source_path when currently NULL. No-op otherwise.
@@ -368,9 +402,10 @@ def scan_and_import_messages(
     already_imported = [m for m in raw_messages if m["message_id"] in done_ids]
 
     if not new_messages:
-        # All messages already fully processed. Backfill source_path for any rows
-        # that were imported before this field existed.
+        # All messages already fully processed. Backfill source_path and attachments
+        # for any rows that were imported before these fields existed.
         _upsert_source_paths(db, already_imported)
+        _backfill_attachments(db, already_imported)
         db.commit()
         return []
 
@@ -406,6 +441,7 @@ def scan_and_import_messages(
             )
             db.add(raw)
             db.flush()
+            _persist_attachments(db, raw, msg_dict.get("attachments") or [])
 
         checkin = process_raw_message(db, raw, net_session, net_id=net_id)
         if checkin.callsign:
@@ -415,6 +451,7 @@ def scan_and_import_messages(
             parsed_checkins[checkin.callsign] = checkin
 
     _upsert_source_paths(db, already_imported)
+    _backfill_attachments(db, already_imported)
     db.commit()  # picks up both the new RawMessage source_paths (already flushed)
                  # and any upserts
     result = list(parsed_checkins.values())
