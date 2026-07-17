@@ -1,5 +1,6 @@
 import pytest
 from datetime import datetime, timezone
+from pathlib import Path
 
 from backend.modules.checkins.mailbox_reader import read_mailbox, read_message_file
 
@@ -158,11 +159,6 @@ def test_read_mailbox_rejects_bare_callsign_for_different_net(tmp_path):
     (tmp_path / "WRONG001.b2f").write_text(msg)
     messages = read_mailbox(str(tmp_path), net_address="kd0tst@winlink.org")
     assert messages == []
-
-
-from pathlib import Path
-
-from backend.modules.checkins.mailbox_reader import read_message_file
 
 
 def _write(tmp_path, name, content: bytes) -> Path:

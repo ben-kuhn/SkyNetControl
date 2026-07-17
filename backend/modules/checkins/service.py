@@ -60,23 +60,24 @@ def purge_session_source_files(db: Session, session_id: int) -> int:
 
 
 def _persist_attachments(db: Session, raw: RawMessage, attachment_dicts) -> None:
-    """Best-effort attachment persistence — never blocks message import."""
+    """Best-effort attachment persistence — never blocks message import.
+    Scoped in a SAVEPOINT so a failure rolls back ONLY the attachment inserts,
+    never the pending RawMessage/CheckIn."""
     from backend.modules.checkins.models import RawMessageAttachment
 
     if not attachment_dicts:
         return
     try:
-        for att in attachment_dicts:
-            db.add(RawMessageAttachment(
-                raw_message_id=raw.id,
-                filename=att["filename"][:255],
-                content_type=att["content_type"][:255],
-                data=att["data"],
-            ))
-        db.flush()
+        with db.begin_nested():
+            for att in attachment_dicts:
+                db.add(RawMessageAttachment(
+                    raw_message_id=raw.id,
+                    filename=att["filename"][:255],
+                    content_type=att["content_type"][:255],
+                    data=att["data"],
+                ))
     except Exception:
         logger.warning("Failed to persist attachments for message %s", raw.message_id, exc_info=True)
-        db.rollback()
 
 
 def _backfill_attachments(db: Session, message_dicts: list[dict]) -> None:
@@ -428,6 +429,7 @@ def scan_and_import_messages(
             # Backfill source_path if it was missing (pre-migration row).
             if raw.source_path is None and msg_dict.get("path"):
                 raw.source_path = msg_dict["path"]
+            _persist_attachments(db, raw, msg_dict.get("attachments") or [])
         else:
             raw = RawMessage(
                 message_id=msg_dict["message_id"],

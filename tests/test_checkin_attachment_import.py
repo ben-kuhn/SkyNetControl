@@ -69,3 +69,27 @@ def test_attachments_backfilled_on_rescan(db):
     att = {"filename": "form.xml", "content_type": "application/xml", "data": b"<x/>"}
     scan_and_import_messages(db, [_msg(atts=[att])], session, net_id=net.id)
     assert db.query(RawMessageAttachment).count() == 1
+
+
+def test_persist_failure_does_not_block_import(db, monkeypatch):
+    # Force RawMessageAttachment construction to raise, simulating a persist failure.
+    from backend.modules.checkins import models as m
+    from backend.modules.checkins.models import CheckIn
+
+    net = make_test_net(db)
+    session = _session(db, net)
+
+    def boom(*a, **kw):
+        raise RuntimeError("simulated attachment failure")
+
+    # Patch at the point of use: the helper imports RawMessageAttachment from
+    # backend.modules.checkins.models, so patch it there.
+    monkeypatch.setattr(m, "RawMessageAttachment", type("Boom", (), {"__init__": boom}))
+
+    att = {"filename": "form.xml", "content_type": "application/xml", "data": b"<x/>"}
+    scan_and_import_messages(db, [_msg(atts=[att])], session, net_id=net.id)
+
+    # The check-in imported despite the attachment failure, and the RawMessage row exists.
+    raw = db.query(RawMessage).filter_by(message_id="M1").one()
+    assert raw is not None
+    assert db.query(CheckIn).filter_by(raw_message_id=raw.id).count() == 1
