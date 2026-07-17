@@ -3,6 +3,7 @@ from pathlib import Path
 
 from backend.integrations.delivery.backends.winlink import WinlinkBackend
 from backend.integrations.delivery.backends.base import DeliveryResult
+from backend.integrations.winlink.b2f import parse_b2f
 
 
 def test_winlink_backend_success():
@@ -123,3 +124,21 @@ def test_winlink_strips_crlf_in_subject_blocks_b2f_header_injection():
         for line in header_lines:
             assert not line.startswith("Cc:")
             assert not line.startswith("X-Injected:")
+
+
+def test_send_output_roundtrips_through_codec():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = WinlinkBackend()
+        config = {"mailbox_path": tmpdir, "target_address": "KE0XYZ", "callsign": "W0NE"}
+        result = backend.send("Test Subject", "body content", config)
+        assert result.success
+
+        out_files = list((Path(tmpdir) / "out").glob("*.b2f"))
+        assert len(out_files) == 1
+        raw = out_files[0].read_bytes()
+        msg = parse_b2f(raw)
+        assert msg.headers["From"] == "W0NE"
+        assert msg.headers["To"] == "KE0XYZ"
+        assert msg.headers["Subject"] == "Test Subject"
+        assert msg.body == "body content"
+        assert msg.attachments == []

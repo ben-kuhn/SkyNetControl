@@ -3,18 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.integrations.delivery.backends.base import DeliveryResult
-
-
-def _strip_b2f_header_chars(value: str) -> str:
-    """Strip CR/LF (and surrounding whitespace) from a B2F header value.
-
-    Header injection guard: the .b2f format is line-oriented, so a value
-    containing \\r or \\n would split into additional headers. `subject` is
-    rendered from Jinja2 reminder/roster templates that may interpolate
-    user-supplied comment text from check-ins; without this strip, a
-    crafted comment could inject To:/Cc:/etc. and redirect the message.
-    """
-    return value.replace("\r", " ").replace("\n", " ").strip()
+from backend.integrations.winlink.b2f import build_b2f
 
 
 class WinlinkBackend:
@@ -25,9 +14,11 @@ class WinlinkBackend:
         if not mailbox_path:
             return DeliveryResult(success=False, error="Winlink mailbox path not configured")
 
-        target_address = _strip_b2f_header_chars(config.get("target_address", ""))
-        callsign = _strip_b2f_header_chars(config.get("callsign", ""))
-        subject = _strip_b2f_header_chars(subject)
+        target_address = config.get("target_address", "")
+        callsign = config.get("callsign", "")
+        # Optional attachments (used by forms composition in SP4b); a list of
+        # B2FAttachment. Absent/empty for plain messages → byte-identical output.
+        attachments = config.get("attachments") or ()
 
         try:
             out_dir = Path(mailbox_path) / "out"
@@ -36,22 +27,20 @@ class WinlinkBackend:
             message_id = uuid.uuid4().hex[:12].upper()
             now = datetime.now(tz=timezone.utc)
             date_str = now.strftime("%Y/%m/%d %H:%M")
-            body_bytes = len(body.encode("utf-8"))
 
-            b2f_content = (
-                f"Mid: {message_id}\n"
-                f"From: {callsign}\n"
-                f"To: {target_address}\n"
-                f"Subject: {subject}\n"
-                f"Mbo: {callsign}\n"
-                f"Date: {date_str}\n"
-                f"Body: {body_bytes}\n"
-                f"\n"
-                f"{body}"
+            content = build_b2f(
+                message_id=message_id,
+                from_addr=callsign,
+                to_addr=target_address,
+                subject=subject,
+                mbo=callsign,
+                date=date_str,
+                body=body,
+                attachments=attachments,
             )
 
             filename = f"{message_id}.b2f"
-            (out_dir / filename).write_text(b2f_content)
+            (out_dir / filename).write_bytes(content)
 
             return DeliveryResult(success=True, error=None)
         except Exception as exc:
