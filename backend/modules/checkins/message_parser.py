@@ -1,3 +1,4 @@
+import fnmatch
 import re
 import xml.etree.ElementTree as ET
 
@@ -218,6 +219,26 @@ def extract_form_xml(body: str) -> str | None:
         return None
     match = _RMS_FORM_RE.search(body)
     return match.group(0) if match else None
+
+
+def find_form_xml(attachments, body: str) -> str | None:
+    """Return the <RMS_Express_Form> XML from an RMS_Express_Form_*.xml
+    attachment (preferred — how real Winlink Express sends forms) or from the
+    message body (fallback — how some paths inline it).
+
+    `attachments` is a list of dicts with keys filename/content_type/data.
+    """
+    for att in attachments or []:
+        name = att.get("filename", "")
+        if fnmatch.fnmatch(name.lower(), "rms_express_form_*.xml"):
+            try:
+                text = att["data"].decode("utf-8", errors="replace")
+            except (AttributeError, UnicodeDecodeError):
+                continue
+            found = extract_form_xml(text)
+            if found:
+                return found
+    return extract_form_xml(body or "")
 
 
 def extract_form_variables(root: ET.Element) -> dict[str, str]:

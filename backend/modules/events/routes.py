@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -157,8 +158,42 @@ def _log_to_response(entry: EventLogEntry) -> dict:
     }
 
 
-def _message_to_response(m: EventMessage) -> dict:
-    return {
+def _message_extras(db: Session, m: EventMessage) -> dict:
+    """Attachment summary + received-form metadata for a message, from its
+    linked RawMessage. Empty/None for outbound or attachment-less messages."""
+    import xml.etree.ElementTree as ET
+
+    from backend.modules.checkins.message_parser import find_form_xml
+    from backend.modules.checkins.models import RawMessage, RawMessageAttachment
+
+    if m.raw_message_id is None:
+        return {"attachments": [], "form": None}
+    atts = db.query(RawMessageAttachment).filter_by(raw_message_id=m.raw_message_id).all()
+    summary = [
+        {"id": a.id, "filename": a.filename, "content_type": a.content_type, "size": len(a.data)}
+        for a in atts
+    ]
+    raw = db.get(RawMessage, m.raw_message_id)
+    att_dicts = [{"filename": a.filename, "content_type": a.content_type, "data": a.data} for a in atts]
+    xml_text = find_form_xml(att_dicts, raw.body if raw else "")
+    form = None
+    if xml_text:
+        try:
+            root = ET.fromstring(xml_text)
+            df = root.find(".//form_parameters/display_form")
+            rt = root.find(".//form_parameters/reply_template")
+            form = {
+                "is_form": True,
+                "display_form": (df.text or "").strip() if df is not None else "",
+                "reply_template": (rt.text or "").strip() if rt is not None else "",
+            }
+        except ET.ParseError:
+            form = None
+    return {"attachments": summary, "form": form}
+
+
+def _message_to_response(m: EventMessage, extras: dict | None = None) -> dict:
+    resp = {
         "id": m.id,
         "msg_seq": m.msg_seq,
         "direction": m.direction.value,
@@ -174,6 +209,9 @@ def _message_to_response(m: EventMessage) -> dict:
         "received_at": _iso(m.received_at),
         "created_at": _iso(m.created_at),
     }
+    resp["attachments"] = (extras or {}).get("attachments", [])
+    resp["form"] = (extras or {}).get("form")
+    return resp
 
 
 def _get_event_or_404(db: Session, net_id: int, event_id: int) -> Event:
@@ -583,7 +621,7 @@ async def list_messages_route(
     net_addr = _get_net_config(db, event.net_id, "net_address", "") or ""
     messaging_configured = bool(pat_mailbox and net_addr)
     return {
-        "messages": [_message_to_response(m) for m in messages],
+        "messages": [_message_to_response(m, _message_extras(db, m)) for m in messages],
         "latest_msg_seq": event.msg_seq,
         "messaging_configured": messaging_configured,
     }
@@ -612,7 +650,7 @@ async def compose_message_route(
 
     logs = get_delivery_status(db, "event_message", message.id)
     delivered = any(log.status == DeliveryStatus.SENT for log in logs)
-    return {"message": _message_to_response(message), "delivered": delivered}
+    return {"message": _message_to_response(message, _message_extras(db, message)), "delivered": delivered}
 
 
 @events_router.patch("/{event_id}/messages/{message_id}")
@@ -629,7 +667,7 @@ async def patch_message_route(
     message = set_message_status(db, event_id, message_id, body.status)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
-    return _message_to_response(message)
+    return _message_to_response(message, _message_extras(db, message))
 
 
 @events_router.post("/{event_id}/rescan")
@@ -658,3 +696,39 @@ async def rescan_route(
     route_event_messages(db, ctx.net.id, messages)
     db.refresh(event)
     return {"new_messages": event.msg_seq - before}
+
+
+@events_router.get("/{event_id}/messages/{message_id}/attachments/{attachment_id}")
+async def download_attachment_route(
+    event_id: int,
+    message_id: int,
+    attachment_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.checkins.models import RawMessageAttachment
+
+    _get_event_or_404(db, ctx.net.id, event_id)
+    message = (
+        db.query(EventMessage)
+        .filter(EventMessage.id == message_id, EventMessage.event_id == event_id)
+        .one_or_none()
+    )
+    if message is None or message.raw_message_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    att = (
+        db.query(RawMessageAttachment)
+        .filter(RawMessageAttachment.id == attachment_id,
+                RawMessageAttachment.raw_message_id == message.raw_message_id)
+        .one_or_none()
+    )
+    if att is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Sanitize the download filename; never serve the claimed content-type
+    # (a hostile form XML must download, never render).
+    safe_name = att.filename.replace("\r", "").replace("\n", "").replace('"', "")
+    return Response(
+        content=att.data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
