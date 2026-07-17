@@ -431,6 +431,19 @@ export interface EventPositions {
 export type MessageDirection = "inbound" | "outbound";
 export type MessageStatus = "unread" | "read" | "dismissed";
 
+export interface EventMessageAttachment {
+  id: number;
+  filename: string;
+  content_type: string;
+  size: number;
+}
+
+export interface EventReceivedForm {
+  is_form: boolean;
+  display_form: string;
+  reply_template: string;
+}
+
 export interface EventMessage {
   id: number;
   msg_seq: number;
@@ -446,6 +459,8 @@ export interface EventMessage {
   actor: string | null;
   received_at: string;
   created_at: string;
+  attachments: EventMessageAttachment[];
+  form: EventReceivedForm | null;
 }
 
 export interface EventMessages {

@@ -261,3 +261,12 @@ export async function rescanEventMailbox(
     method: "POST",
   });
 }
+
+export function eventAttachmentUrl(
+  eventId: number,
+  messageId: number,
+  attachmentId: number,
+  netSlug: string,
+): string {
+  return `/api/nets/${netSlug}/events/${eventId}/messages/${messageId}/attachments/${attachmentId}`;
+}

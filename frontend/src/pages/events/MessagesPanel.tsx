@@ -1,7 +1,7 @@
 // frontend/src/pages/events/MessagesPanel.tsx
 import { useMemo, useState } from "react";
 import { retryDelivery } from "../../api/delivery";
-import { rescanEventMailbox, setEventMessageStatus } from "../../api/events";
+import { eventAttachmentUrl, rescanEventMailbox, setEventMessageStatus } from "../../api/events";
 import { Button } from "../../components/Button";
 import type { EventMessage, NetEvent } from "../../types";
 import { MessageComposer } from "./MessageComposer";
@@ -148,6 +148,7 @@ export function MessagesPanel({
                   {m.direction === "inbound" ? m.from_callsign : `→ ${m.to_address}`}
                 </span>
                 <span className="text-text-secondary truncate flex-1">{m.subject || "(no subject)"}</span>
+                {m.attachments.length > 0 && <span title="Has attachments">📎</span>}
                 <span className="text-xs text-text-muted shrink-0">
                   {new Date(m.received_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
@@ -155,6 +156,25 @@ export function MessagesPanel({
               {openId === m.id && (
                 <div className="pl-4 pb-2 text-sm">
                   <pre className="whitespace-pre-wrap font-sans text-text-secondary">{m.body}</pre>
+                  {m.form?.is_form && (
+                    <div className="text-xs text-accent mt-1">
+                      Winlink form: {m.form.display_form}
+                    </div>
+                  )}
+                  {m.attachments.length > 0 && (
+                    <div className="flex flex-col gap-0.5 mt-2">
+                      {m.attachments.map((a) => (
+                        <a
+                          key={a.id}
+                          href={eventAttachmentUrl(event.id, m.id, a.id, netSlug)}
+                          download={a.filename}
+                          className="text-xs text-accent hover:underline"
+                        >
+                          📎 {a.filename} ({Math.ceil(a.size / 1024)} KB)
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   {canWrite && active && (
                     <div className="flex gap-2 mt-2">
                       {m.direction === "inbound" && (
