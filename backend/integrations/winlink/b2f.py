@@ -52,17 +52,34 @@ def strip_b2f_header_chars(value: str) -> str:
 
 
 def parse_b2f(raw: bytes) -> B2FMessage:
-    """Parse decoded .b2f bytes into headers, body, and attachments."""
-    # Split the header block from the payload at the first blank line.
-    sep = raw.find(b"\n\n")
-    if sep == -1:
+    """Parse decoded .b2f bytes into headers, body, and attachments.
+
+    Tolerates CRLF line endings in the framing (headers, File: lines,
+    section separators). Byte-counted body and attachment data regions
+    are sliced by length and left byte-exact — no stripping inside them.
+    """
+    # Locate the header/body separator: prefer CRLF form (\r\n\r\n) but
+    # accept LF-only (\n\n). Whichever comes first wins.
+    sep_crlf = raw.find(b"\r\n\r\n")
+    sep_lf = raw.find(b"\n\n")
+
+    if sep_crlf == -1 and sep_lf == -1:
         raise B2FParseError("no header/body separator")
+
+    if sep_crlf != -1 and (sep_lf == -1 or sep_crlf <= sep_lf):
+        sep = sep_crlf
+        sep_len = 4
+    else:
+        sep = sep_lf
+        sep_len = 2
+
     header_block = raw[:sep].decode("utf-8", errors="replace")
-    payload = raw[sep + 2:]
+    payload = raw[sep + sep_len:]
 
     headers: dict = {}
     body_len: int | None = None
     for line in header_block.split("\n"):
+        line = line.rstrip("\r")
         if not line.strip():
             continue
         if ":" not in line:
@@ -87,15 +104,17 @@ def parse_b2f(raw: bytes) -> B2FMessage:
 
     attachments: list = []
     while rest:
-        # Skip a single separator newline between sections if present.
-        if rest.startswith(b"\n"):
+        # Skip a single separator newline (LF or CRLF) between sections.
+        if rest.startswith(b"\r\n"):
+            rest = rest[2:]
+        elif rest.startswith(b"\n"):
             rest = rest[1:]
         if not rest:
             break
         nl = rest.find(b"\n")
         if nl == -1:
             raise B2FParseError("attachment header not terminated")
-        line = rest[:nl].decode("utf-8", errors="replace")
+        line = rest[:nl].decode("utf-8", errors="replace").rstrip("\r")
         if not line.startswith("File:"):
             raise B2FParseError(f"expected File: section, got {line!r}")
         spec = line[len("File:"):].strip()
