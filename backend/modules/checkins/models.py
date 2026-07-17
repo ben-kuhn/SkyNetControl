@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Integer,
@@ -10,6 +10,7 @@ from sqlalchemy import (
     Float,
     Enum,
     ForeignKey,
+    LargeBinary,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,6 +51,9 @@ class RawMessage(Base):
     source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     checkin: Mapped["CheckIn | None"] = relationship(back_populates="raw_message")
+    attachments: Mapped[list["RawMessageAttachment"]] = relationship(
+        cascade="all, delete-orphan"
+    )
 
 
 class CheckIn(Base):
@@ -83,3 +87,18 @@ class Member(Base):
     first_check_in_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_check_in_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     total_check_ins: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class RawMessageAttachment(Base):
+    __tablename__ = "raw_message_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    raw_message_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("raw_messages.id"), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
