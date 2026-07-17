@@ -75,6 +75,7 @@ def _persist_raw_messages(db, messages):
     Used when an event is active but no check-in session window is open, so event
     routing still has RawMessage rows to reference."""
     from backend.modules.checkins.models import MessageType, RawMessage
+    from backend.modules.checkins.service import _backfill_attachments, _persist_attachments
 
     ids = [m["message_id"] for m in messages]
     existing = {
@@ -83,11 +84,17 @@ def _persist_raw_messages(db, messages):
     for m in messages:
         if m["message_id"] in existing:
             continue
-        db.add(RawMessage(
+        raw = RawMessage(
             message_id=m["message_id"], from_address=m["from_address"],
             received_at=m["received_at"], subject=m["subject"], body=m["body"],
             message_type=MessageType.UNKNOWN, parsed=False, source_path=m.get("path"),
-        ))
+        )
+        db.add(raw)
+        db.flush()
+        _persist_attachments(db, raw, m.get("attachments") or [])
+    # Backfill attachments for any messages that already had a RawMessage row
+    # but were imported before the attachments column existed.
+    _backfill_attachments(db, messages)
     db.commit()
 
 
