@@ -64,6 +64,28 @@ def test_catalog_cache_keyed_and_clearable(forms_tree, monkeypatch):
     assert set(names) == {"ICS213", "ICS214"}
 
 
+def test_catalog_cache_keyed_by_version(forms_tree):
+    """Version change bypasses cache without needing clear_catalog_cache()."""
+    catalog_mod.clear_catalog_cache()
+    # Build with v1, should see ICS213 only
+    t1 = catalog_mod.build_catalog(version="v1")
+    names1 = [f["name"] for f in {f["name"]: f for f in t1["folders"]}["ICS USA"]["forms"]]
+    assert names1 == ["ICS213"]
+
+    # Add a new form to disk
+    (forms_tree / "ICS USA" / "ICS214.txt").write_text("Form: ICS214Input.html\nMsg:\nx\n")
+    (forms_tree / "ICS USA" / "ICS214Input.html").write_text("<form></form>")
+
+    # Build with v2 (different version), should see both even without clear
+    t2 = catalog_mod.build_catalog(version="v2")
+    names2 = [f["name"] for f in {f["name"]: f for f in t2["folders"]}["ICS USA"]["forms"]]
+    assert set(names2) == {"ICS213", "ICS214"}
+
+    # v2 was cached, so building again with v2 should return cached tree
+    t2_again = catalog_mod.build_catalog(version="v2")
+    assert t2 == t2_again
+
+
 # Route tests (ASGI client, net member, patch catalog.forms_library_dir)
 
 @pytest.fixture

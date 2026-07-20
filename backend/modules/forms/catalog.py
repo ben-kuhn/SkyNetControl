@@ -67,5 +67,10 @@ def build_catalog(version: str = "") -> dict:
     base = forms_library_dir()
     tree = _walk(base, base) if base.is_dir() else {"name": "", "folders": [], "forms": []}
     with _cache_lock:
-        _cache = (version, tree)
-    return tree
+        # Re-check: only cache if nobody else stored this version and no clear
+        # happened while we were walking. If another thread already cached the
+        # same version, reuse theirs; if _cache was cleared, still store ours
+        # (fresh walk) — but never overwrite a DIFFERENT version's fresh entry.
+        if _cache is None or _cache[0] != version:
+            _cache = (version, tree)
+        return _cache[1]
