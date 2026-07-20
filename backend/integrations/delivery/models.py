@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
@@ -9,6 +9,7 @@ from backend.db.base import Base
 
 class DeliveryStatus(str, enum.Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     SENT = "sent"
     FAILED = "failed"
 
@@ -25,3 +26,7 @@ class DeliveryLog(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    pat_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pat_connection_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    pat_mid: Mapped[str | None] = mapped_column(String(64), nullable=True)

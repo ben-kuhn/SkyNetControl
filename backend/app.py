@@ -16,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from backend.config import Settings, settings as default_settings
 from backend.db.session import create_engine_from_url, create_session_factory
 from backend.modules.nets import models as nets_models  # noqa: F401
+import backend.integrations.winlink.models  # noqa: F401
 from backend.auth.routes import auth_router
 from backend.modules.nets.routes import router as nets_router
 from backend.auth.pat_routes import pat_router
