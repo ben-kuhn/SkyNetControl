@@ -1,0 +1,177 @@
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from backend.app import create_app
+from backend.auth.models import User
+from backend.config import Settings
+from backend.db.base import Base
+from backend.modules.forms import serve as serve_mod
+from backend.modules.nets.models import Net, NetMembership, NetRole
+from tests.conftest import make_test_token
+
+
+@pytest.fixture
+def lib(tmp_path, monkeypatch):
+    base = tmp_path / "forms"
+    (base / "ICS USA").mkdir(parents=True)
+    (base / "ICS USA" / "ICS213Input.html").write_text(
+        "<html><body><form id='f'><input name='MsgBody'></form></body></html>"
+    )
+    monkeypatch.setattr(serve_mod, "forms_library_dir", lambda: base)
+    return base
+
+
+def test_render_injects_shim(lib):
+    html = serve_mod.render_input_form("ICS USA/ICS213Input.html")
+    assert "<form id='f'>" in html
+    assert "skynet-form-vars" in html  # the shim posts this message type
+    assert "postMessage" in html
+    assert html.rstrip().endswith("</html>") or "</body>" in html
+
+
+def test_prefill_seeded(lib):
+    html = serve_mod.render_input_form("ICS USA/ICS213Input.html", prefill={"MsgBody": "hello"})
+    assert '"MsgBody": "hello"' in html or "'MsgBody': 'hello'" in html or "MsgBody" in html
+
+
+def test_traversal_blocked(lib):
+    with pytest.raises(ValueError):
+        serve_mod.render_input_form("../../etc/passwd")
+    with pytest.raises(ValueError):
+        serve_mod.render_input_form("ICS USA/../../secret")
+
+
+def test_missing_form(lib):
+    with pytest.raises(FileNotFoundError):
+        serve_mod.render_input_form("ICS USA/Nope.html")
+
+
+# Route tests
+
+
+@pytest.fixture
+def test_settings(tmp_path):
+    return Settings(
+        jwt_secret_key="test-secret",
+        app_base_url="http://test",
+        state_dir=str(tmp_path),
+    )
+
+
+@pytest.fixture
+def db_setup(test_settings):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = SessionLocal()
+
+    # Create a test net
+    net = Net(slug="t", name="Test Net")
+    session.add(net)
+    session.flush()
+
+    # Create a net_control member (full perms)
+    user_nc = User(
+        callsign="NC0TST",
+        oidc_subject="auth0|nc",
+        name="NC Test",
+        is_admin=False,
+        is_pending=False,
+    )
+    session.add(user_nc)
+    session.flush()
+    session.add(NetMembership(net_id=net.id, user_callsign=user_nc.callsign, role=NetRole.NET_CONTROL))
+
+    # Create a viewer member (limited perms)
+    user_v = User(
+        callsign="V0TST",
+        oidc_subject="auth0|viewer",
+        name="Viewer Test",
+        is_admin=False,
+        is_pending=False,
+    )
+    session.add(user_v)
+    session.flush()
+    session.add(NetMembership(net_id=net.id, user_callsign=user_v.callsign, role=NetRole.VIEWER))
+
+    session.commit()
+    session.close()
+
+    return SessionLocal
+
+
+@pytest.fixture
+def test_app(test_settings, db_setup):
+    app = create_app(settings=test_settings)
+    app.state.session_factory = db_setup
+    return app
+
+
+@pytest.fixture
+async def test_client(test_app):
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_render_route_net_control(test_client, test_settings, tmp_path, monkeypatch):
+    """GET /api/nets/{slug}/forms/render?path=... returns form with shim + CSP (net_control auth)."""
+    base = tmp_path / "forms"
+    (base / "ICS USA").mkdir(parents=True)
+    (base / "ICS USA" / "ICS213Input.html").write_text(
+        "<html><body><form id='f'><input name='MsgBody'></form></body></html>"
+    )
+    monkeypatch.setattr(serve_mod, "forms_library_dir", lambda: base)
+
+    token = make_test_token("NC0TST", test_settings, token_version=0)
+    headers = {"cookie": f"access_token={token}"}
+
+    resp = await test_client.get(
+        "/api/nets/t/forms/render?path=ICS%20USA%2FICS213Input.html", headers=headers
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "<form id='f'>" in body
+    assert "skynet-form-vars" in body
+    csp = resp.headers.get("content-security-policy", "")
+    assert "sandbox" in csp
+    assert "connect-src 'none'" in csp
+
+
+@pytest.mark.asyncio
+async def test_render_route_traversal_blocked(test_client, test_settings, tmp_path, monkeypatch):
+    """GET /api/nets/{slug}/forms/render?path=../../x → 404 (traversal blocked)."""
+    base = tmp_path / "forms"
+    base.mkdir(parents=True)
+    monkeypatch.setattr(serve_mod, "forms_library_dir", lambda: base)
+
+    token = make_test_token("NC0TST", test_settings, token_version=0)
+    headers = {"cookie": f"access_token={token}"}
+
+    resp = await test_client.get("/api/nets/t/forms/render?path=../../etc/passwd", headers=headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_render_route_viewer_forbidden(test_client, test_settings, tmp_path, monkeypatch):
+    """GET /api/nets/{slug}/forms/render by non-net_control member → 403."""
+    base = tmp_path / "forms"
+    (base / "ICS USA").mkdir(parents=True)
+    (base / "ICS USA" / "ICS213Input.html").write_text("<form></form>")
+    monkeypatch.setattr(serve_mod, "forms_library_dir", lambda: base)
+
+    token = make_test_token("V0TST", test_settings, token_version=0)
+    headers = {"cookie": f"access_token={token}"}
+
+    resp = await test_client.get(
+        "/api/nets/t/forms/render?path=ICS%20USA%2FICS213Input.html", headers=headers
+    )
+    assert resp.status_code == 403
