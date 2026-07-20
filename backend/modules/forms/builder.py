@@ -36,6 +36,15 @@ class ComposedForm:
     variables: dict = field(default_factory=dict)
 
 
+# Recognized insertion-tag names (lowercased). Public for callers/tests that
+# want to know which bare <Tags> the builder resolves.
+INSERTION_TAGS = {
+    "msgsender", "callsign", "senders_callsign",
+    "datetime", "udtg", "date", "time",
+    "gridsquare", "grid_square", "gps", "position", "latlon",
+}
+
+
 # Insertion tags → resolver over (context). Ported from PAT's insertion_tags set;
 # unresolved tags render blank (matching PAT with unconfigured station data).
 def _insertion_value(tag: str, ctx: BuildContext, variables: dict) -> str:
@@ -112,7 +121,9 @@ def _parse(template_text: str):
             body = stripped[4:].strip()
             if "=" in body:
                 k, _, v = body.partition("=")
-                defs[k.strip()] = v.strip()
+                k = k.strip()
+                if re.fullmatch(r"[A-Za-z0-9_]+", k):
+                    defs[k] = v.strip()
             continue
         for key in ("to", "cc", "subject", "subj"):
             if low.startswith(key + ":"):
@@ -171,6 +182,8 @@ def build_form_xml(display_form: str, variables: dict, context: BuildContext) ->
         "  <variables>",
     ]
     for key in sorted(variables.keys()):
+        if not re.fullmatch(r"[A-Za-z0-9_]+", key):
+            continue  # skip non-conforming variable names (can't be valid XML element names)
         parts.append(f"    <{key}>{su.escape(str(variables[key]))}</{key}>")
     parts.append("  </variables>")
     parts.append("</RMS_Express_Form>")

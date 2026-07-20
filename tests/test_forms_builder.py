@@ -1,3 +1,5 @@
+import xml.etree.ElementTree as ET
+
 import pytest
 
 from backend.integrations.winlink.b2f import B2FAttachment
@@ -81,3 +83,34 @@ def test_blank_insertion_tag_when_unsourced(lib, tmp_path, monkeypatch):
     result = b.build_form_message("G.txt", {}, ctx_nogrid)
     assert "GRID: " in result.body  # blank, not the literal <GridSquare>
     assert "<GridSquare>" not in result.body
+
+
+def test_xml_variable_keys_sanitized(lib):
+    """Variables with illegal key names (containing <, >, space, /) are skipped; valid keys are preserved."""
+    variables = {
+        "x>injection": "malicious",
+        "GoodKey": "ok",
+        "bad key": "space",
+        "bad/key": "slash",
+    }
+    xml = b.build_form_xml("TestForm.html", variables, CTX)
+
+    # XML should parse without error
+    ET.fromstring(xml)
+
+    # Malformed keys should not appear in XML
+    assert "x>injection" not in xml
+    assert "bad key" not in xml
+    assert "bad/key" not in xml
+
+    # Valid key should be present
+    assert "<GoodKey>ok</GoodKey>" in xml
+
+
+def test_insertion_tags_exported(lib):
+    """INSERTION_TAGS should be importable and contain expected tag names."""
+    assert hasattr(b, "INSERTION_TAGS")
+    assert isinstance(b.INSERTION_TAGS, set)
+    assert "datetime" in b.INSERTION_TAGS
+    assert "callsign" in b.INSERTION_TAGS
+    assert "gridsquare" in b.INSERTION_TAGS
