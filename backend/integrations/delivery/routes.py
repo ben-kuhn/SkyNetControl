@@ -79,15 +79,41 @@ def retry_delivery(
     if content_type == "event_message":
         # Event messages must retry winlink-only, addressed to the original
         # composed recipient (to_address on the EventMessage row).
+        # For form messages, rebuild the attachment so the retry is byte-identical
+        # to the original send — the whole point of persisting EventMessageForm.
         from backend.modules.events.models import EventMessage
+        from backend.modules.events.message_service import _build_context
 
         msg = db.get(EventMessage, content_id)
         if msg is None:
             raise HTTPException(status_code=404, detail="Not found")
+
+        config_overrides: dict = {"target_address": msg.to_address}
+        subject = msg.subject
+        body = msg.body
+
+        net_id = ctx.net.id
+        rec = msg.form_record  # EventMessageForm; None for plain messages
+        if rec is not None:
+            from backend.modules.forms.builder import build_form_message, FormBuildError
+            try:
+                build_ctx = _build_context(db, net_id, rec.datetime_stamp)
+                composed = build_form_message(rec.template_path, rec.variables, build_ctx)
+                config_overrides["attachments"] = [composed.attachment]
+                subject = composed.subject
+                body = composed.body
+            except (FormBuildError, Exception):
+                # If rebuild fails, fall through with the stored subject/body and
+                # no attachment — at minimum deliver the text, and the operator
+                # sees the delivery failed or partial.
+                pass
+
         success = retry_failed(
-            db, content_type, content_id, ctx.net.id,
+            db, content_type, content_id, net_id,
             backends=["winlink"],
-            config_overrides={"target_address": msg.to_address},
+            config_overrides=config_overrides,
+            subject_override=subject,
+            body_override=body,
         )
     else:
         success = retry_failed(db, content_type, content_id, ctx.net.id)

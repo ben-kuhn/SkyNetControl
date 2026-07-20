@@ -220,3 +220,195 @@ async def test_get_delivery_status_rejects_cross_net(client, test_settings, db_s
         headers=_auth_headers(test_settings),
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Event-message retry: form attachment must be rebuilt on retry
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def form_retry_db_setup(tmp_path):
+    """DB + forms dir for testing that form-message retry re-attaches the XML."""
+    # Forms library with one template that has a fixed recipient.
+    forms = tmp_path / "forms"
+    (forms / "ICS USA").mkdir(parents=True)
+    (forms / "ICS USA" / "ICS213.txt").write_text(
+        "Form: ICS213Input.html\nTo: KE0XYZ\nSubject: ICS213 Report\nMsg:\n<Var MsgBody>\n"
+    )
+    (forms / "ICS USA" / "ICS213Input.html").write_text("<form><input name='MsgBody'></form>")
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with factory() as session:
+        session.add(User(callsign="ADMIN", oidc_subject="local|admin", name="Admin", is_admin=True))
+        from backend.modules.nets.models import Net, NetMembership, NetRole
+        from backend.modules.events.models import Event, EventMessage, EventMessageForm, EventStatus, MessageDirection, MessageStatus
+        net = Net(slug=NET_SLUG, name="Test Net")
+        session.add(net)
+        session.flush()
+        session.add(NetMembership(user_callsign="ADMIN", net_id=net.id, role=NetRole.NET_CONTROL))
+        set_net_config(session, net.id, "net_address", "W0NE@winlink.org")
+        set_net_config(session, net.id, "pat_mailbox_path", str(tmp_path / "mailbox"))
+
+        event = Event(
+            net_id=net.id, name="E", event_type="emergency",
+            status=EventStatus.ACTIVE, created_by="ADMIN",
+        )
+        session.add(event)
+        session.flush()
+
+        msg = EventMessage(
+            event_id=event.id, msg_seq=1,
+            direction=MessageDirection.OUTBOUND,
+            from_callsign="W0NE", to_address="KE0XYZ",
+            subject="ICS213 Report", body="all clear",
+            status=MessageStatus.READ, actor="ADMIN",
+        )
+        session.add(msg)
+        session.flush()
+        session.add(EventMessageForm(
+            event_message_id=msg.id,
+            template_path="ICS USA/ICS213.txt",
+            display_form="ICS213Input.html",
+            variables={"MsgBody": "all clear"},
+            datetime_stamp="2026/07/17 18:30",
+        ))
+        session.add(DeliveryLog(
+            content_type="event_message",
+            content_id=msg.id,
+            backend="winlink",
+            status=DeliveryStatus.FAILED,
+            error_message="PAT not running",
+            created_at=datetime.now(tz=timezone.utc),
+        ))
+        session.commit()
+        msg_id = msg.id
+
+    return {"factory": factory, "engine": engine, "msg_id": msg_id, "forms": forms}
+
+
+@pytest.fixture
+def form_retry_app(test_settings, form_retry_db_setup):
+    application = FastAPI()
+    application.state.session_factory = form_retry_db_setup["factory"]
+    application.state.settings = test_settings
+    application.include_router(delivery_router, prefix="/api/nets/{net_slug}/delivery")
+    return application
+
+
+@pytest.fixture
+async def form_retry_client(form_retry_app):
+    transport = ASGITransport(app=form_retry_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_form_message_retry_includes_attachment(form_retry_client, test_settings, form_retry_db_setup, monkeypatch):
+    """Retrying a failed form event-message must rebuild the RMS_Express_Form
+    XML and pass it as an attachment — not silently re-send plain text."""
+    import backend.modules.forms.builder as bld
+    monkeypatch.setattr(bld, "forms_library_dir", lambda: form_retry_db_setup["forms"])
+
+    captured_configs = []
+
+    def mock_send(self, subject, body, config):
+        captured_configs.append(dict(config))
+        from backend.integrations.delivery.backends.base import DeliveryResult
+        return DeliveryResult(success=True, error=None)
+
+    from backend.integrations.delivery.backends.winlink import WinlinkBackend
+    monkeypatch.setattr(WinlinkBackend, "send", mock_send)
+
+    resp = await form_retry_client.post(
+        f"{BASE}/event_message/{form_retry_db_setup['msg_id']}/retry",
+        headers=_auth_headers(test_settings),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["retried"] is True
+    # The attachment must be present in the config sent to the backend.
+    assert len(captured_configs) == 1
+    atts = captured_configs[0].get("attachments") or []
+    assert len(atts) == 1
+    # Verify it's the RMS_Express_Form XML.
+    xml_bytes = atts[0].data
+    assert b"<RMS_Express_Form>" in xml_bytes
+    assert b"all clear" in xml_bytes
+
+
+@pytest.mark.anyio
+async def test_plain_message_retry_no_attachment(test_settings, db_setup):
+    """Retrying a plain (non-form) event message must not add any attachment."""
+    from backend.modules.events.models import Event, EventMessage, EventStatus, MessageDirection, MessageStatus
+
+    with db_setup() as session:
+        from backend.modules.nets.models import Net, NetMembership, NetRole
+        net = session.query(Net).filter_by(slug=NET_SLUG).one()
+        session.add(NetMembership(user_callsign="ADMIN", net_id=net.id, role=NetRole.NET_CONTROL))
+        set_net_config(session, net.id, "net_address", "W0NE@winlink.org")
+        set_net_config(session, net.id, "pat_mailbox_path", "/tmp/mailbox")
+
+        event = Event(
+            net_id=net.id, name="PlainEvt", event_type="emergency",
+            status=EventStatus.ACTIVE, created_by="ADMIN",
+        )
+        session.add(event)
+        session.flush()
+
+        msg = EventMessage(
+            event_id=event.id, msg_seq=1,
+            direction=MessageDirection.OUTBOUND,
+            from_callsign="W0NE", to_address="KE0ABC",
+            subject="Plain msg", body="hello",
+            status=MessageStatus.READ, actor="ADMIN",
+        )
+        session.add(msg)
+        session.flush()
+        session.add(DeliveryLog(
+            content_type="event_message",
+            content_id=msg.id,
+            backend="winlink",
+            status=DeliveryStatus.FAILED,
+            error_message="PAT not running",
+            created_at=datetime.now(tz=timezone.utc),
+        ))
+        session.commit()
+        msg_id = msg.id
+
+    captured_configs = []
+
+    application = FastAPI()
+    application.state.session_factory = db_setup
+    application.state.settings = test_settings
+    application.include_router(delivery_router, prefix="/api/nets/{net_slug}/delivery")
+
+    from backend.integrations.delivery.backends.winlink import WinlinkBackend
+
+    original_send = WinlinkBackend.send
+
+    def mock_send(self, subject, body, config):
+        captured_configs.append(dict(config))
+        from backend.integrations.delivery.backends.base import DeliveryResult
+        return DeliveryResult(success=True, error=None)
+
+    WinlinkBackend.send = mock_send
+    try:
+        transport = ASGITransport(app=application)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.post(
+                f"{BASE}/event_message/{msg_id}/retry",
+                headers=_auth_headers(test_settings),
+            )
+        assert resp.status_code == 200
+        assert len(captured_configs) == 1
+        # Plain message must not carry an attachments key (or it's empty).
+        atts = captured_configs[0].get("attachments") or []
+        assert atts == []
+    finally:
+        WinlinkBackend.send = original_send

@@ -187,6 +187,8 @@ def retry_failed(
     *,
     backends: list[str] | None = None,
     config_overrides: dict | None = None,
+    subject_override: str | None = None,
+    body_override: str | None = None,
 ) -> bool:
     """Retry only failed delivery attempts for a piece of content.
 
@@ -194,7 +196,11 @@ def retry_failed(
       backends: if provided, only retry failed attempts for these backends
                 (used for event_message retries that must go winlink-only).
       config_overrides: a dict merged into the per-backend config after
-                        _build_config (e.g. {"target_address": to_address}).
+                        _build_config (e.g. {"target_address": to_address,
+                        "attachments": [attachment]}).
+      subject_override / body_override: if provided, use these instead of the
+                        stored subject/body (used for form-message retries where
+                        the form is rebuilt from EventMessageForm to re-attach).
     """
     query = db.query(DeliveryLog).filter_by(
         content_type=content_type, content_id=content_id, status=DeliveryStatus.FAILED
@@ -206,7 +212,10 @@ def retry_failed(
     if not failed_logs:
         return False
 
-    subject, body = _lookup_content(db, content_type, content_id)
+    if subject_override is not None and body_override is not None:
+        subject, body = subject_override, body_override
+    else:
+        subject, body = _lookup_content(db, content_type, content_id)
 
     any_success = False
     for log in failed_logs:

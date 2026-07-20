@@ -188,6 +188,8 @@ class EventMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     event: Mapped["Event"] = relationship(back_populates="messages")
+    # SQLite FK enforcement relies on ORM cascade (PRAGMA foreign_keys is not
+    # enabled globally); the cascade="all, delete-orphan" here is the real guard.
     form_record: Mapped["EventMessageForm | None"] = relationship(
         cascade="all, delete-orphan"
     )
