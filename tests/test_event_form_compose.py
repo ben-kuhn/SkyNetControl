@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from backend.auth.models import User
 from backend.config import Settings
 from backend.db.base import Base
-from backend.modules.events.models import EventMessage, EventMessageForm, MessageDirection
+from backend.modules.events.models import EventMessage, EventMessageForm, MessageDirection, MessageStatus
 from backend.modules.nets.models import Net, NetMembership, NetRole
 from backend.modules.nets.config_service import set_net_config_bulk
 from tests.conftest import make_test_token
@@ -110,3 +110,118 @@ class TestSend:
         resp = await nc.post(f"{BASE}/{active_event}/form-messages", json={
             "template_path": "ICS USA/Nope.txt", "variables": {}, "datetime_stamp": "2026/07/17 18:30"})
         assert resp.status_code == 422
+
+
+# XML carrying a reply_template that points at ICS213.txt (already in the fixture's forms dir)
+_REPLY_FORM_XML = (
+    "<RMS_Express_Form>"
+    "<form_parameters>"
+    "<display_form>ICS213Input.html</display_form>"
+    "<reply_template>ICS213.txt</reply_template>"
+    "</form_parameters>"
+    "<variables><msgbody>all clear</msgbody><tostation>W0NC</tostation></variables>"
+    "</RMS_Express_Form>"
+)
+
+
+class TestReplyForm:
+    """Tests for GET /events/{id}/messages/{mid}/reply-form."""
+
+    def _seed_inbound_with_form(self, db_setup, event_id):
+        """Insert an inbound EventMessage whose RawMessage carries form XML."""
+        from datetime import datetime, timezone
+        from backend.modules.checkins.models import MessageType, RawMessage, RawMessageAttachment
+
+        with db_setup["factory"]() as db:
+            raw = RawMessage(
+                message_id="RF1",
+                from_address="KE0XYZ@winlink.org",
+                received_at=datetime.now(timezone.utc),
+                subject="ICS213 Report",
+                body="see form",
+                message_type=MessageType.WINLINK_FORM,
+                parsed=True,
+            )
+            db.add(raw)
+            db.flush()
+            att = RawMessageAttachment(
+                raw_message_id=raw.id,
+                filename="RMS_Express_Form_ICS213.xml",
+                content_type="application/xml",
+                data=_REPLY_FORM_XML.encode("utf-8"),
+            )
+            db.add(att)
+            msg = EventMessage(
+                event_id=event_id,
+                msg_seq=99,
+                direction=MessageDirection.INBOUND,
+                raw_message_id=raw.id,
+                from_callsign="KE0XYZ",
+                to_address="W0NE@winlink.org",
+                subject="ICS213 Report",
+                body="see form",
+                status=MessageStatus.UNREAD,
+            )
+            db.add(msg)
+            db.commit()
+            return msg.id
+
+    def _seed_plain_inbound(self, db_setup, event_id):
+        """Insert an inbound EventMessage with NO form (plain text)."""
+        from datetime import datetime, timezone
+        from backend.modules.checkins.models import MessageType, RawMessage
+
+        with db_setup["factory"]() as db:
+            raw = RawMessage(
+                message_id="PL1",
+                from_address="KE0ABC@winlink.org",
+                received_at=datetime.now(timezone.utc),
+                subject="No form here",
+                body="just text",
+                message_type=MessageType.PLAIN_TEXT,
+                parsed=True,
+            )
+            db.add(raw)
+            db.flush()
+            msg = EventMessage(
+                event_id=event_id,
+                msg_seq=100,
+                direction=MessageDirection.INBOUND,
+                raw_message_id=raw.id,
+                from_callsign="KE0ABC",
+                to_address="W0NE@winlink.org",
+                subject="No form here",
+                body="just text",
+                status=MessageStatus.UNREAD,
+            )
+            db.add(msg)
+            db.commit()
+            return msg.id
+
+    async def test_reply_form_404_plain_message(self, nc, active_event, db_setup):
+        """Plain inbound message (no RMS_Express_Form XML) → 404."""
+        mid = self._seed_plain_inbound(db_setup, active_event)
+        resp = await nc.get(f"{BASE}/{active_event}/messages/{mid}/reply-form")
+        assert resp.status_code == 404
+
+    async def test_reply_form_200_happy_path(self, nc, active_event, db_setup, monkeypatch):
+        """Inbound message with captured form → reply_template_path + input_form_path + prefill."""
+        import backend.modules.forms.library as lib
+
+        # Point find_template at the same tmp forms dir the fixture already created.
+        forms_dir = db_setup["forms"]
+        monkeypatch.setattr(lib, "forms_library_dir", lambda: forms_dir)
+        # Clear the module-level template cache so find_template re-scans from the patched dir.
+        lib.clear_template_cache()
+
+        mid = self._seed_inbound_with_form(db_setup, active_event)
+        resp = await nc.get(f"{BASE}/{active_event}/messages/{mid}/reply-form")
+        assert resp.status_code == 200
+        body = resp.json()
+        # reply_template resolves to "ICS USA/ICS213.txt" (relative to forms dir)
+        assert body["reply_template_path"] == "ICS USA/ICS213.txt"
+        # input_form_path resolves to "ICS USA/ICS213Input.html" (from the Form: line in the .txt)
+        assert body["input_form_path"] == "ICS USA/ICS213Input.html"
+        # prefill carries the variables from the inbound form XML
+        assert body["prefill"]["msgbody"] == "all clear"
+        assert body["prefill"]["tostation"] == "W0NC"

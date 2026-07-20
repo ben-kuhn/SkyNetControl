@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -249,7 +250,7 @@ def _get_event_or_404(db: Session, net_id: int, event_id: int) -> Event:
     return event
 
 
-def _raise_for(err: EventError):
+def _raise_for(err: EventError) -> NoReturn:
     if isinstance(err, (InvalidStatusTransitionError, InvalidPostError)):
         raise HTTPException(status_code=422, detail=str(err))
     raise HTTPException(status_code=409, detail=str(err))
