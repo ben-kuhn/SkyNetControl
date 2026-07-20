@@ -99,14 +99,18 @@ def retry_delivery(
             try:
                 build_ctx = _build_context(db, net_id, rec.datetime_stamp)
                 composed = build_form_message(rec.template_path, rec.variables, build_ctx)
-                config_overrides["attachments"] = [composed.attachment]
-                subject = composed.subject
-                body = composed.body
-            except (FormBuildError, Exception):
-                # If rebuild fails, fall through with the stored subject/body and
-                # no attachment — at minimum deliver the text, and the operator
-                # sees the delivery failed or partial.
-                pass
+            except (FormBuildError, ValueError) as exc:
+                # A form message must never silently degrade to a plain-text retry —
+                # that reintroduces the exact failure (form sent as text, reported
+                # delivered) this rebuild exists to prevent. Fail the retry loudly so
+                # the operator can fix the template/library and try again.
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Cannot rebuild form attachment for retry: {exc}",
+                )
+            config_overrides["attachments"] = [composed.attachment]
+            subject = composed.subject
+            body = composed.body
 
         success = retry_failed(
             db, content_type, content_id, net_id,

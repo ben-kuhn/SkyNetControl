@@ -343,6 +343,38 @@ async def test_form_message_retry_includes_attachment(form_retry_client, test_se
 
 
 @pytest.mark.anyio
+async def test_form_message_retry_rebuild_failure_returns_422(
+    form_retry_client, test_settings, form_retry_db_setup, monkeypatch, tmp_path
+):
+    """If the form can't be rebuilt on retry (e.g. its template is gone from the
+    library), the retry must fail loudly with 422 — never silently degrade to a
+    plain-text send that reports success."""
+    import backend.modules.forms.builder as bld
+    # Point the library at an empty dir so the template can't be resolved.
+    empty = tmp_path / "empty-forms"
+    empty.mkdir()
+    monkeypatch.setattr(bld, "forms_library_dir", lambda: empty)
+
+    sent = []
+
+    def mock_send(self, subject, body, config):
+        sent.append(dict(config))
+        from backend.integrations.delivery.backends.base import DeliveryResult
+        return DeliveryResult(success=True, error=None)
+
+    from backend.integrations.delivery.backends.winlink import WinlinkBackend
+    monkeypatch.setattr(WinlinkBackend, "send", mock_send)
+
+    resp = await form_retry_client.post(
+        f"{BASE}/event_message/{form_retry_db_setup['msg_id']}/retry",
+        headers=_auth_headers(test_settings),
+    )
+    assert resp.status_code == 422
+    # And nothing was delivered — no plain-text fallback went out.
+    assert sent == []
+
+
+@pytest.mark.anyio
 async def test_plain_message_retry_no_attachment(test_settings, db_setup):
     """Retrying a plain (non-form) event message must not add any attachment."""
     from backend.modules.events.models import Event, EventMessage, EventStatus, MessageDirection, MessageStatus
