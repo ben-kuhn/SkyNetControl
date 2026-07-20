@@ -18,11 +18,23 @@ export function useFormCompose(netSlug: string, eventId: number) {
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [prefill, setPrefill] = useState<Record<string, string>>({});
   const [replyToId, setReplyToId] = useState<number | null>(null);
-  const [stamp] = useState(nowStamp());
+  // stamp is initialised to "" and set fresh at the START of each compose session
+  // (in pickForm / startReply) so it reflects when the operator actually began
+  // composing, not when the panel was mounted.  It stays fixed through
+  // acceptVariables → send so preview == send byte-for-byte.
+  const [stamp, setStamp] = useState("");
   const [preview, setPreview] = useState<FormPreview | null>(null);
 
   const pickForm = useCallback((template: string, inputForm: string) => {
-    setTemplatePath(template); setInputFormPath(inputForm); setStep("fill");
+    // Reset all session state so a new compose never carries stale reply context.
+    setTemplatePath(template);
+    setInputFormPath(inputForm);
+    setPrefill({});
+    setReplyToId(null);
+    setVariables({});
+    setPreview(null);
+    setStamp(nowStamp());
+    setStep("fill");
   }, []);
 
   const acceptVariables = useCallback(async (vars: Record<string, string>, onError: (m: string) => void) => {
@@ -47,11 +59,33 @@ export function useFormCompose(netSlug: string, eventId: number) {
     }
   }, [eventId, netSlug, templatePath, variables, stamp, replyToId]);
 
+  // reset() returns the panel to the catalog step with all session state cleared.
+  // Use this instead of bare setStep("catalog") so stale prefill / replyToId
+  // from a previous reply-with-form session are not carried into a new compose.
+  const reset = useCallback(() => {
+    setTemplatePath("");
+    setInputFormPath("");
+    setPrefill({});
+    setReplyToId(null);
+    setVariables({});
+    setPreview(null);
+    setStamp("");
+    setStep("catalog");
+  }, []);
+
   return {
     step, setStep, templatePath, inputFormPath, prefill, preview, replyToId,
-    pickForm, acceptVariables, send,
+    pickForm, acceptVariables, send, reset,
     startReply: (template: string, inputForm: string, pf: Record<string, string>, rid: number) => {
-      setTemplatePath(template); setInputFormPath(inputForm); setPrefill(pf); setReplyToId(rid); setStep("fill");
+      // Like pickForm but keeps prefill + replyToId from the inbound message.
+      setTemplatePath(template);
+      setInputFormPath(inputForm);
+      setPrefill(pf);
+      setReplyToId(rid);
+      setVariables({});
+      setPreview(null);
+      setStamp(nowStamp());
+      setStep("fill");
     },
   };
 }

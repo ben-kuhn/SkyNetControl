@@ -119,7 +119,7 @@ export function MessagesPanel({
             <Button size="sm" variant="secondary" loading={rescanning} onClick={() => void rescan()}>
               Check mail now
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => { compose.setStep("catalog"); setFormOpen(true); }}>
+            <Button size="sm" variant="secondary" onClick={() => { compose.reset(); setFormOpen(true); }}>
               New form
             </Button>
             <Button size="sm" onClick={() => { setReplyTo(null); setComposeOpen(true); }}>

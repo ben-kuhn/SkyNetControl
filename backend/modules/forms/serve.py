@@ -33,9 +33,12 @@ COLLECTOR_SHIM = """
   function applyPrefill() {
     var form = document.querySelector("form");
     if (!form) return;
-    Object.keys(PREFILL).forEach(function (name) {
-      var el = form.querySelector("[name='" + name + "']");
-      if (el) el.value = PREFILL[name];
+    var els = form.querySelectorAll("[name]");
+    els.forEach(function (el) {
+      var lower = el.name.toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(PREFILL, lower)) {
+        el.value = PREFILL[lower];
+      }
     });
   }
   window.addEventListener("message", function (e) {

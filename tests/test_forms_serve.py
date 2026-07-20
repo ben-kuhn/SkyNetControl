@@ -37,6 +37,23 @@ def test_prefill_seeded(lib):
     assert '"MsgBody": "hello"' in html
 
 
+def test_prefill_case_insensitive_matcher(lib):
+    """The shim must match form field names case-insensitively.
+
+    Real Winlink forms use mixed-case field names (e.g. MsgBody) while the
+    prefill dict from extract_form_variables uses lowercased keys (msgbody).
+    The shim must iterate [name] elements and compare lowercased rather than
+    doing a case-sensitive CSS attribute selector.
+    """
+    # Render with a lowercase prefill key; form has mixed-case name attribute.
+    html = serve_mod.render_input_form("ICS USA/ICS213Input.html", prefill={"msgbody": "hello"})
+    # The new shim must iterate querySelectorAll('[name]') and lowercase-compare.
+    assert "querySelectorAll('[name]')" in html or 'querySelectorAll("[name]")' in html
+    assert "el.name.toLowerCase()" in html
+    # The prefill must still be seeded in the JSON (with its lowercase key).
+    assert '"msgbody": "hello"' in html or '"msgbody":"hello"' in html
+
+
 def test_prefill_script_tag_escaped(lib):
     html = serve_mod.render_input_form(
         "ICS USA/ICS213Input.html",
