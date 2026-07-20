@@ -281,8 +281,12 @@ export async function fetchFormCatalog(netSlug: string, q = ""): Promise<FormCat
   return apiFetch<FormCatalogNode>(`/nets/${netSlug}/forms/catalog${p}`);
 }
 
-export function formRenderUrl(netSlug: string, path: string): string {
-  return `/api/nets/${netSlug}/forms/render?path=${encodeURIComponent(path)}`;
+export function formRenderUrl(netSlug: string, path: string, prefill?: Record<string, string>): string {
+  let url = `/api/nets/${netSlug}/forms/render?path=${encodeURIComponent(path)}`;
+  if (prefill && Object.keys(prefill).length > 0) {
+    url += `&prefill=${encodeURIComponent(JSON.stringify(prefill))}`;
+  }
+  return url;
 }
 
 export interface FormComposeInput {

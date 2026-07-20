@@ -190,3 +190,51 @@ async def test_render_route_viewer_forbidden(test_client, test_settings, tmp_pat
         "/api/nets/t/forms/render?path=ICS%20USA%2FICS213Input.html", headers=headers
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_render_route_prefill_seeded(test_client, test_settings, tmp_path, monkeypatch):
+    """GET .../forms/render?path=...&prefill=<json> returns 200 with prefill JSON in shim."""
+    import json
+    import urllib.parse
+
+    base = tmp_path / "forms"
+    (base / "ICS USA").mkdir(parents=True)
+    (base / "ICS USA" / "ICS213Input.html").write_text(
+        "<html><body><form id='f'><input name='MsgBody'></form></body></html>"
+    )
+    monkeypatch.setattr(serve_mod, "forms_library_dir", lambda: base)
+
+    token = make_test_token("NC0TST", test_settings, token_version=0)
+    headers = {"cookie": f"access_token={token}"}
+
+    prefill = {"MsgBody": "hello from reply"}
+    prefill_param = urllib.parse.quote(json.dumps(prefill))
+    resp = await test_client.get(
+        f"/api/nets/t/forms/render?path=ICS%20USA%2FICS213Input.html&prefill={prefill_param}",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert "hello from reply" in resp.text
+    assert "MsgBody" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_render_route_prefill_malformed_returns_200(test_client, test_settings, tmp_path, monkeypatch):
+    """GET .../forms/render?path=...&prefill=INVALID still returns 200 (falls back to empty, no 500)."""
+    base = tmp_path / "forms"
+    (base / "ICS USA").mkdir(parents=True)
+    (base / "ICS USA" / "ICS213Input.html").write_text(
+        "<html><body><form id='f'><input name='MsgBody'></form></body></html>"
+    )
+    monkeypatch.setattr(serve_mod, "forms_library_dir", lambda: base)
+
+    token = make_test_token("NC0TST", test_settings, token_version=0)
+    headers = {"cookie": f"access_token={token}"}
+
+    resp = await test_client.get(
+        "/api/nets/t/forms/render?path=ICS%20USA%2FICS213Input.html&prefill=NOT_VALID_JSON",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert "skynet-form-vars" in resp.text

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -19,10 +21,19 @@ _SANDBOX_CSP = (
 @net_forms_router.get("/render")
 async def forms_render_route(
     path: str = Query(...),
+    prefill: str = Query(default=""),
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
 ):
+    prefill_dict: dict = {}
+    if prefill:
+        try:
+            parsed = json.loads(prefill)
+            if isinstance(parsed, dict):
+                prefill_dict = parsed
+        except (json.JSONDecodeError, ValueError):
+            pass  # malformed prefill: treat as empty, do not 500
     try:
-        html = render_input_form(path)
+        html = render_input_form(path, prefill=prefill_dict)
     except (FileNotFoundError, ValueError):
         raise HTTPException(status_code=404, detail="Form not found")
     return HTMLResponse(content=html, headers={"Content-Security-Policy": _SANDBOX_CSP})

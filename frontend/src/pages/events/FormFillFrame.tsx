@@ -6,10 +6,11 @@ import { Button } from "../../components/Button";
 interface Props {
   netSlug: string;
   inputFormPath: string;
+  prefill?: Record<string, string>;
   onVariables: (vars: Record<string, string>) => void;
 }
 
-export function FormFillFrame({ netSlug, inputFormPath, onVariables }: Props) {
+export function FormFillFrame({ netSlug, inputFormPath, prefill, onVariables }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function FormFillFrame({ netSlug, inputFormPath, onVariables }: Props) {
         ref={ref}
         title="Winlink form"
         sandbox="allow-scripts"
-        src={formRenderUrl(netSlug, inputFormPath)}
+        src={formRenderUrl(netSlug, inputFormPath, prefill)}
         className="w-full h-[480px] border border-border rounded-md bg-white"
       />
       <div className="flex justify-end">

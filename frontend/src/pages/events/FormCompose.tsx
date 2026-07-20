@@ -1,4 +1,5 @@
 // frontend/src/pages/events/FormCompose.tsx
+import { useCallback } from "react";
 import { Button } from "../../components/Button";
 import { Modal } from "../../components/Modal";
 import { useFormCompose } from "../../hooks/useFormCompose";
@@ -17,15 +18,19 @@ interface Props {
 }
 
 export function FormCompose({ netSlug, event: _event, open, onClose, onSent, onError, compose }: Props) {
-  const { step, inputFormPath, preview, pickForm, acceptVariables, send } = compose;
+  const { step, inputFormPath, prefill, preview, pickForm, acceptVariables, send } = compose;
+  const handleVariables = useCallback(
+    (vars: Record<string, string>) => void acceptVariables(vars, onError),
+    [acceptVariables, onError],
+  );
   return (
     <Modal open={open} onClose={onClose} title="Winlink form" size="xl">
       {step === "catalog" && (
         <FormCatalog netSlug={netSlug} onPick={(e) => pickForm(e.template_path, e.input_form_path)} />
       )}
       {step === "fill" && (
-        <FormFillFrame netSlug={netSlug} inputFormPath={inputFormPath}
-          onVariables={(vars) => void acceptVariables(vars, onError)} />
+        <FormFillFrame netSlug={netSlug} inputFormPath={inputFormPath} prefill={prefill}
+          onVariables={handleVariables} />
       )}
       {step === "preview" && preview && (
         <div className="flex flex-col gap-2 text-sm">
