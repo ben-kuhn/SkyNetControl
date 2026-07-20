@@ -17,6 +17,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Fix 1: on PostgreSQL, delivery_logs.status is a native enum type
+    # "deliverystatus" created in d50a22f251e3 with labels PENDING/SENT/FAILED.
+    # Adding QUEUED to the Python enum is not enough — extend the PG type here.
+    # SQLite stores a bare VARCHAR so this branch must be skipped there.
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute("ALTER TYPE deliverystatus ADD VALUE IF NOT EXISTS 'QUEUED'")
+
     op.create_table(
         "pat_connection_sessions",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -54,3 +61,5 @@ def downgrade() -> None:
         batch.drop_column("pat_mid")
         batch.drop_column("pat_session_id")
     op.drop_table("pat_connection_sessions")
+    # Note: PostgreSQL does not support removing a value from an enum type,
+    # so the 'QUEUED' label added in upgrade() is left in place on downgrade.

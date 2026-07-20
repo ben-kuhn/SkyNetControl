@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -47,3 +47,19 @@ def test_delivery_log_pat_columns():
     db.add(log)
     db.commit()
     assert db.query(DeliveryLog).one().pat_mid == "ABC123"
+
+
+def test_session_status_stored_as_lowercase_value():
+    """Verify that PatConnectionSession.status stores the enum VALUE ('connecting'),
+    not the Python name ('CONNECTING'), consistent with the String(20) migration column."""
+    db = _db()
+    s = PatConnectionSession(
+        net_id=1, event_id=None, connect_url="telnet:///",
+        method_label="alias: telnet", status=PatSessionStatus.CONNECTING,
+        sent_count=0, received_count=0, events=[], actor="W0NC",
+        started_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(s)
+    db.commit()
+    raw = db.execute(text("SELECT status FROM pat_connection_sessions")).scalar()
+    assert raw == "connecting", f"expected 'connecting', got {raw!r}"

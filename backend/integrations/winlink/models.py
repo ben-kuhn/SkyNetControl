@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
@@ -28,7 +28,11 @@ class PatConnectionSession(Base):
     )
     connect_url: Mapped[str] = mapped_column(String(512), nullable=False)
     method_label: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    status: Mapped[PatSessionStatus] = mapped_column(nullable=False)
+    status: Mapped[PatSessionStatus] = mapped_column(
+        SAEnum(PatSessionStatus, values_callable=lambda e: [m.value for m in e],
+               native_enum=False, length=20),
+        nullable=False,
+    )
     sent_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     received_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
