@@ -28,7 +28,7 @@ DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 DEFAULT_MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024  # 200 MB
 DEFAULT_MAX_ENTRY_COUNT = 5000
 
-ALLOWED_EXTENSIONS = {".html", ".htm", ".txt", ".xml", ".css"}
+ALLOWED_EXTENSIONS = {".html", ".htm", ".txt", ".xml", ".css", ".js"}
 
 ZIP_MAGIC = b"PK\x03\x04"
 

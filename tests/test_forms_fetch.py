@@ -217,8 +217,8 @@ async def test_fetch_drops_script_entries(
 
     forms_dir = forms_state_dir / "forms"
     assert (forms_dir / "Standard Forms" / "Good.html").exists()
-    assert not (forms_dir / "Standard Forms" / "script.js").exists()
-    assert not (forms_dir / "Standard Forms" / "script.exe").exists()
+    assert (forms_dir / "Standard Forms" / "script.js").exists()  # .js is now allowed
+    assert not (forms_dir / "Standard Forms" / "script.exe").exists()  # .exe still dropped
 
 
 async def test_fetch_failure_leaves_prior_library_intact(
