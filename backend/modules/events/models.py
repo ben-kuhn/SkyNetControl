@@ -8,6 +8,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -187,3 +188,21 @@ class EventMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     event: Mapped["Event"] = relationship(back_populates="messages")
+    form_record: Mapped["EventMessageForm | None"] = relationship(
+        cascade="all, delete-orphan"
+    )
+
+
+class EventMessageForm(Base):
+    __tablename__ = "event_message_forms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_message_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("event_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    template_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    display_form: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    reply_template: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    variables: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    datetime_stamp: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
