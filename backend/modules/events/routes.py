@@ -765,3 +765,66 @@ async def download_attachment_route(
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
     )
+
+
+# --- Form compose / send / reply-form routes ---
+
+
+class FormComposeBody(BaseModel):
+    template_path: str
+    variables: dict = {}
+    datetime_stamp: str
+    reply_to_id: int | None = None
+
+
+@events_router.post("/{event_id}/forms/preview")
+async def form_preview_route(
+    event_id: int, body: FormComposeBody,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    from backend.modules.events.message_service import compose_form_preview
+    try:
+        return compose_form_preview(db, event_id, template_path=body.template_path,
+                                    variables=body.variables, datetime_stamp=body.datetime_stamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@events_router.post("/{event_id}/form-messages", status_code=201)
+async def form_send_route(
+    event_id: int, body: FormComposeBody,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    from backend.modules.events.message_service import send_event_form_message
+    try:
+        message = send_event_form_message(
+            db, event_id, actor=ctx.user.callsign, template_path=body.template_path,
+            variables=body.variables, datetime_stamp=body.datetime_stamp, reply_to_id=body.reply_to_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except EventError as err:
+        _raise_for(err)
+    from backend.integrations.delivery.service import get_delivery_status
+    from backend.integrations.delivery.models import DeliveryStatus
+    logs = get_delivery_status(db, "event_message", message.id)
+    delivered = any(log.status == DeliveryStatus.SENT for log in logs)
+    return {"message": _message_to_response(message, _message_extras(db, message)), "delivered": delivered}
+
+
+@events_router.get("/{event_id}/messages/{message_id}/reply-form")
+async def reply_form_route(
+    event_id: int, message_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    from backend.modules.events.message_service import resolve_reply_form
+    try:
+        return resolve_reply_form(db, event_id, message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
