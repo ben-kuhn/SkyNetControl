@@ -62,7 +62,7 @@ def _resolve(rel_path: str):
 def render_input_form(rel_path: str, prefill: dict | None = None) -> str:
     target = _resolve(rel_path)
     html = target.read_text(errors="replace")
-    shim = COLLECTOR_SHIM.replace("__PREFILL__", json.dumps(prefill or {}))
+    shim = COLLECTOR_SHIM.replace("__PREFILL__", json.dumps(prefill or {}).replace("</", "<\\/"))
     lower = html.lower()
     idx = lower.rfind("</body>")
     if idx != -1:

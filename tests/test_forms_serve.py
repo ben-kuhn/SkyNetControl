@@ -34,7 +34,18 @@ def test_render_injects_shim(lib):
 
 def test_prefill_seeded(lib):
     html = serve_mod.render_input_form("ICS USA/ICS213Input.html", prefill={"MsgBody": "hello"})
-    assert '"MsgBody": "hello"' in html or "'MsgBody': 'hello'" in html or "MsgBody" in html
+    assert '"MsgBody": "hello"' in html
+
+
+def test_prefill_script_tag_escaped(lib):
+    html = serve_mod.render_input_form(
+        "ICS USA/ICS213Input.html",
+        prefill={"MsgBody": "</script><script>alert(1)</script>"},
+    )
+    # The raw closing tag must NOT appear un-escaped inside the injected JSON —
+    # it is escaped to <\/script>, so no premature script termination.
+    assert "</script><script>alert(1)</script>" not in html
+    assert "<\\/script>" in html
 
 
 def test_traversal_blocked(lib):
@@ -141,9 +152,13 @@ async def test_render_route_net_control(test_client, test_settings, tmp_path, mo
     body = resp.text
     assert "<form id='f'>" in body
     assert "skynet-form-vars" in body
-    csp = resp.headers.get("content-security-policy", "")
-    assert "sandbox" in csp
-    assert "connect-src 'none'" in csp
+    csp = resp.headers["content-security-policy"]
+    for directive in [
+        "sandbox", "default-src 'none'", "script-src 'unsafe-inline'",
+        "style-src 'unsafe-inline'", "img-src data:", "connect-src 'none'",
+        "form-action 'none'",
+    ]:
+        assert directive in csp
 
 
 @pytest.mark.asyncio
