@@ -111,6 +111,26 @@ class TestSend:
             "template_path": "ICS USA/Nope.txt", "variables": {}, "datetime_stamp": "2026/07/17 18:30"})
         assert resp.status_code == 422
 
+    async def test_empty_to_send_422(self, nc, active_event, db_setup):
+        """A form whose To: resolves to empty (no ToStation variable provided)
+        must return 422, not persist a corrupt message or silently fail in PAT."""
+        # ICS213.txt has "To: <Var ToStation>"; omitting ToStation yields to="".
+        resp = await nc.post(f"{BASE}/{active_event}/form-messages", json={
+            "template_path": "ICS USA/ICS213.txt",
+            "variables": {"Subject": "test", "MsgBody": "hello"},
+            "datetime_stamp": "2026/07/17 18:30",
+        })
+        assert resp.status_code == 422
+
+    async def test_empty_to_preview_422(self, nc, active_event, db_setup):
+        """Preview with empty To: must also 422."""
+        resp = await nc.post(f"{BASE}/{active_event}/forms/preview", json={
+            "template_path": "ICS USA/ICS213.txt",
+            "variables": {"Subject": "test", "MsgBody": "hello"},
+            "datetime_stamp": "2026/07/17 18:30",
+        })
+        assert resp.status_code == 422
+
 
 # XML carrying a reply_template that points at ICS213.txt (already in the fixture's forms dir)
 _REPLY_FORM_XML = (
@@ -201,6 +221,53 @@ class TestReplyForm:
     async def test_reply_form_404_plain_message(self, nc, active_event, db_setup):
         """Plain inbound message (no RMS_Express_Form XML) → 404."""
         mid = self._seed_plain_inbound(db_setup, active_event)
+        resp = await nc.get(f"{BASE}/{active_event}/messages/{mid}/reply-form")
+        assert resp.status_code == 404
+
+    async def test_reply_form_malformed_xml_returns_404(self, nc, active_event, db_setup):
+        """An inbound message whose form XML is well-sniffed but malformed
+        must return 404, not 500 (ET.ParseError must be caught)."""
+        from datetime import datetime, timezone
+        from backend.modules.checkins.models import MessageType, RawMessage, RawMessageAttachment
+
+        # Sniffs as a form (passes the regex slice) but fails ET.fromstring parse.
+        malformed_xml = "<RMS_Express_Form><bad></bad attr></RMS_Express_Form>"
+
+        with db_setup["factory"]() as db:
+            raw = RawMessage(
+                message_id="MAL1",
+                from_address="KE0XYZ@winlink.org",
+                received_at=datetime.now(timezone.utc),
+                subject="Malformed form",
+                body="see form",
+                message_type=MessageType.WINLINK_FORM,
+                parsed=True,
+            )
+            db.add(raw)
+            db.flush()
+            att = RawMessageAttachment(
+                raw_message_id=raw.id,
+                filename="RMS_Express_Form_Bad.xml",
+                content_type="application/xml",
+                data=malformed_xml.encode("utf-8"),
+            )
+            db.add(att)
+            from backend.modules.events.models import EventMessage, MessageDirection, MessageStatus
+            msg = EventMessage(
+                event_id=active_event,
+                msg_seq=88,
+                direction=MessageDirection.INBOUND,
+                raw_message_id=raw.id,
+                from_callsign="KE0XYZ",
+                to_address="W0NE@winlink.org",
+                subject="Malformed form",
+                body="see form",
+                status=MessageStatus.UNREAD,
+            )
+            db.add(msg)
+            db.commit()
+            mid = msg.id
+
         resp = await nc.get(f"{BASE}/{active_event}/messages/{mid}/reply-form")
         assert resp.status_code == 404
 

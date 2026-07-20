@@ -103,6 +103,8 @@ def compose_form_preview(db, event_id, *, template_path, variables, datetime_sta
         composed = build_form_message(template_path, variables, ctx)
     except FormBuildError as exc:
         raise ValueError(str(exc))
+    if not composed.to.strip():
+        raise ValueError("form has no destination address")
     return {
         "to": composed.to, "subject": composed.subject, "body": composed.body,
         "attachment_filename": composed.attachment.filename,
@@ -126,6 +128,8 @@ def send_event_form_message(db, event_id, *, actor, template_path, variables, da
         composed = build_form_message(template_path, variables, ctx)
     except FormBuildError as exc:
         raise ValueError(str(exc))
+    if not composed.to.strip():
+        raise ValueError("form has no destination address")
 
     seq = next_msg_seq(event)
     message = EventMessage(
@@ -174,7 +178,10 @@ def resolve_reply_form(db, event_id, message_id) -> dict:
     )
     if not xml_text:
         raise ValueError("no form to reply to")
-    root = ET.fromstring(xml_text)
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        raise ValueError("no form to reply to")
     rt = root.find(".//form_parameters/reply_template")
     reply_name = (rt.text or "").strip() if rt is not None else ""
     prefill = extract_form_variables(root)
