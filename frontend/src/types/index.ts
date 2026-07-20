@@ -468,3 +468,8 @@ export interface EventMessages {
   latest_msg_seq: number;
   messaging_configured: boolean;
 }
+
+export interface FormCatalogEntry { name: string; template_path: string; input_form_path: string; }
+export interface FormCatalogNode { name: string; folders: FormCatalogNode[]; forms: FormCatalogEntry[]; }
+export interface FormPreview { to: string; subject: string; body: string; attachment_filename: string; }
+export interface ReplyForm { reply_template_path: string; input_form_path: string | null; prefill: Record<string, string>; }

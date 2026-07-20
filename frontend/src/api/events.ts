@@ -10,9 +10,12 @@ import type {
   EventSnapshot,
   EventType,
   EventUpdates,
+  FormCatalogNode,
+  FormPreview,
   MessageStatus,
   NetEvent,
   ParticipantStatus,
+  ReplyForm,
 } from "../types";
 
 // --- Events ---
@@ -269,4 +272,41 @@ export function eventAttachmentUrl(
   netSlug: string,
 ): string {
   return `/api/nets/${netSlug}/events/${eventId}/messages/${messageId}/attachments/${attachmentId}`;
+}
+
+// --- Form composition ---
+
+export async function fetchFormCatalog(netSlug: string, q = ""): Promise<FormCatalogNode> {
+  const p = q ? `?q=${encodeURIComponent(q)}` : "";
+  return apiFetch<FormCatalogNode>(`/nets/${netSlug}/forms/catalog${p}`);
+}
+
+export function formRenderUrl(netSlug: string, path: string): string {
+  return `/api/nets/${netSlug}/forms/render?path=${encodeURIComponent(path)}`;
+}
+
+export interface FormComposeInput {
+  template_path: string;
+  variables: Record<string, string>;
+  datetime_stamp: string;
+  reply_to_id?: number | null;
+}
+
+export async function previewForm(eventId: number, input: FormComposeInput, netSlug: string): Promise<FormPreview> {
+  return apiFetch<FormPreview>(`/nets/${netSlug}/events/${eventId}/forms/preview`, {
+    method: "POST", body: JSON.stringify(input),
+  });
+}
+
+export async function sendFormMessage(
+  eventId: number, input: FormComposeInput, netSlug: string,
+): Promise<{ message: EventMessage; delivered: boolean }> {
+  return apiFetch<{ message: EventMessage; delivered: boolean }>(
+    `/nets/${netSlug}/events/${eventId}/form-messages`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function fetchReplyForm(eventId: number, messageId: number, netSlug: string): Promise<ReplyForm> {
+  return apiFetch<ReplyForm>(`/nets/${netSlug}/events/${eventId}/messages/${messageId}/reply-form`);
 }
