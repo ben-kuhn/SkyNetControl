@@ -143,8 +143,22 @@ def scan_one(db: Session, net_id: int, mailbox: str, now: datetime) -> int:
         logger.info("Scanner skipped for net_id=%d: net_address not configured", net_id)
         return 0
 
-    inbox_path = os.path.join(mailbox, "in")
-    messages = read_mailbox(inbox_path, net_address)
+    from backend.integrations.winlink.pat_config import (
+        pat_transport_enabled, resolve_pat_config, build_pat_client,
+    )
+    from backend.integrations.winlink.pat_inbound import fetch_inbound_messages
+    from backend.integrations.winlink.pat_client import PatUnavailable
+
+    if pat_transport_enabled(db, net_id):
+        client = build_pat_client(resolve_pat_config(db, net_id))
+        try:
+            messages = fetch_inbound_messages(client)
+        except PatUnavailable:
+            logger.warning("PAT unreachable during scan for net %s", net_id)
+            return 0
+    else:
+        inbox_path = os.path.join(mailbox, "in")
+        messages = read_mailbox(inbox_path, net_address)
 
     session = find_active_session(db, now, net_id=net_id)
     checkins = []
