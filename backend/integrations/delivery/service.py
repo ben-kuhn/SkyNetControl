@@ -39,6 +39,8 @@ def _build_config(db: Session, backend_name: str, net_id: int) -> dict:
         config["mailbox_path"] = get_net_config(db, net_id, "pat_mailbox_path", "")
         net_address = get_net_config(db, net_id, "net_address", "")
         config["callsign"] = net_address.split("@")[0].upper() if "@" in net_address else net_address.upper()
+        from backend.integrations.winlink.pat_config import resolve_pat_config
+        config["pat_http"] = resolve_pat_config(db, net_id)
 
     return config
 
@@ -114,7 +116,12 @@ def dispatch_delivery(
             db.commit()
             continue
 
-        if result.success:
+        if result.success and result.queued:
+            log.status = DeliveryStatus.QUEUED
+            log.pat_mid = result.pat_mid
+            log.error_message = None
+            any_success = True
+        elif result.success:
             log.status = DeliveryStatus.SENT
             log.sent_at = datetime.now(tz=timezone.utc)
             any_success = True
@@ -228,7 +235,12 @@ def retry_failed(
         except KeyError:
             continue
 
-        if result.success:
+        if result.success and result.queued:
+            log.status = DeliveryStatus.QUEUED
+            log.pat_mid = result.pat_mid
+            log.error_message = None
+            any_success = True
+        elif result.success:
             log.status = DeliveryStatus.SENT
             log.sent_at = datetime.now(tz=timezone.utc)
             log.error_message = None

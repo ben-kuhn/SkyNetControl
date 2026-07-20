@@ -6,6 +6,8 @@ from typing import Protocol, runtime_checkable
 class DeliveryResult:
     success: bool
     error: str | None
+    queued: bool = False
+    pat_mid: str | None = None
 
 
 @runtime_checkable

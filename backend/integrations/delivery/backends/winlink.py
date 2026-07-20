@@ -4,12 +4,33 @@ from pathlib import Path
 
 from backend.integrations.delivery.backends.base import DeliveryResult
 from backend.integrations.winlink.b2f import build_b2f
+from backend.integrations.winlink.pat_client import PatUnavailable
+from backend.integrations.winlink.pat_config import build_pat_client
 
 
 class WinlinkBackend:
-    """Write a .b2f file to PAT's out/ directory for delivery on next sync."""
+    """Post via PAT HTTP when transport is enabled; fall back to writing a .b2f file."""
 
     def send(self, subject: str, body: str, config: dict) -> DeliveryResult:
+        pat_http = config.get("pat_http")
+        if pat_http is not None and getattr(pat_http, "enabled", False):
+            client = config.get("pat_client") or build_pat_client(pat_http)
+            attachments = config.get("attachments") or []
+            atts = [
+                {"filename": a.filename, "content_type": a.content_type, "data": a.data}
+                if hasattr(a, "filename") else a
+                for a in attachments
+            ]
+            try:
+                mid = client.post_outbound(
+                    to=config["target_address"], subject=subject, body=body,
+                    cc=[], attachments=atts,
+                )
+            except PatUnavailable as exc:
+                return DeliveryResult(success=False, error=str(exc))
+            return DeliveryResult(success=True, error=None, queued=True, pat_mid=mid or None)
+
+        # --- existing file-based handoff below (unchanged) ---
         mailbox_path = config.get("mailbox_path", "")
         if not mailbox_path:
             return DeliveryResult(success=False, error="Winlink mailbox path not configured")
