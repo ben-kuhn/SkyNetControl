@@ -1,9 +1,11 @@
 // frontend/src/pages/events/MessagesPanel.tsx
 import { useMemo, useState } from "react";
 import { retryDelivery } from "../../api/delivery";
-import { eventAttachmentUrl, rescanEventMailbox, setEventMessageStatus } from "../../api/events";
+import { eventAttachmentUrl, fetchReplyForm, rescanEventMailbox, setEventMessageStatus } from "../../api/events";
 import { Button } from "../../components/Button";
+import { useFormCompose } from "../../hooks/useFormCompose";
 import type { EventMessage, NetEvent } from "../../types";
+import { FormCompose } from "./FormCompose";
 import { MessageComposer } from "./MessageComposer";
 
 type Filter = "all" | "unread" | "inbound" | "outbound";
@@ -35,6 +37,8 @@ export function MessagesPanel({
   const [replyTo, setReplyTo] = useState<EventMessage | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const compose = useFormCompose(netSlug, event.id);
 
   const visible = useMemo(() => {
     return messages.filter((m) => {
@@ -115,6 +119,9 @@ export function MessagesPanel({
             <Button size="sm" variant="secondary" loading={rescanning} onClick={() => void rescan()}>
               Check mail now
             </Button>
+            <Button size="sm" variant="secondary" onClick={() => { compose.setStep("catalog"); setFormOpen(true); }}>
+              New form
+            </Button>
             <Button size="sm" onClick={() => { setReplyTo(null); setComposeOpen(true); }}>
               New message
             </Button>
@@ -185,6 +192,28 @@ export function MessagesPanel({
                           Reply
                         </button>
                       )}
+                      {m.direction === "inbound" && m.form?.is_form && (
+                        <button
+                          onClick={() => void (async () => {
+                            try {
+                              const rf = await fetchReplyForm(event.id, m.id, netSlug);
+                              if (rf.input_form_path !== null) {
+                                compose.startReply(rf.reply_template_path, rf.input_form_path, rf.prefill, m.id);
+                                setFormOpen(true);
+                              } else {
+                                // No form fill step — fall back to plain-text reply composer prefilled.
+                                setReplyTo(m);
+                                setComposeOpen(true);
+                              }
+                            } catch (e) {
+                              onError(e instanceof Error ? e.message : "Could not load reply form");
+                            }
+                          })()}
+                          className="text-xs text-accent hover:underline"
+                        >
+                          Reply with form
+                        </button>
+                      )}
                       {m.direction === "outbound" && (
                         <button onClick={() => void retry(m)} className="text-xs text-text-muted hover:text-accent">
                           Retry send
@@ -213,6 +242,16 @@ export function MessagesPanel({
         replyTo={replyTo}
         onSent={onChanged}
         onError={onError}
+      />
+
+      <FormCompose
+        netSlug={netSlug}
+        event={event}
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSent={onChanged}
+        onError={onError}
+        compose={compose}
       />
     </div>
   );
