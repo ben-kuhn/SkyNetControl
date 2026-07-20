@@ -76,18 +76,26 @@ def _read_template(template_path: str) -> str:
 
 
 def _substitute(text: str, variables: dict, ctx: BuildContext) -> str:
-    # <Var Name> first (case-insensitive lookup), then bare insertion tags.
+    # Single-pass substitution over the TEMPLATE so user-supplied values that
+    # happen to look like insertion tags (<15>, <urgent>, <Callsign> inside a
+    # variable value) are never rescanned and silently mutated.
     lower_vars = {k.lower(): v for k, v in variables.items()}
 
-    def var_sub(m):
-        return str(lower_vars.get(m.group(1).lower(), ""))
+    # Combined pattern: <Var Name> alternation first so it wins over bare tags
+    # when both could match (e.g. "<Var Callsign>").
+    _COMBINED_RE = re.compile(
+        r"<Var\s+([A-Za-z0-9_]+)\s*>|<([A-Za-z0-9_]+)\s*>",
+        re.IGNORECASE,
+    )
 
-    text = _VAR_RE.sub(var_sub, text)
+    def _sub(m):
+        if m.group(1) is not None:
+            # <Var Name> match
+            return str(lower_vars.get(m.group(1).lower(), ""))
+        # bare <Tag> match
+        return _insertion_value(m.group(2), ctx, variables)
 
-    def tag_sub(m):
-        return _insertion_value(m.group(1), ctx, variables)
-
-    return _TAG_RE.sub(tag_sub, text)
+    return _COMBINED_RE.sub(_sub, text)
 
 
 def _parse(template_text: str):

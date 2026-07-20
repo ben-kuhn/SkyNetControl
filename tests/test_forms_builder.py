@@ -114,3 +114,31 @@ def test_insertion_tags_exported(lib):
     assert "datetime" in b.INSERTION_TAGS
     assert "callsign" in b.INSERTION_TAGS
     assert "gridsquare" in b.INSERTION_TAGS
+
+
+def test_single_pass_no_variable_value_rescanning(lib, tmp_path, monkeypatch):
+    """User-supplied variable values containing tag-like text must NOT be
+    rescanned and mutated.  A variable value of 'wind <15> kts' must survive
+    verbatim; a value of '<Callsign>' must not be replaced by the net callsign.
+    A real template-level <Callsign> insertion tag must still be resolved."""
+    (tmp_path / "forms" / "SP.txt").write_text(
+        "Subject: Report\n"
+        "Msg:\n"
+        "<Callsign> reports: <Var MsgBody>\n"
+    )
+    monkeypatch.setattr(b, "forms_library_dir", lambda: tmp_path / "forms")
+
+    ctx = b.BuildContext(callsign="W0NE", datetime_stamp="2026/07/17 18:30", grid="")
+
+    # Variable value contains a numeric-tag-like fragment and a known insertion tag name.
+    result = b.build_form_message(
+        "SP.txt",
+        {"MsgBody": "wind <15> kts and <Callsign> was there"},
+        ctx,
+    )
+
+    # Template-level <Callsign> must be resolved to the context callsign.
+    assert "W0NE reports:" in result.body
+    # User value must be verbatim — neither <15> nor <Callsign> inside the value
+    # should be touched.
+    assert "wind <15> kts and <Callsign> was there" in result.body
