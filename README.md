@@ -2,7 +2,7 @@
 
 A web application for managing a weekly Winlink net — schedule, activity planning, participant reminders, check-in tracking, roster generation, and long-term participation records.
 
-Built for ham radio operators running recurring digital nets, with first-class Winlink (PAT mailbox) integration, groups.io / email / Winlink delivery backends, and Claude-powered activity brainstorming.
+Built for ham radio operators running recurring digital nets, with first-class Winlink (PAT) integration — either a shared mailbox directory or PAT's HTTP API with operator-driven radio connections — groups.io / email / Winlink delivery backends, and Claude-powered activity brainstorming.
 
 ## Quick start
 

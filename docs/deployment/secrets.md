@@ -17,7 +17,7 @@ For day-to-day procedures (key rotation, recovery tokens, registration toggle, b
 
 ## At-rest encryption
 
-OAuth `client_secret` and SMTP `password` rows in `app_config` are stored as AES-256-GCM envelopes (`enc:v1:<base64(nonce || ciphertext+tag)>`). The key is HKDF-SHA256 derived from `SKYNET_SECRETS_KEY` (or its fallback) with a fixed salt and domain-separation info string.
+OAuth `client_secret` and SMTP `password` rows in `app_config` — plus per-net sensitive keys in `net_config` (the PAT HTTP `pat_http_password` / `pat_http_token` credentials) — are stored as AES-256-GCM envelopes (`enc:v1:<base64(nonce || ciphertext+tag)>`). The key is HKDF-SHA256 derived from `SKYNET_SECRETS_KEY` (or its fallback) with a fixed salt and domain-separation info string.
 
 Plaintext rows from before the encryption rolled out pass through `decrypt()` unchanged and are re-encrypted on the next admin save. To migrate existing plaintext rows in one pass:
 
@@ -35,7 +35,7 @@ These are **no longer set via env vars**. They live in the database, configured 
 - the recovery wizard at `/recovery` (after minting a recovery token),
 - the admin config page (post-setup, day-to-day changes).
 
-The typed routes mask secret values as `"***"` on GET. The bulk `GET /api/config/` endpoint applies the same masking via a substring allowlist (`api_key`, `password`, `secret`, `token`).
+The typed routes mask secret values as `"***"` on GET. The bulk `GET /api/config/` endpoint applies the same masking via a substring allowlist (`api_key`, `password`, `secret`, `token`). The per-net config routes (`GET/PUT /api/nets/{slug}/config`) apply the same encrypt-on-write / mask-on-read rules, so per-net PAT credentials are never returned in plaintext and a blank field leaves the stored secret unchanged.
 
 ## Deployment patterns
 

@@ -56,7 +56,26 @@ Connection details live in `app_config` under the `smtp.*` keys (host / port / u
 |-----|------|-------------|
 | `delivery.winlink.target_address` | email string | Winlink address to send to (e.g., the group's Winlink alias). |
 
-Also reads `pat_mailbox_path` and `net_address` (above) — the Winlink backend writes outbound `.b2f` files into the PAT mailbox.
+Also reads `net_address` (above). The backend has two transport modes:
+
+- **File handoff (default).** Reads `pat_mailbox_path` and writes outbound `.b2f` files into `{pat_mailbox_path}/out/`; PAT sends them on its own schedule. Inbound is polled from `{pat_mailbox_path}/in/` by the scanner. Requires the app to share PAT's mailbox filesystem.
+- **PAT HTTP transport.** When `pat_transport_enabled` is on (see below), the backend instead posts outbound messages to PAT's HTTP API and the scanner fetches inbound over HTTP — no shared mailbox filesystem is needed, so PAT can run on a separate host. Outbound is marked `queued` until an operator-driven connect confirms it left PAT's outbox, at which point it flips to `sent`.
+
+### PAT HTTP transport
+
+Drives PAT (the Winlink client) over its built-in HTTP API instead of the file handoff, and adds operator-triggered radio connections with a live session log (the **Connect (PAT)** control in an event's Messages panel — NCS only). All keys are per-net with a global fallback, set from the **PAT transport** section of a net's settings page. When `pat_transport_enabled` is off (default), behavior is unchanged from the file handoff above.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `pat_transport_enabled` | `"true"` / `"false"` | Default `"false"`. When true (and a base URL is set), outbound/inbound use PAT's HTTP API and the Connect control is available. |
+| `pat_http_base_url` | URL string | PAT's HTTP endpoint, e.g. `http://shack:8080`. Reach it over a trusted network (VPN/LAN) or a reverse proxy — PAT's own API is unauthenticated. |
+| `pat_http_auth_mode` | `none` / `basic` / `token` | Default `none`. Use `basic` or `token` when PAT is fronted by an authenticating reverse proxy. |
+| `pat_http_username` | string | Username for `basic` auth. |
+| `pat_http_password` | string (encrypted) | Password for `basic` auth. Encrypted at rest; write-only in the UI (blank leaves it unchanged). |
+| `pat_http_token` | string (encrypted) | Bearer token for `token` auth. Encrypted at rest; write-only. |
+| `pat_http_timeout_seconds` | integer | Default `15`. Per-request timeout for ordinary PAT calls (a radio connect uses a longer session timeout). |
+
+Connect method: the operator picks a saved PAT **connect alias** (read from PAT's config over the API) or builds one from mode + gateway + optional frequency. Use the **Test connection** button on the net settings page to confirm the endpoint is reachable.
 
 ## Callbook lookup
 
