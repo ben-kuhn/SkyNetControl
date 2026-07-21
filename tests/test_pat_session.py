@@ -40,6 +40,10 @@ class FakeClient:
     def list_mailbox(self, box):
         return self._out_box if box == "out" else []
 
+    async def stream_status(self):
+        return
+        yield  # make it an async generator
+
 
 @pytest.fixture(autouse=True)
 def _reset_engine():
@@ -120,3 +124,23 @@ async def test_single_flight_blocks_second_start(monkeypatch):
                                        connect_url="telnet:///", method_label="x", client=FakeClient())
     release.set()
     await pat_session.engine.shutdown()
+
+
+async def test_live_events_recorded(monkeypatch):
+    factory = _factory()
+    monkeypatch.setattr(pat_session, "scan_all_enabled", lambda db, now: 0)
+
+    async def fake_stream():
+        yield {"notification": {"body": "Connecting to KE0GW"}}
+        yield {"status": {"connected": True}}
+        yield {"notification": {"body": "Receiving message 1"}}
+
+    sid = await _seed_session(factory)
+    await pat_session.engine.run_session(
+        factory, sid, FakeClient(), timeout=5, status_stream=fake_stream,
+    )
+    with factory() as db:
+        s = db.get(PatConnectionSession, sid)
+        texts = [e["text"] for e in s.events]
+        assert any("Connecting to KE0GW" in t for t in texts)
+        assert any("Receiving message 1" in t for t in texts)

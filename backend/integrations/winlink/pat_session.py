@@ -1,12 +1,14 @@
 # backend/integrations/winlink/pat_session.py
 """Background PAT connect/session engine. One session at a time (single radio);
 runs the connect in a thread, reconciles QUEUED->SENT from PAT's outbox, imports
-inbound, and records status. Live /ws progress is layered on in a later task."""
+inbound, and records status. Live /ws progress is consumed concurrently."""
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime, timezone
+
+from sqlalchemy.orm.attributes import flag_modified
 
 from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
 from backend.integrations.scanner.service import scan_all_enabled
@@ -18,6 +20,50 @@ logger = logging.getLogger(__name__)
 
 class SessionBusy(Exception):
     """A connect session is already running (single radio, single-flight)."""
+
+
+def _append_event(db, session_id, kind, text):
+    s = db.get(PatConnectionSession, session_id)
+    events = list(s.events or [])
+    events.append({"ts": datetime.now(tz=timezone.utc).isoformat(), "kind": kind, "text": text})
+    s.events = events
+    flag_modified(s, "events")
+    db.commit()
+
+
+def _frame_text(frame: dict) -> tuple[str, str] | None:
+    """Reduce a PAT /ws frame to (kind, text), or None to ignore."""
+    if "notification" in frame and isinstance(frame["notification"], dict):
+        body = frame["notification"].get("body") or frame["notification"].get("message")
+        if body:
+            return "notification", str(body)
+    if "status" in frame and isinstance(frame["status"], dict):
+        if frame["status"].get("connected"):
+            return "status", "Link established"
+    if "log_line" in frame:
+        return "log", str(frame["log_line"])
+    return None
+
+
+async def _consume_status(session_factory, session_id, status_stream, stop: asyncio.Event):
+    try:
+        agen = status_stream()
+        async for frame in agen:
+            if stop.is_set():
+                break
+            reduced = _frame_text(frame)
+            if reduced is None:
+                continue
+            kind, text = reduced
+            with session_factory() as db:
+                _append_event(db, session_id, kind, text)
+                if kind == "status" and text == "Link established":
+                    s = db.get(PatConnectionSession, session_id)
+                    if s.status == PatSessionStatus.CONNECTED:
+                        s.status = PatSessionStatus.SYNCING
+                        db.commit()
+    except (asyncio.CancelledError, Exception):
+        return
 
 
 def _set_status(db, session_id, status, **fields):
@@ -75,7 +121,12 @@ class PatSessionEngine:
         )
         return session_id
 
-    async def run_session(self, session_factory, session_id, client: PatClient, timeout: int) -> None:
+    async def run_session(
+        self, session_factory, session_id, client: PatClient, timeout: int, status_stream=None
+    ) -> None:
+        stop = asyncio.Event()
+        stream = status_stream or client.stream_status
+        consumer = asyncio.create_task(_consume_status(session_factory, session_id, stream, stop))
         try:
             with session_factory() as db:
                 _set_status(db, session_id, PatSessionStatus.CONNECTED)
@@ -114,6 +165,12 @@ class PatSessionEngine:
                             sent_count=sent, received_count=received,
                             ended_at=datetime.now(tz=timezone.utc))
         finally:
+            stop.set()
+            consumer.cancel()
+            try:
+                await consumer
+            except asyncio.CancelledError:
+                pass
             self.active_session_id = None
 
     async def abort(self, session_factory, session_id, client: PatClient) -> None:
