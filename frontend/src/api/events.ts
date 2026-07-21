@@ -15,6 +15,9 @@ import type {
   MessageStatus,
   NetEvent,
   ParticipantStatus,
+  PatConnectInput,
+  PatConnectOptions,
+  PatSession,
   ReplyForm,
 } from "../types";
 
@@ -313,4 +316,31 @@ export async function sendFormMessage(
 
 export async function fetchReplyForm(eventId: number, messageId: number, netSlug: string): Promise<ReplyForm> {
   return apiFetch<ReplyForm>(`/nets/${netSlug}/events/${eventId}/messages/${messageId}/reply-form`);
+}
+
+// --- PAT transport ---
+
+export async function fetchPatConnectOptions(netSlug: string): Promise<PatConnectOptions> {
+  return apiFetch<PatConnectOptions>(`/nets/${netSlug}/pat/connect-options`);
+}
+
+export async function patConnect(
+  netSlug: string, eventId: number | null, input: PatConnectInput,
+): Promise<{ session_id: number }> {
+  const path = eventId == null
+    ? `/nets/${netSlug}/pat/connect`
+    : `/nets/${netSlug}/events/${eventId}/pat/connect`;
+  return apiFetch<{ session_id: number }>(path, { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function fetchPatSession(netSlug: string, sessionId: number): Promise<PatSession> {
+  return apiFetch<PatSession>(`/nets/${netSlug}/pat/sessions/${sessionId}`);
+}
+
+export async function abortPatSession(netSlug: string, sessionId: number): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/nets/${netSlug}/pat/sessions/${sessionId}/abort`, { method: "POST" });
+}
+
+export async function testPatConnection(netSlug: string): Promise<{ ok: boolean; error?: string }> {
+  return apiFetch<{ ok: boolean; error?: string }>(`/nets/${netSlug}/pat/test`, { method: "POST" });
 }

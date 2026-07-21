@@ -473,3 +473,26 @@ export interface FormCatalogEntry { name: string; template_path: string; input_f
 export interface FormCatalogNode { name: string; folders: FormCatalogNode[]; forms: FormCatalogEntry[]; }
 export interface FormPreview { to: string; subject: string; body: string; attachment_filename: string; }
 export interface ReplyForm { reply_template_path: string; input_form_path: string | null; prefill: Record<string, string>; }
+
+export interface PatSessionEvent { ts: string; kind: string; text: string; }
+export interface PatSession {
+  id: number;
+  status: "connecting" | "connected" | "syncing" | "completed" | "failed" | "aborted";
+  method_label: string;
+  sent_count: number;
+  received_count: number;
+  error: string | null;
+  events: PatSessionEvent[];
+  started_at: string | null;
+  ended_at: string | null;
+}
+export interface PatConnectOptions {
+  aliases: { name: string; url: string }[];
+  gateways: { callsign: string; modes: string; freq: string }[];
+}
+export interface PatConnectInput {
+  alias?: string;
+  mode?: string;
+  gateway?: string;
+  freq?: string;
+}
