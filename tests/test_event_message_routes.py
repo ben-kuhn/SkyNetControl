@@ -267,3 +267,55 @@ class TestMessagingConfigured:
         assert resp.status_code == 200
         # net_address is set (W0NE@winlink.org) but pat_mailbox_path is not
         assert resp.json()["messaging_configured"] is False
+
+    async def test_messaging_configured_true_when_pat_transport_enabled(
+        self, nc_client, active_event, db_setup, monkeypatch
+    ):
+        """Fix C: messaging_configured=True for a remote-PAT net with no mailbox path."""
+        import backend.modules.events.routes as events_routes
+        from backend.modules.nets.config_service import set_net_config
+
+        # Set up PAT transport keys (no mailbox path).
+        with db_setup["factory"]() as db:
+            set_net_config(db, db_setup["net_id"], "pat_transport_enabled", "true")
+            set_net_config(db, db_setup["net_id"], "pat_http_base_url", "http://pat.local:8080")
+            db.commit()
+
+        resp = await nc_client.get(f"{BASE}/{active_event}/messages")
+        assert resp.status_code == 200
+        assert resp.json()["messaging_configured"] is True, (
+            "Remote-PAT net with no mailbox must still report messaging_configured=True"
+        )
+
+
+class TestRescanPatTransport:
+    async def test_rescan_uses_pat_http_when_transport_enabled(
+        self, nc_client, active_event, db_setup, monkeypatch
+    ):
+        """Fix C: rescan_route imports via PAT HTTP when pat_transport_enabled=true."""
+        from datetime import datetime, timezone
+        import backend.integrations.winlink.pat_inbound as pat_inbound_mod
+        import backend.integrations.winlink.pat_config as pat_config_mod
+        from backend.modules.nets.config_service import set_net_config
+
+        with db_setup["factory"]() as db:
+            set_net_config(db, db_setup["net_id"], "pat_transport_enabled", "true")
+            set_net_config(db, db_setup["net_id"], "pat_http_base_url", "http://pat.local:8080")
+            db.commit()
+
+        def fake_fetch_inbound(client):
+            return [{
+                "message_id": "PAT-RS1", "from_address": "KE0XYZ@winlink.org",
+                "to_address": "W0NE@winlink.org",
+                "subject": "SITREP", "body": "all clear",
+                "received_at": datetime.now(timezone.utc),
+            }]
+
+        monkeypatch.setattr(pat_inbound_mod, "fetch_inbound_messages", fake_fetch_inbound)
+
+        # Patch build_pat_client so no real HTTP call is made.
+        monkeypatch.setattr(pat_config_mod, "build_pat_client", lambda cfg: object())
+
+        resp = await nc_client.post(f"{BASE}/{active_event}/rescan")
+        assert resp.status_code == 200
+        assert resp.json()["new_messages"] == 1

@@ -667,9 +667,11 @@ async def list_messages_route(
     messages = query.order_by(EventMessage.msg_seq).all()
     from backend.modules.nets.config_service import get_net_config as _get_net_config
 
+    from backend.integrations.winlink.pat_config import pat_transport_enabled as _pat_enabled
+
     pat_mailbox = _get_net_config(db, event.net_id, "pat_mailbox_path", "") or ""
     net_addr = _get_net_config(db, event.net_id, "net_address", "") or ""
-    messaging_configured = bool(pat_mailbox and net_addr)
+    messaging_configured = bool(pat_mailbox and net_addr) or _pat_enabled(db, event.net_id)
     return {
         "messages": [_message_to_response(m, _message_extras(db, m)) for m in messages],
         "latest_msg_seq": event.msg_seq,
@@ -729,18 +731,39 @@ async def rescan_route(
     import os
 
     from backend.integrations.scanner.service import _persist_raw_messages
+    from backend.integrations.winlink.pat_config import (
+        pat_transport_enabled as _pat_enabled,
+        resolve_pat_config,
+        build_pat_client,
+    )
+    from backend.integrations.winlink.pat_client import PatUnavailable
+    from backend.integrations.winlink.pat_inbound import fetch_inbound_messages
     from backend.modules.nets.config_service import get_net_config
 
     event = _get_event_or_404(db, ctx.net.id, event_id)
     if event.status != EventStatus.ACTIVE:
         raise HTTPException(status_code=409, detail="Event is not active")
 
-    mailbox = get_net_config(db, ctx.net.id, "pat_mailbox_path", "") or ""
     net_address = get_net_config(db, ctx.net.id, "net_address", "") or ""
-    if not mailbox or not net_address:
+    if not net_address:
         return {"new_messages": 0}
 
-    messages = read_mailbox(os.path.join(mailbox, "in"), net_address)
+    if _pat_enabled(db, ctx.net.id):
+        # Remote-PAT path: fetch inbound via HTTP API and filter to this net.
+        from backend.modules.checkins.mailbox_reader import _to_matches_net
+
+        client = build_pat_client(resolve_pat_config(db, ctx.net.id))
+        try:
+            raw = fetch_inbound_messages(client)
+        except PatUnavailable:
+            return {"new_messages": 0}
+        messages = [m for m in raw if _to_matches_net(net_address, m["to_address"])]
+    else:
+        mailbox = get_net_config(db, ctx.net.id, "pat_mailbox_path", "") or ""
+        if not mailbox:
+            return {"new_messages": 0}
+        messages = read_mailbox(os.path.join(mailbox, "in"), net_address)
+
     _persist_raw_messages(db, messages)
     before = event.msg_seq
     route_event_messages(db, ctx.net.id, messages)
