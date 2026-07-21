@@ -168,7 +168,16 @@ class PatSessionEngine:
 
             # connect() returned — session is over; stop consumer before writing SYNCING/COMPLETED.
             await _stop_consumer(stop, consumer)
+
+            # Guard: if abort() already wrote a terminal status (ABORTED/FAILED/COMPLETED),
+            # do not overwrite it.  Reconcile still runs (desirable), but status writes stop.
+            _TERMINAL = {PatSessionStatus.ABORTED, PatSessionStatus.FAILED, PatSessionStatus.COMPLETED}
             with session_factory() as db:
+                _current = db.get(PatConnectionSession, session_id)
+                if _current and _current.status in _TERMINAL:
+                    # Session was aborted mid-flight; reconcile best-effort then leave status alone.
+                    _reconcile_outbound(db, client, session_id)
+                    return
                 _set_status(db, session_id, PatSessionStatus.SYNCING)
                 sent = _reconcile_outbound(db, client, session_id)
             received = 0
@@ -178,6 +187,10 @@ class PatSessionEngine:
             except Exception:
                 logger.exception("inbound import during session %s failed", session_id)
             with session_factory() as db:
+                # Final guard: abort may have fired between SYNCING write and now.
+                _s = db.get(PatConnectionSession, session_id)
+                if _s and _s.status in _TERMINAL and _s.status != PatSessionStatus.SYNCING:
+                    return
                 _set_status(db, session_id, PatSessionStatus.COMPLETED,
                             sent_count=sent, received_count=received,
                             ended_at=datetime.now(tz=timezone.utc))

@@ -146,6 +146,44 @@ async def test_live_events_recorded(monkeypatch):
         assert any("Receiving message 1" in t for t in texts)
 
 
+async def test_abort_status_not_clobbered_by_run_session(monkeypatch):
+    """Fix D: abort() sets ABORTED; run_session must not overwrite it with COMPLETED.
+
+    Simulate the race: FakeClient.connect() sets the row to ABORTED mid-call
+    (mimicking engine.abort() firing while connect() is in flight). After
+    run_session returns the final status must remain ABORTED.
+    """
+    factory = _factory()
+    monkeypatch.setattr(pat_session, "scan_all_enabled", lambda db, now: 1)
+
+    class AbortingClient(FakeClient):
+        def __init__(self, fact):
+            super().__init__()
+            self._fact = fact
+            self.sid = None  # set before run_session
+
+        def connect(self, url):
+            # Simulate abort() firing while connect is running.
+            with self._fact() as db:
+                s = db.get(PatConnectionSession, self.sid)
+                if s:
+                    s.status = PatSessionStatus.ABORTED
+                    from datetime import datetime, timezone
+                    s.ended_at = datetime.now(tz=timezone.utc)
+                    db.commit()
+            return True  # connect "succeeds" after abort
+
+    client = AbortingClient(factory)
+    sid = await _seed_session(factory)
+    client.sid = sid
+    await pat_session.engine.run_session(factory, sid, client, timeout=5)
+    with factory() as db:
+        s = db.get(PatConnectionSession, sid)
+        assert s.status == PatSessionStatus.ABORTED, (
+            f"Expected ABORTED but got {s.status!r} — run_session clobbered abort"
+        )
+
+
 async def test_link_up_frame_does_not_clobber_completed(monkeypatch):
     """A 'Link established' /ws frame must not clobber COMPLETED with SYNCING.
 
