@@ -45,6 +45,18 @@ def _frame_text(frame: dict) -> tuple[str, str] | None:
     return None
 
 
+async def _stop_consumer(stop: asyncio.Event, consumer: asyncio.Task | None) -> None:
+    """Idempotent: cancel the /ws consumer and wait for it to finish."""
+    if consumer is None:
+        return
+    stop.set()
+    consumer.cancel()
+    try:
+        await consumer
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
 async def _consume_status(session_factory, session_id, status_stream, stop: asyncio.Event):
     try:
         agen = status_stream()
@@ -59,6 +71,7 @@ async def _consume_status(session_factory, session_id, status_stream, stop: asyn
                 _append_event(db, session_id, kind, text)
                 if kind == "status" and text == "Link established":
                     s = db.get(PatConnectionSession, session_id)
+                    # Guard: only advance CONNECTED→SYNCING; never overwrite terminal states.
                     if s.status == PatSessionStatus.CONNECTED:
                         s.status = PatSessionStatus.SYNCING
                         db.commit()
@@ -136,6 +149,7 @@ class PatSessionEngine:
                     timeout=timeout,
                 )
             except (PatConnectError, PatUnavailable) as exc:
+                await _stop_consumer(stop, consumer)
                 with session_factory() as db:
                     _set_status(db, session_id, PatSessionStatus.FAILED,
                                 error=str(exc), ended_at=datetime.now(tz=timezone.utc))
@@ -145,12 +159,15 @@ class PatSessionEngine:
                     await asyncio.to_thread(client.disconnect)
                 except Exception:
                     pass
+                await _stop_consumer(stop, consumer)
                 with session_factory() as db:
                     _set_status(db, session_id, PatSessionStatus.FAILED,
                                 error="session timed out",
                                 ended_at=datetime.now(tz=timezone.utc))
                 return
 
+            # connect() returned — session is over; stop consumer before writing SYNCING/COMPLETED.
+            await _stop_consumer(stop, consumer)
             with session_factory() as db:
                 _set_status(db, session_id, PatSessionStatus.SYNCING)
                 sent = _reconcile_outbound(db, client, session_id)
@@ -165,12 +182,8 @@ class PatSessionEngine:
                             sent_count=sent, received_count=received,
                             ended_at=datetime.now(tz=timezone.utc))
         finally:
-            stop.set()
-            consumer.cancel()
-            try:
-                await consumer
-            except asyncio.CancelledError:
-                pass
+            # Idempotent safety net for unexpected-exception paths.
+            await _stop_consumer(stop, consumer)
             self.active_session_id = None
 
     async def abort(self, session_factory, session_id, client: PatClient) -> None:

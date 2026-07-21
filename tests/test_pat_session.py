@@ -144,3 +144,35 @@ async def test_live_events_recorded(monkeypatch):
         texts = [e["text"] for e in s.events]
         assert any("Connecting to KE0GW" in t for t in texts)
         assert any("Receiving message 1" in t for t in texts)
+
+
+async def test_link_up_frame_does_not_clobber_completed(monkeypatch):
+    """A 'Link established' /ws frame must not clobber COMPLETED with SYNCING.
+
+    The structural fix (stop consumer before terminal write) closes the race.
+    This test asserts the invariant: session ends COMPLETED even when a link-up
+    frame is present in the stream. The consumer is stopped before run_session
+    writes SYNCING/COMPLETED, so by the time the main flow commits COMPLETED
+    the consumer is already done.
+    """
+    factory = _factory()
+    monkeypatch.setattr(pat_session, "scan_all_enabled", lambda db, now: 1)
+
+    async def fake_stream():
+        yield {"notification": {"body": "Connecting to RMS"}}
+        yield {"status": {"connected": True}}   # "Link established" frame
+        yield {"notification": {"body": "Sending message"}}
+
+    sid = await _seed_session(factory)
+    await pat_session.engine.run_session(
+        factory, sid, FakeClient(), timeout=5, status_stream=fake_stream,
+    )
+    with factory() as db:
+        s = db.get(PatConnectionSession, sid)
+        # Terminal state must be COMPLETED, never SYNCING.
+        assert s.status == PatSessionStatus.COMPLETED, (
+            f"Expected COMPLETED but got {s.status!r} — consumer clobbered terminal state"
+        )
+        # The link-up event was still recorded (live progress preserved).
+        texts = [e["text"] for e in s.events]
+        assert any("Link established" in t for t in texts), "Link established event not recorded"
