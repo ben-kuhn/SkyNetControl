@@ -229,7 +229,13 @@ def put_config(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    set_net_config(db, ctx.net.id, key, body["value"])
+    value = body["value"]
+    if is_sensitive_key(key):
+        if not value:
+            # Blank sensitive value → leave existing value unchanged (mirrors bulk PUT).
+            return {"ok": True}
+        value = encrypt(value)
+    set_net_config(db, ctx.net.id, key, value)
     return {"ok": True}
 
 

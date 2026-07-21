@@ -487,3 +487,71 @@ async def test_put_config_as_viewer_returns_403(client, test_settings, db_setup)
         cookies={"access_token": token},
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Fix E: single-key PUT must encrypt sensitive keys
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_put_config_sensitive_key_is_encrypted_at_rest(client, test_settings, db_setup):
+    """PUT /{net_slug}/config/{key} must store sensitive values encrypted, not plaintext.
+
+    conftest.py calls install_key_material("test-secret") at import time, so the
+    secret_box is already keyed; no need to call it again here.
+    """
+    from backend.auth.secret_box import _PREFIX, decrypt
+    from backend.modules.nets.config_service import get_net_config
+
+    with db_setup() as db:
+        net = create_net(db, slug="enc-net", name="EncNet", creator_callsign="W0ADM")
+        net_id = net.id
+
+    token = _admin_token(test_settings)
+    resp = await client.put(
+        "/api/nets/enc-net/config/pat_http_token",
+        json={"value": "super-secret-token"},
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # Read the raw stored value directly (get_net_config reads NetConfig.value as-is,
+    # no decryption) — it must start with the encryption prefix.
+    with db_setup() as db:
+        raw = get_net_config(db, net_id, "pat_http_token")
+
+    assert raw is not None, "Value must have been stored"
+    assert raw.startswith(_PREFIX), (
+        f"Expected encrypted value (prefix {_PREFIX!r}) but got: {raw!r}"
+    )
+    # Decrypt round-trips to plaintext.
+    assert decrypt(raw) == "super-secret-token"
+
+
+@pytest.mark.asyncio
+async def test_put_config_blank_sensitive_key_is_noop(client, test_settings, db_setup):
+    """PUT with blank value for a sensitive key must not overwrite the existing value."""
+    from backend.auth.secret_box import _PREFIX, encrypt, decrypt
+    from backend.modules.nets.config_service import get_net_config, set_net_config
+
+    with db_setup() as db:
+        net = create_net(db, slug="blank-enc", name="BlankEnc", creator_callsign="W0ADM")
+        net_id = net.id
+        # Seed an existing encrypted value directly into the table.
+        set_net_config(db, net_id, "pat_http_token", encrypt("existing-token"))
+
+    token = _admin_token(test_settings)
+    resp = await client.put(
+        "/api/nets/blank-enc/config/pat_http_token",
+        json={"value": ""},
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+
+    with db_setup() as db:
+        raw = get_net_config(db, net_id, "pat_http_token")
+
+    assert raw is not None and raw.startswith(_PREFIX), "Existing encrypted value must be preserved"
+    assert decrypt(raw) == "existing-token"
