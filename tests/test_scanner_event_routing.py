@@ -160,3 +160,73 @@ def test_scan_one_does_not_persist_without_active_event(db, monkeypatch):
 
     # No RawMessage rows should have been persisted
     assert db.query(RawMessage).count() == 0, "Must not persist without active event"
+
+
+# ---------------------------------------------------------------------------
+# Fix A: scan_all_enabled must not skip remote-PAT nets (no mailbox)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_all_enabled_does_not_skip_pat_transport_net(monkeypatch):
+    """A net with pat_transport_enabled=true and no pat_mailbox_path must NOT
+    be skipped by scan_all_enabled.  The old gate `if not mailbox: continue`
+    silently dropped all remote-PAT nets.
+    """
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with factory() as db:
+        net = make_test_net(db, slug="pat-only")
+        # Enable scanner but no file mailbox — remote-PAT only.
+        set_net_config_bulk(db, net.id, {
+            "scanner.enabled": "true",
+            "net_address": "W0NE@winlink.org",
+            "pat_transport_enabled": "true",
+            "pat_http_base_url": "http://pat.local:8080",
+        })
+        db.commit()
+
+    scanned_net_ids = []
+
+    def fake_scan_one(db, net_id, mailbox, now):
+        scanned_net_ids.append(net_id)
+        return 0
+
+    monkeypatch.setattr(scanner_service, "scan_one", fake_scan_one)
+
+    with factory() as db:
+        result = scanner_service.scan_all_enabled(db, datetime.now(timezone.utc))
+
+    assert scanned_net_ids, "scan_all_enabled must call scan_one for a remote-PAT net"
+    engine.dispose()
+
+
+def test_scan_all_enabled_still_skips_net_with_no_mailbox_no_transport(monkeypatch):
+    """A net with scanner.enabled=true but no mailbox and no transport is still skipped."""
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with factory() as db:
+        net = make_test_net(db, slug="no-transport")
+        set_net_config_bulk(db, net.id, {
+            "scanner.enabled": "true",
+            "net_address": "W0NE@winlink.org",
+            # no pat_mailbox_path, no pat_transport_enabled
+        })
+        db.commit()
+
+    scanned_net_ids = []
+
+    def fake_scan_one(db, net_id, mailbox, now):
+        scanned_net_ids.append(net_id)
+        return 0
+
+    monkeypatch.setattr(scanner_service, "scan_one", fake_scan_one)
+
+    with factory() as db:
+        result = scanner_service.scan_all_enabled(db, datetime.now(timezone.utc))
+
+    assert scanned_net_ids == [], "Must skip net with neither mailbox nor transport"
+    engine.dispose()

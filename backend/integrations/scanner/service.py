@@ -208,13 +208,17 @@ def scan_all_enabled(db: Session, now: datetime) -> int | None:
     from backend.modules.nets.models import Net
     from backend.modules.nets.config_service import get_net_config
 
+    from backend.integrations.winlink.pat_config import pat_transport_enabled
+
     nets = db.query(Net).all()
     total: int | None = None
     for net in nets:
         if get_net_config(db, net.id, "scanner.enabled", "false") != "true":
             continue
-        mailbox = get_net_config(db, net.id, "pat_mailbox_path")
-        if not mailbox:
+        mailbox = get_net_config(db, net.id, "pat_mailbox_path") or ""
+        # Skip only when there is no file mailbox AND PAT HTTP transport is not
+        # enabled. Remote-PAT nets have no mailbox path but must still be scanned.
+        if not mailbox and not pat_transport_enabled(db, net.id):
             continue
         if total is None:
             total = 0
