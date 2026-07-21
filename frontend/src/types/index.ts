@@ -461,6 +461,7 @@ export interface EventMessage {
   created_at: string;
   attachments: EventMessageAttachment[];
   form: EventReceivedForm | null;
+  delivery_status?: string;
 }
 
 export interface EventMessages {

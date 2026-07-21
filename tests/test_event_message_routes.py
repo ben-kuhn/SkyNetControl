@@ -194,6 +194,62 @@ class TestPatchStatusClosedEvent:
         assert resp.status_code == 409
 
 
+class TestDeliveryStatus:
+    async def test_outbound_queued_delivery_status(self, nc_client, active_event, db_setup):
+        """Outbound message with a QUEUED winlink DeliveryLog exposes delivery_status='queued'."""
+        from datetime import datetime, timezone
+
+        from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
+
+        # Send an outbound message to get its id.
+        resp = await nc_client.post(f"{BASE}/{active_event}/messages", json={
+            "to_address": "dest@example.com", "subject": "Test", "body": "hello",
+        })
+        assert resp.status_code == 201
+        message_id = resp.json()["message"]["id"]
+
+        # Update the existing DeliveryLog row to QUEUED status.
+        with db_setup["factory"]() as db:
+            log = (
+                db.query(DeliveryLog)
+                .filter(
+                    DeliveryLog.content_type == "event_message",
+                    DeliveryLog.content_id == message_id,
+                    DeliveryLog.backend == "winlink",
+                )
+                .one_or_none()
+            )
+            if log is not None:
+                log.status = DeliveryStatus.QUEUED
+            else:
+                db.add(DeliveryLog(
+                    content_type="event_message",
+                    content_id=message_id,
+                    backend="winlink",
+                    status=DeliveryStatus.QUEUED,
+                    created_at=datetime.now(timezone.utc),
+                ))
+            db.commit()
+
+        # List messages and check delivery_status.
+        resp = await nc_client.get(f"{BASE}/{active_event}/messages")
+        assert resp.status_code == 200
+        msgs = resp.json()["messages"]
+        outbound = [m for m in msgs if m["direction"] == "outbound" and m["id"] == message_id]
+        assert len(outbound) == 1
+        assert outbound[0]["delivery_status"] == "queued"
+
+    async def test_inbound_has_no_delivery_status(self, nc_client, active_event, db_setup):
+        """Inbound messages always have delivery_status=None."""
+        _seed_inbound(db_setup, active_event)
+        resp = await nc_client.get(f"{BASE}/{active_event}/messages")
+        assert resp.status_code == 200
+        msgs = resp.json()["messages"]
+        inbound = [m for m in msgs if m["direction"] == "inbound"]
+        assert len(inbound) == 1
+        assert inbound[0]["delivery_status"] is None
+
+
 class TestMessagingConfigured:
     async def test_messaging_configured_true_when_both_set(self, nc_client, active_event, db_setup):
         """messaging_configured=True when pat_mailbox_path and net_address both set."""

@@ -7,6 +7,7 @@ import { useFormCompose } from "../../hooks/useFormCompose";
 import type { EventMessage, NetEvent } from "../../types";
 import { FormCompose } from "./FormCompose";
 import { MessageComposer } from "./MessageComposer";
+import { PatConnectModal } from "./PatConnectModal";
 
 type Filter = "all" | "unread" | "inbound" | "outbound";
 
@@ -38,6 +39,7 @@ export function MessagesPanel({
   const [composeOpen, setComposeOpen] = useState(false);
   const [rescanning, setRescanning] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [patOpen, setPatOpen] = useState(false);
   const compose = useFormCompose(netSlug, event.id);
 
   const visible = useMemo(() => {
@@ -119,6 +121,9 @@ export function MessagesPanel({
             <Button size="sm" variant="secondary" loading={rescanning} onClick={() => void rescan()}>
               Check mail now
             </Button>
+            <Button size="sm" variant="secondary" onClick={() => setPatOpen(true)}>
+              Connect (PAT)
+            </Button>
             <Button size="sm" variant="secondary" onClick={() => { compose.reset(); setFormOpen(true); }}>
               New form
             </Button>
@@ -155,6 +160,11 @@ export function MessagesPanel({
                   {m.direction === "inbound" ? m.from_callsign : `→ ${m.to_address}`}
                 </span>
                 <span className="text-text-secondary truncate flex-1">{m.subject || "(no subject)"}</span>
+                {m.direction === "outbound" && m.delivery_status && (
+                  <span className="text-xs" title={m.delivery_status}>
+                    {m.delivery_status === "queued" ? "📤" : m.delivery_status === "sent" ? "✓" : m.delivery_status === "failed" ? "⚠️" : "…"}
+                  </span>
+                )}
                 {m.attachments.length > 0 && <span title="Has attachments">📎</span>}
                 <span className="text-xs text-text-muted shrink-0">
                   {new Date(m.received_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -252,6 +262,14 @@ export function MessagesPanel({
         onSent={onChanged}
         onError={onError}
         compose={compose}
+      />
+
+      <PatConnectModal
+        netSlug={netSlug}
+        eventId={event.id}
+        open={patOpen}
+        onClose={() => setPatOpen(false)}
+        onSettled={onChanged}
       />
     </div>
   );

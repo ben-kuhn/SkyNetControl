@@ -166,16 +166,36 @@ def _message_extras(db: Session, m: EventMessage) -> dict:
     Avoids loading BLOB data for the summary — only fetches sizes via
     func.length() so polling never materialises multi-MB payloads. For the
     form block, only the data of RMS_Express_Form_*.xml attachments is read.
+
+    For outbound messages, also includes delivery_status from the winlink
+    DeliveryLog (None if no row exists).
     """
     import xml.etree.ElementTree as ET
 
     from sqlalchemy import func
 
+    from backend.integrations.delivery.models import DeliveryLog
     from backend.modules.checkins.message_parser import find_form_xml
     from backend.modules.checkins.models import RawMessage, RawMessageAttachment
+    from backend.modules.events.models import MessageDirection
+
+    # Delivery status for outbound messages only.
+    delivery_status = None
+    if m.direction == MessageDirection.OUTBOUND:
+        log = (
+            db.query(DeliveryLog)
+            .filter(
+                DeliveryLog.content_type == "event_message",
+                DeliveryLog.content_id == m.id,
+                DeliveryLog.backend == "winlink",
+            )
+            .one_or_none()
+        )
+        if log is not None:
+            delivery_status = log.status.value
 
     if m.raw_message_id is None:
-        return {"attachments": [], "form": None}
+        return {"attachments": [], "form": None, "delivery_status": delivery_status}
 
     # Summary: id, filename, content_type, size — no BLOB bytes fetched.
     rows = (
@@ -218,7 +238,7 @@ def _message_extras(db: Session, m: EventMessage) -> dict:
             }
         except ET.ParseError:
             form = None
-    return {"attachments": summary, "form": form}
+    return {"attachments": summary, "form": form, "delivery_status": delivery_status}
 
 
 def _message_to_response(m: EventMessage, extras: dict | None = None) -> dict:
@@ -240,6 +260,7 @@ def _message_to_response(m: EventMessage, extras: dict | None = None) -> dict:
     }
     resp["attachments"] = (extras or {}).get("attachments", [])
     resp["form"] = (extras or {}).get("form")
+    resp["delivery_status"] = (extras or {}).get("delivery_status")
     return resp
 
 
