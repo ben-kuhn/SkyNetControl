@@ -16,6 +16,8 @@ from backend.auth.dependencies import (
     require_net_role,
 )
 from backend.auth.models import User
+from backend.auth.secret_box import encrypt
+from backend.config_mgmt.service import is_sensitive_key
 from backend.modules.nets import service
 from backend.modules.nets.config_service import set_net_config, set_net_config_bulk
 from backend.modules.nets.models import Net, NetRole
@@ -196,7 +198,9 @@ def get_config(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    return service.list_net_config(db, net=ctx.net)
+    raw = service.list_net_config(db, net=ctx.net)
+    # Mask sensitive values as "***" — never return secrets (even encrypted) to the frontend.
+    return {k: ("***" if is_sensitive_key(k) and v else v) for k, v in raw.items()}
 
 
 @router.put("/{net_slug}/config/bulk")
@@ -205,7 +209,16 @@ def put_config_bulk(
     ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
     db: Session = Depends(get_db_session),
 ):
-    set_net_config_bulk(db, ctx.net.id, body.values)
+    # Encrypt sensitive values; skip empty sensitive values (blank = unchanged).
+    prepared: dict[str, str] = {}
+    for key, value in body.values.items():
+        if is_sensitive_key(key):
+            if value:
+                prepared[key] = encrypt(value)
+            # else: empty string for a sensitive key → leave existing value unchanged
+        else:
+            prepared[key] = value
+    set_net_config_bulk(db, ctx.net.id, prepared)
     return {"ok": True, "count": len(body.values)}
 
 

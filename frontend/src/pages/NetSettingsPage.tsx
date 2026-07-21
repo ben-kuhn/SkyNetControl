@@ -9,6 +9,7 @@ import { useToast } from "../context/ToastContext";
 import { useAuth } from "../hooks/useAuth";
 import { useCurrentNet } from "../hooks/useCurrentNet";
 import { getNetConfig, patchNet, sendGroupsIoTest, setNetConfigBulk } from "../api/nets";
+import { testPatConnection } from "../api/events";
 
 function parseStringArray(raw: string): string[] {
   try {
@@ -97,6 +98,65 @@ const APRS_FIELDS: ConfigField[] = [
   },
 ];
 
+const PAT_TRANSPORT_FIELDS: ConfigField[] = [
+  {
+    key: "pat_transport_enabled",
+    label: "PAT HTTP Transport",
+    type: "boolean",
+    helpText: "Enable outbound delivery via a running PAT Winlink client over its HTTP API.",
+  },
+  {
+    key: "pat_http_base_url",
+    label: "PAT Base URL",
+    placeholder: "http://shack:8080",
+    mono: true,
+    helpText: "Base URL of your PAT HTTP API (e.g. http://localhost:8080). Save before testing.",
+    visibleWhen: (v) => v["pat_transport_enabled"] === "true",
+  },
+  {
+    key: "pat_http_auth_mode",
+    label: "Auth Mode",
+    type: "select",
+    options: [
+      { value: "none", label: "None" },
+      { value: "basic", label: "Basic (username + password)" },
+      { value: "token", label: "Bearer token" },
+    ],
+    helpText: "Authentication method for the PAT HTTP API.",
+    visibleWhen: (v) => v["pat_transport_enabled"] === "true",
+  },
+  {
+    key: "pat_http_username",
+    label: "Username",
+    placeholder: "pat",
+    helpText: "Username for Basic auth.",
+    visibleWhen: (v) => v["pat_transport_enabled"] === "true" && v["pat_http_auth_mode"] === "basic",
+  },
+  {
+    key: "pat_http_password",
+    label: "Password",
+    placeholder: "leave blank to keep existing",
+    secret: true,
+    helpText: "Password for Basic auth. Write-only — leave blank to keep the stored value.",
+    visibleWhen: (v) => v["pat_transport_enabled"] === "true" && v["pat_http_auth_mode"] === "basic",
+  },
+  {
+    key: "pat_http_token",
+    label: "Bearer Token",
+    placeholder: "leave blank to keep existing",
+    secret: true,
+    helpText: "Token for Bearer auth. Write-only — leave blank to keep the stored value.",
+    visibleWhen: (v) => v["pat_transport_enabled"] === "true" && v["pat_http_auth_mode"] === "token",
+  },
+  {
+    key: "pat_http_timeout_seconds",
+    label: "Timeout (seconds)",
+    placeholder: "15",
+    helpText: "HTTP request timeout for PAT API calls.",
+    visibleWhen: (v) => v["pat_transport_enabled"] === "true",
+  },
+];
+
 function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
   const backendOptions = [
     { value: "email", label: "Email" },
@@ -153,6 +213,9 @@ export function NetSettingsPage() {
   const [savedConfig, setSavedConfig] = useState<Record<string, string>>({});
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [savingSection, setSavingSection] = useState<string | null>(null);
+
+  const [patTestResult, setPatTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [patTesting, setPatTesting] = useState(false);
 
   const isAdmin = user?.is_admin === true;
 
@@ -247,6 +310,19 @@ export function NetSettingsPage() {
     }
   };
 
+  const handlePatTest = async () => {
+    setPatTesting(true);
+    setPatTestResult(null);
+    try {
+      const result = await testPatConnection(slug ?? "");
+      setPatTestResult(result);
+    } catch (e: any) {
+      setPatTestResult({ ok: false, error: e?.detail ?? e?.message ?? "request error" });
+    } finally {
+      setPatTesting(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl">
       <h1 className="text-xl font-bold text-text-primary mb-6">
@@ -336,6 +412,31 @@ export function NetSettingsPage() {
               onSave={handleSectionSave("pat")}
               saving={savingSection === "pat"}
             />
+          )}
+
+          {winlinkEnabledSaved && (
+            <SettingsSection
+              title="PAT Transport"
+              fields={PAT_TRANSPORT_FIELDS}
+              values={config}
+              savedValues={savedConfig}
+              onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+              onSave={handleSectionSave("pat-transport")}
+              saving={savingSection === "pat-transport"}
+            >
+              {savedConfig["pat_http_base_url"] && (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={handlePatTest} loading={patTesting}>
+                    Test connection
+                  </Button>
+                  {patTestResult !== null && (
+                    <span className={`text-sm font-medium ${patTestResult.ok ? "text-green-600" : "text-red-600"}`}>
+                      {patTestResult.ok ? "Reached PAT" : (patTestResult.error ?? "Connection failed")}
+                    </span>
+                  )}
+                </div>
+              )}
+            </SettingsSection>
           )}
 
           <SettingsSection

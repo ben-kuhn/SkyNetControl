@@ -4,7 +4,7 @@ import { Button } from "./Button";
 export interface ConfigField {
   key: string;
   label: string;
-  type?: "text" | "boolean" | "multiselect";
+  type?: "text" | "boolean" | "multiselect" | "select";
   placeholder?: string;
   helpText: string;
   mono?: boolean;
@@ -58,6 +58,20 @@ function FieldRow({
         />
         <span className="text-text-secondary">{field.label}</span>
       </label>
+    );
+  } else if (type === "select") {
+    input = (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="max-w-md w-full bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary"
+      >
+        {(field.options ?? []).map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
     );
   } else if (type === "multiselect") {
     const selected = parseStringArray(value);

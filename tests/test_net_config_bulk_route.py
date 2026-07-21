@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.auth.models import User
+from backend.auth.secret_box import decrypt
 from backend.config import Settings
 from backend.db.base import Base
 from backend.modules.nets.models import Net, NetConfig, NetMembership, NetRole
@@ -103,3 +104,87 @@ async def test_bulk_put_empty_values_is_noop(app):
         )
     assert r.status_code == 200, r.text
     assert r.json() == {"ok": True, "count": 0}
+
+
+@pytest.mark.asyncio
+async def test_pat_secrets_encrypted_at_rest(app, db_factory):
+    """PAT password and token must be stored encrypted, never as plaintext."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.put(
+            "/api/nets/weekly/config/bulk",
+            cookies={"access_token": _nc_token()},
+            json={
+                "values": {
+                    "pat_http_base_url": "http://shack:8080",
+                    "pat_http_password": "s3cr3t",
+                    "pat_http_token": "mytoken",
+                }
+            },
+        )
+    assert r.status_code == 200, r.text
+    with db_factory() as s:
+        net = s.query(Net).filter(Net.slug == "weekly").one()
+        rows = {c.key: c.value for c in s.query(NetConfig).filter(NetConfig.net_id == net.id).all()}
+    # Base URL stored as plaintext
+    assert rows["pat_http_base_url"] == "http://shack:8080"
+    # Secrets must NOT be stored as plaintext
+    assert rows["pat_http_password"] != "s3cr3t"
+    assert rows["pat_http_token"] != "mytoken"
+    # Secrets must decrypt to their original values (round-trip via resolve_pat_config)
+    assert decrypt(rows["pat_http_password"]) == "s3cr3t"
+    assert decrypt(rows["pat_http_token"]) == "mytoken"
+
+
+@pytest.mark.asyncio
+async def test_pat_secrets_blank_means_unchanged(app, db_factory):
+    """Sending an empty string for a sensitive key must not overwrite the stored secret."""
+    # First, set a password
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.put(
+            "/api/nets/weekly/config/bulk",
+            cookies={"access_token": _nc_token()},
+            json={"values": {"pat_http_password": "original"}},
+        )
+    assert r.status_code == 200, r.text
+
+    with db_factory() as s:
+        net = s.query(Net).filter(Net.slug == "weekly").one()
+        original_rows = {c.key: c.value for c in s.query(NetConfig).filter(NetConfig.net_id == net.id).all()}
+
+    # Now send an empty password (blank = unchanged)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.put(
+            "/api/nets/weekly/config/bulk",
+            cookies={"access_token": _nc_token()},
+            json={"values": {"pat_http_password": ""}},
+        )
+    assert r.status_code == 200, r.text
+
+    with db_factory() as s:
+        net = s.query(Net).filter(Net.slug == "weekly").one()
+        rows = {c.key: c.value for c in s.query(NetConfig).filter(NetConfig.net_id == net.id).all()}
+
+    # The stored encrypted password must be unchanged
+    assert rows.get("pat_http_password") == original_rows.get("pat_http_password")
+
+
+@pytest.mark.asyncio
+async def test_get_config_masks_sensitive_keys(app, db_factory):
+    """GET /config must return '***' for sensitive keys, never ciphertext or plaintext."""
+    # Write secrets via bulk PUT
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        await ac.put(
+            "/api/nets/weekly/config/bulk",
+            cookies={"access_token": _nc_token()},
+            json={"values": {"pat_http_password": "s3cr3t", "pat_http_base_url": "http://shack:8080"}},
+        )
+        r = await ac.get(
+            "/api/nets/weekly/config",
+            cookies={"access_token": _nc_token()},
+        )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    # Sensitive keys must be masked
+    assert data["pat_http_password"] == "***"
+    # Non-sensitive keys pass through
+    assert data["pat_http_base_url"] == "http://shack:8080"
