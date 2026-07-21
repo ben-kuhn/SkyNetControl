@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from backend.config_mgmt.service import get_config_value
-from backend.modules.checkins.mailbox_reader import read_mailbox
+from backend.modules.checkins.mailbox_reader import _to_matches_net, read_mailbox
 from backend.modules.checkins.service import scan_and_import_messages
 from backend.modules.schedule.models import NetSession, SessionStatus
 
@@ -152,7 +152,8 @@ def scan_one(db: Session, net_id: int, mailbox: str, now: datetime) -> int:
     if pat_transport_enabled(db, net_id):
         client = build_pat_client(resolve_pat_config(db, net_id))
         try:
-            messages = fetch_inbound_messages(client)
+            raw_messages = fetch_inbound_messages(client)
+            messages = [m for m in raw_messages if _to_matches_net(net_address, m["to_address"])]
         except PatUnavailable:
             logger.warning("PAT unreachable during scan for net %s", net_id)
             return 0
