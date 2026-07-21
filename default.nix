@@ -40,6 +40,8 @@ python.pkgs.buildPythonApplication {
     prompt-toolkit
     pyyaml
     bleach
+    websockets
+    aprslib
   ];
 
   postInstall = ''
