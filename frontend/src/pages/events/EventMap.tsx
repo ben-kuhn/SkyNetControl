@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type * as GeoJSON from "geojson";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useTheme } from "../../hooks/useTheme";
@@ -245,15 +246,14 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
     if (!groups) return;
     groups.weather.clearLayers();
     if (!weatherEnabled || alerts.features.length === 0) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    L.geoJSON(alerts as unknown as any, {
+    L.geoJSON(alerts as unknown as GeoJSON.FeatureCollection, {
       style: (f) => alertStyle(f as unknown as WeatherFeature),
       onEachFeature: (f, layer) => {
         const p = (f as unknown as WeatherFeature).properties ?? {};
         const title = String(p.event ?? "Alert");
         const headline = String(p.headline ?? "");
-        const expires = p.expires ? `<br/>Expires: ${new Date(String(p.expires)).toLocaleString()}` : "";
-        layer.bindPopup(`<b>${title}</b><br/>${headline}${expires}`);
+        const expiresDate = p.expires ? new Date(String(p.expires)).toLocaleString() : null;
+        layer.bindPopup(popupContent(title, [headline, ...(expiresDate ? [`Expires: ${expiresDate}`] : [])], null, () => {}));
       },
     }).addTo(groups.weather);
   }, [alerts, weatherEnabled]);
