@@ -1,9 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Spinner } from "../../components/Spinner";
 import { useEventPositions } from "../../hooks/useEventPositions";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
 import { useEventWeather } from "../../hooks/useEventWeather";
+import { useRadarFrames } from "../../hooks/useRadarFrames";
 import { EventMap } from "./EventMap";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -23,7 +24,17 @@ export function EventMapPage() {
   );
   const weatherEnabled = updates?.event.weather_enabled ?? false;
   const weather = useEventWeather(slug!, Number(eventId), weatherEnabled);
+  const radar = useRadarFrames(weatherEnabled);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [radarFrameIndex, setRadarFrameIndex] = useState(0);
+  const [radarFrameCount, setRadarFrameCount] = useState(0);
+
+  // Auto-advance radar frames in the full-page view.
+  useEffect(() => {
+    if (radarFrameCount === 0) return;
+    const id = window.setInterval(() => setRadarFrameIndex((i) => (i + 1) % radarFrameCount), 700);
+    return () => window.clearInterval(id);
+  }, [radarFrameCount]);
 
   const toggleHide = useCallback((id: string) =>
     setHidden((prev) => {
@@ -83,6 +94,10 @@ export function EventMapPage() {
           onToggleHide={toggleHide}
           weatherEnabled={weatherEnabled}
           alerts={weather.alerts}
+          frames={radar.frames}
+          radarTileUrl={radar.tileUrl}
+          radarFrameIndex={radarFrameIndex}
+          onRadarFrameCount={setRadarFrameCount}
         />
       </div>
     </div>

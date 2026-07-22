@@ -3,6 +3,7 @@ import type * as GeoJSON from "geojson";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useTheme } from "../../hooks/useTheme";
+import type { RadarFrame } from "../../hooks/useRadarFrames";
 import type { BeaconedObject, EventParticipant, EventPost, EventStation, ParticipantStatus, WeatherAlerts, WeatherFeature } from "../../types";
 
 const TILE_URL_DARK = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
@@ -43,6 +44,10 @@ export interface EventMapProps {
   onToggleHide: (stationId: string) => void;
   weatherEnabled: boolean;
   alerts: WeatherAlerts;
+  frames?: RadarFrame[];
+  radarTileUrl?: (f: RadarFrame) => string;
+  radarFrameIndex?: number;
+  onRadarFrameCount?: (n: number) => void;
 }
 
 function popupContent(title: string, lines: string[], hideId: string | null, onHide: (id: string) => void) {
@@ -65,7 +70,10 @@ function popupContent(title: string, lines: string[], hideId: string | null, onH
   return el;
 }
 
-export function EventMap({ stations, participants, posts, objects, hidden, onToggleHide, weatherEnabled, alerts }: EventMapProps) {
+export function EventMap({
+  stations, participants, posts, objects, hidden, onToggleHide, weatherEnabled, alerts,
+  frames = [], radarTileUrl = () => "", radarFrameIndex = 0, onRadarFrameCount,
+}: EventMapProps) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -76,7 +84,9 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
     posts: L.LayerGroup;
     others: L.LayerGroup;
     weather: L.LayerGroup;
+    weatherRadar: L.LayerGroup;
   } | null>(null);
+  const radarLayersRef = useRef<L.TileLayer[]>([]);
   const fittedRef = useRef(false);
   const markersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const openPopupRef = useRef<string | null>(null);
@@ -97,6 +107,7 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
       posts: L.layerGroup().addTo(map),
       others: L.layerGroup().addTo(map),
       weather: L.layerGroup(), // NOT addTo(map) — off by default
+      weatherRadar: L.layerGroup(), // NOT addTo(map) — off by default
     };
     const overlays: Record<string, L.Layer> = {
       Participants: groups.participants,
@@ -104,7 +115,10 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
       Posts: groups.posts,
       "Other stations": groups.others,
     };
-    if (weatherEnabled) overlays["Weather: Warnings"] = groups.weather;
+    if (weatherEnabled) {
+      overlays["Weather: Warnings"] = groups.weather;
+      overlays["Weather: Radar"] = groups.weatherRadar;
+    }
     L.control.layers(undefined, overlays).addTo(map);
     layersRef.current = groups;
     mapRef.current = map;
@@ -118,6 +132,7 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
       mapRef.current = null;
       tileLayerRef.current = null;
       layersRef.current = null;
+      radarLayersRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -257,6 +272,24 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
       },
     }).addTo(groups.weather);
   }, [alerts, weatherEnabled]);
+
+  // Rebuild radar tile layers when frame list changes.
+  useEffect(() => {
+    const groups = layersRef.current;
+    if (!groups) return;
+    groups.weatherRadar.clearLayers();
+    radarLayersRef.current = frames.map((f) =>
+      L.tileLayer(radarTileUrl(f), { opacity: 0, zIndex: 250 }));
+    radarLayersRef.current.forEach((tl) => tl.addTo(groups.weatherRadar));
+    onRadarFrameCount?.(frames.length);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frames, radarTileUrl]);
+
+  // Show only the active frame (opacity 0.6), hide the rest.
+  useEffect(() => {
+    radarLayersRef.current.forEach((tl, i) =>
+      tl.setOpacity(i === radarFrameIndex ? 0.6 : 0));
+  }, [radarFrameIndex, frames]);
 
   return <div ref={containerRef} className="h-full w-full rounded-md overflow-hidden" />;
 }

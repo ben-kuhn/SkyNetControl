@@ -1,9 +1,10 @@
 // frontend/src/pages/events/MapPanel.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { updateEvent } from "../../api/events";
 import type { BeaconedObject, EventParticipant, EventPost, EventStation, NetEvent } from "../../types";
 import { useEventWeather } from "../../hooks/useEventWeather";
+import { useRadarFrames } from "../../hooks/useRadarFrames";
 import { EventMap } from "./EventMap";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -49,6 +50,16 @@ export function MapPanel({
   const [rangeKm, setRangeKm] = useState(event.aprs_range_km?.toString() ?? "50");
   const { stations, aprsStatus, aprsStatusDetail, objects } = positions;
   const weather = useEventWeather(netSlug, event.id, expanded && event.weather_enabled);
+  const radar = useRadarFrames(expanded && event.weather_enabled);
+  const [frameCount, setFrameCount] = useState(0);
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    if (!playing || frameCount === 0) return;
+    const id = window.setInterval(() => setFrameIndex((i) => (i + 1) % frameCount), 700);
+    return () => window.clearInterval(id);
+  }, [playing, frameCount]);
 
   const toggleHide = (id: string) =>
     setHidden((prev) => {
@@ -159,17 +170,41 @@ export function MapPanel({
         </div>
       </div>
       {expanded && (
-        <div className="h-[360px] border-t border-border">
-          <EventMap
-            stations={stations}
-            participants={participants}
-            posts={posts}
-            objects={objects}
-            hidden={hidden}
-            onToggleHide={toggleHide}
-            weatherEnabled={event.weather_enabled}
-            alerts={weather.alerts}
-          />
+        <div className="border-t border-border">
+          <div className="h-[360px]">
+            <EventMap
+              stations={stations}
+              participants={participants}
+              posts={posts}
+              objects={objects}
+              hidden={hidden}
+              onToggleHide={toggleHide}
+              weatherEnabled={event.weather_enabled}
+              alerts={weather.alerts}
+              frames={radar.frames}
+              radarTileUrl={radar.tileUrl}
+              radarFrameIndex={frameIndex}
+              onRadarFrameCount={setFrameCount}
+            />
+          </div>
+          {event.weather_enabled && radar.frames.length > 0 && (
+            <div className="flex items-center gap-2 text-xs px-3 py-1 border-t border-border">
+              <button className="px-2 py-0.5 rounded bg-bg-elevated" onClick={() => setPlaying((p) => !p)}>
+                {playing ? "⏸" : "▶"}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={frameCount - 1}
+                value={frameIndex}
+                onChange={(e) => { setPlaying(false); setFrameIndex(Number(e.target.value)); }}
+                className="flex-1"
+              />
+              <span className="text-text-muted tabular-nums">
+                {radar.frames[frameIndex] ? new Date(radar.frames[frameIndex].time * 1000).toLocaleTimeString() : ""}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
