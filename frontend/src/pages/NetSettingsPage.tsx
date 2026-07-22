@@ -157,6 +157,32 @@ const PAT_TRANSPORT_FIELDS: ConfigField[] = [
   },
 ];
 
+const WEATHER_FIELDS: ConfigField[] = [
+  {
+    key: "weather.enabled",
+    label: "Weather overlay",
+    type: "boolean",
+    helpText: "Show a radar loop + NWS warning polygons on the live event map.",
+  },
+  {
+    key: "weather.alert_states",
+    label: "Alert states (optional)",
+    type: "text",
+    placeholder: '["MN","WI"]',
+    mono: true,
+    helpText: 'JSON list of 2-letter state codes for NWS alerts. Leave blank to auto-detect from the event location.',
+    visibleWhen: (v) => v["weather.enabled"] === "true",
+  },
+  {
+    key: "weather.nws_contact",
+    label: "NWS contact (optional)",
+    type: "text",
+    placeholder: "you@example.com",
+    helpText: "Contact included in the NWS API request identifier. Defaults to the net Winlink address.",
+    visibleWhen: (v) => v["weather.enabled"] === "true",
+  },
+];
+
 function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
   const backendOptions = [
     { value: "email", label: "Email" },
@@ -463,6 +489,16 @@ export function NetSettingsPage() {
             onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
             onSave={handleSectionSave("aprs")}
             saving={savingSection === "aprs"}
+          />
+
+          <SettingsSection
+            title="Weather overlay"
+            fields={WEATHER_FIELDS}
+            values={config}
+            savedValues={savedConfig}
+            onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+            onSave={handleSectionSave("weather")}
+            saving={savingSection === "weather"}
           />
         </>
       )}
