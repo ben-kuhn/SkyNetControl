@@ -25,8 +25,8 @@ const OTHER_COLOR = "#9ca3af";
 const POST_COLOR = "#a78bfa";
 
 function alertStyle(feature?: WeatherFeature): L.PathOptions {
-  const ev = (feature?.properties?.event ?? "").toLowerCase();
-  const sev = (feature?.properties?.severity ?? "").toLowerCase();
+  const ev = String(feature?.properties?.event ?? "").toLowerCase();
+  const sev = String(feature?.properties?.severity ?? "").toLowerCase();
   const isWarning = ev.includes("warning");
   let color = "#9ca3af"; // muted default (advisories/statements)
   if (ev.includes("tornado") && isWarning) color = "#dc2626"; // red
