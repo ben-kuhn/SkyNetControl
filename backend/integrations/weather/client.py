@@ -32,9 +32,12 @@ class WeatherClient:
             with self._client() as c:
                 resp = c.get(path, params=params)
                 resp.raise_for_status()
-                return resp.json()
-        except httpx.HTTPError as exc:
+                data = resp.json()
+        except (httpx.HTTPError, ValueError) as exc:
             raise WeatherUnavailable(f"NWS {path} unavailable: {exc}") from exc
+        if not isinstance(data, dict):
+            raise WeatherUnavailable(f"NWS {path} returned a non-object body")
+        return data
 
     def fetch_active_alerts(self, states: list[str]) -> dict:
         """Merge active alerts across states, deduped by feature id."""

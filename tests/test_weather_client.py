@@ -77,3 +77,19 @@ def test_lookup_state_non_dict_relative_location_returns_none():
     def handler(request):
         return httpx.Response(200, json={"properties": {"relativeLocation": "str"}})
     assert _client(handler).lookup_state(0.0, 0.0) is None
+
+
+def test_fetch_active_alerts_non_json_body_raises_unavailable():
+    """200 with a non-JSON body (e.g. CDN interstitial) must map to WeatherUnavailable."""
+    def handler(request):
+        return httpx.Response(200, content=b"<html>oops</html>")
+    with pytest.raises(WeatherUnavailable):
+        _client(handler).fetch_active_alerts(["MN"])
+
+
+def test_fetch_active_alerts_non_dict_json_raises_unavailable():
+    """200 with a top-level JSON array must map to WeatherUnavailable (not AttributeError)."""
+    def handler(request):
+        return httpx.Response(200, json=[])
+    with pytest.raises(WeatherUnavailable):
+        _client(handler).fetch_active_alerts(["MN"])
