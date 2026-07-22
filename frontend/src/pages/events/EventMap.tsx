@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useTheme } from "../../hooks/useTheme";
-import type { BeaconedObject, EventParticipant, EventPost, EventStation, ParticipantStatus } from "../../types";
+import type { BeaconedObject, EventParticipant, EventPost, EventStation, ParticipantStatus, WeatherAlerts, WeatherFeature } from "../../types";
 
 const TILE_URL_DARK = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 const TILE_URL_LIGHT = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
@@ -22,6 +22,17 @@ const STATUS_COLOR: Record<ParticipantStatus, string> = {
 const OTHER_COLOR = "#9ca3af";
 const POST_COLOR = "#a78bfa";
 
+function alertStyle(feature?: WeatherFeature): L.PathOptions {
+  const ev = (feature?.properties?.event ?? "").toLowerCase();
+  const sev = (feature?.properties?.severity ?? "").toLowerCase();
+  const isWarning = ev.includes("warning");
+  let color = "#9ca3af"; // muted default (advisories/statements)
+  if (ev.includes("tornado") && isWarning) color = "#dc2626"; // red
+  else if (isWarning && (sev === "extreme" || sev === "severe")) color = "#ef4444";
+  else if (ev.includes("watch")) color = "#f59e0b"; // amber
+  return { color, weight: 2, fillColor: color, fillOpacity: 0.15 };
+}
+
 export interface EventMapProps {
   stations: Map<string, EventStation>;
   participants: EventParticipant[];
@@ -29,6 +40,8 @@ export interface EventMapProps {
   objects: BeaconedObject[];
   hidden: Set<string>;
   onToggleHide: (stationId: string) => void;
+  weatherEnabled: boolean;
+  alerts: WeatherAlerts;
 }
 
 function popupContent(title: string, lines: string[], hideId: string | null, onHide: (id: string) => void) {
@@ -51,7 +64,7 @@ function popupContent(title: string, lines: string[], hideId: string | null, onH
   return el;
 }
 
-export function EventMap({ stations, participants, posts, objects, hidden, onToggleHide }: EventMapProps) {
+export function EventMap({ stations, participants, posts, objects, hidden, onToggleHide, weatherEnabled, alerts }: EventMapProps) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -61,6 +74,7 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
     trails: L.LayerGroup;
     posts: L.LayerGroup;
     others: L.LayerGroup;
+    weather: L.LayerGroup;
   } | null>(null);
   const fittedRef = useRef(false);
   const markersRef = useRef<Map<string, L.CircleMarker>>(new Map());
@@ -81,15 +95,16 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
       trails: L.layerGroup().addTo(map),
       posts: L.layerGroup().addTo(map),
       others: L.layerGroup().addTo(map),
+      weather: L.layerGroup(), // NOT addTo(map) — off by default
     };
-    L.control
-      .layers(undefined, {
-        Participants: groups.participants,
-        Trails: groups.trails,
-        Posts: groups.posts,
-        "Other stations": groups.others,
-      })
-      .addTo(map);
+    const overlays: Record<string, L.Layer> = {
+      Participants: groups.participants,
+      Trails: groups.trails,
+      Posts: groups.posts,
+      "Other stations": groups.others,
+    };
+    if (weatherEnabled) overlays["Weather: Warnings"] = groups.weather;
+    L.control.layers(undefined, overlays).addTo(map);
     layersRef.current = groups;
     mapRef.current = map;
 
@@ -223,6 +238,25 @@ export function EventMap({ stations, participants, posts, objects, hidden, onTog
       }
     }
   }, [stations, participants, posts, objects, hidden, onToggleHide]);
+
+  // Repopulate weather warnings on alerts/enabled change
+  useEffect(() => {
+    const groups = layersRef.current;
+    if (!groups) return;
+    groups.weather.clearLayers();
+    if (!weatherEnabled || alerts.features.length === 0) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    L.geoJSON(alerts as unknown as any, {
+      style: (f) => alertStyle(f as unknown as WeatherFeature),
+      onEachFeature: (f, layer) => {
+        const p = (f as unknown as WeatherFeature).properties ?? {};
+        const title = String(p.event ?? "Alert");
+        const headline = String(p.headline ?? "");
+        const expires = p.expires ? `<br/>Expires: ${new Date(String(p.expires)).toLocaleString()}` : "";
+        layer.bindPopup(`<b>${title}</b><br/>${headline}${expires}`);
+      },
+    }).addTo(groups.weather);
+  }, [alerts, weatherEnabled]);
 
   return <div ref={containerRef} className="h-full w-full rounded-md overflow-hidden" />;
 }

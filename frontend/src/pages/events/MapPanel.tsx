@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { updateEvent } from "../../api/events";
 import type { BeaconedObject, EventParticipant, EventPost, EventStation, NetEvent } from "../../types";
+import { useEventWeather } from "../../hooks/useEventWeather";
 import { EventMap } from "./EventMap";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -47,6 +48,7 @@ export function MapPanel({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [rangeKm, setRangeKm] = useState(event.aprs_range_km?.toString() ?? "50");
   const { stations, aprsStatus, aprsStatusDetail, objects } = positions;
+  const weather = useEventWeather(netSlug, event.id, expanded && event.weather_enabled);
 
   const toggleHide = (id: string) =>
     setHidden((prev) => {
@@ -103,6 +105,22 @@ export function MapPanel({
             APRS {aprsStatus}
           </span>
         )}
+        {expanded && event.weather_enabled && (
+          <span
+            className={`px-2 py-0.5 rounded text-xs font-medium ${
+              weather.status === "ok"
+                ? "bg-success/15 text-success"
+                : weather.status === "stale"
+                  ? "bg-warning/15 text-warning"
+                  : weather.status === "unavailable"
+                    ? "bg-danger/15 text-danger"
+                    : "bg-bg-elevated text-text-muted"
+            }`}
+            title={`NWS alerts: ${weather.status}`}
+          >
+            Wx {weather.status}
+          </span>
+        )}
         {expanded && aprsStatus === "disabled" && (
           <Link to={`/nets/${netSlug}/settings`} className="text-xs text-text-muted hover:text-accent underline">
             enable in net settings
@@ -149,6 +167,8 @@ export function MapPanel({
             objects={objects}
             hidden={hidden}
             onToggleHide={toggleHide}
+            weatherEnabled={event.weather_enabled}
+            alerts={weather.alerts}
           />
         </div>
       )}

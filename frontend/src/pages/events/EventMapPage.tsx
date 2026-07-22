@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Spinner } from "../../components/Spinner";
 import { useEventPositions } from "../../hooks/useEventPositions";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
+import { useEventWeather } from "../../hooks/useEventWeather";
 import { EventMap } from "./EventMap";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -20,6 +21,8 @@ export function EventMapPage() {
     Number(eventId),
     true,
   );
+  const weatherEnabled = updates?.event.weather_enabled ?? false;
+  const weather = useEventWeather(slug!, Number(eventId), weatherEnabled);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   const toggleHide = useCallback((id: string) =>
@@ -78,6 +81,8 @@ export function EventMapPage() {
           objects={objects}
           hidden={hidden}
           onToggleHide={toggleHide}
+          weatherEnabled={weatherEnabled}
+          alerts={weather.alerts}
         />
       </div>
     </div>
