@@ -19,6 +19,7 @@ import type {
   PatConnectOptions,
   PatSession,
   ReplyForm,
+  WeatherData,
 } from "../types";
 
 // --- Events ---
@@ -343,4 +344,10 @@ export async function abortPatSession(netSlug: string, sessionId: number): Promi
 
 export async function testPatConnection(netSlug: string): Promise<{ ok: boolean; error?: string }> {
   return apiFetch<{ ok: boolean; error?: string }>(`/nets/${netSlug}/pat/test`, { method: "POST" });
+}
+
+// --- Weather ---
+
+export async function fetchEventWeather(eventId: number, netSlug: string): Promise<WeatherData> {
+  return apiFetch<WeatherData>(`/nets/${netSlug}/events/${eventId}/weather`);
 }

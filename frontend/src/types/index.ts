@@ -331,6 +331,7 @@ export interface NetEvent {
   aprs_range_lon: number | null;
   aprs_range_km: number | null;
   aprs_beacon_posts: boolean;
+  weather_enabled: boolean;
 }
 
 export interface EventPost {
@@ -496,4 +497,30 @@ export interface PatConnectInput {
   mode?: string;
   gateway?: string;
   freq?: string;
+}
+
+export type WeatherStatus = "ok" | "stale" | "unavailable" | "disabled" | "no_area";
+
+export interface WeatherFeature {
+  id?: string;
+  type: "Feature";
+  geometry: unknown;                 // GeoJSON geometry, passed straight to L.geoJSON
+  properties: {
+    event?: string;                  // e.g. "Tornado Warning"
+    headline?: string;
+    severity?: string;               // Extreme | Severe | Moderate | Minor | Unknown
+    expires?: string;
+    [k: string]: unknown;
+  };
+}
+
+export interface WeatherAlerts {
+  type: "FeatureCollection";
+  features: WeatherFeature[];
+}
+
+export interface WeatherData {
+  alerts: WeatherAlerts;
+  updated_at: string | null;
+  status: WeatherStatus;
 }
