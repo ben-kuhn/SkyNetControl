@@ -1,8 +1,8 @@
 # SkyNetControl
 
-A web application for managing a weekly Winlink net — schedule, activity planning, participant reminders, check-in tracking, roster generation, and long-term participation records.
+A web application for managing a weekly Winlink net — schedule, activity planning, participant reminders, check-in tracking, roster generation, long-term participation records, and live public-service / emergency events with real-time operations.
 
-Built for ham radio operators running recurring digital nets, with first-class Winlink (PAT) integration — either a shared mailbox directory or PAT's HTTP API with operator-driven radio connections — groups.io / email / Winlink delivery backends, and Claude-powered activity brainstorming.
+Built for ham radio operators running recurring digital nets, with first-class Winlink (PAT) integration — either a shared mailbox directory or PAT's HTTP API with operator-driven radio connections — Winlink Standard Forms composition, groups.io / email / Winlink delivery backends, a live event map (APRS participant positioning + a precipitation-radar and NWS-warning weather overlay for skywarn/emergency nets), and Claude-powered activity brainstorming.
 
 ## Quick start
 

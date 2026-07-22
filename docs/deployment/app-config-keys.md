@@ -89,6 +89,20 @@ For looking up callsign info during manual check-in entry (Add Check-in modal).
 
 Supported provider names depend on `backend/integrations/callbook/service.py` — check there for the current list.
 
+## Weather overlay
+
+Per-net weather layers on the live event map, for emergency/skywarn nets: an animated precipitation-radar loop (RainViewer) and active NWS watch/warning polygons. Configured from the **Weather overlay** section of a net's settings page. All keys are per-net with a global fallback; default off is a zero-cost no-op (no layers render, no external calls). No API key is needed — radar and NWS alerts are both free/keyless, so these keys are stored plaintext.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `weather.enabled` | `"true"` / `"false"` | Default `"false"`. Master switch. When on, the map layer control gains "Weather: Radar" and "Weather: Warnings" toggles (off by default, operator-toggled) and the backend polls NWS alerts. |
+| `weather.alert_states` | JSON list of 2-letter state codes (optional) | Explicit NWS coverage area, e.g. `["MN","WI"]`. If unset, the coverage state is auto-derived from the event location (its posts' centroid / APRS range center) via one NWS `/points` lookup. |
+| `weather.nws_contact` | string (optional) | Contact embedded in the NWS API `User-Agent` (`SkyNetControl (<contact>)`), per NWS etiquette. Defaults to `net_address` if unset. |
+
+- **Radar** is fetched client-side directly from RainViewer (no backend involvement, no key); a RainViewer outage only blanks the radar layer.
+- **Warnings** are proxied by the backend (`GET /api/nets/{slug}/events/{id}/weather`), which fetches `api.weather.gov/alerts/active` for the coverage area with a short shared cache (~60s) and degrades gracefully — an NWS problem surfaces as a status chip (`stale`/`unavailable`), never an error. US-only (NWS); radar is global.
+- Both layers are viewer-visible (read-only) on active events.
+
 ## Editing values
 
 **Via the UI:** Sign in as an admin and visit `/config`. Each key/value pair is editable; new keys can be added.
