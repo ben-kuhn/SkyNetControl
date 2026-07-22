@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import NetContext, get_db_session, require_net_role
 from backend.integrations.aprs import manager as aprs_manager
+from backend.integrations.weather.service import get_event_alerts
 from backend.modules.checkins.mailbox_reader import read_mailbox
+from backend.modules.nets.config_service import get_net_config
 from backend.modules.events.message_service import send_event_message, set_message_status
 from backend.modules.events.messages import route_event_messages
 from backend.modules.events.models import (
@@ -99,7 +101,7 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def _event_to_response(event: Event) -> dict:
+def _event_to_response(event: Event, *, weather_enabled: bool = False) -> dict:
     return {
         "id": event.id,
         "net_id": event.net_id,
@@ -117,6 +119,7 @@ def _event_to_response(event: Event) -> dict:
         "aprs_range_lon": event.aprs_range_lon,
         "aprs_range_km": event.aprs_range_km,
         "aprs_beacon_posts": event.aprs_beacon_posts,
+        "weather_enabled": weather_enabled,
     }
 
 
@@ -291,8 +294,9 @@ def _snapshot(db: Session, event: Event) -> dict:
         .order_by(EventLogEntry.seq)
         .all()
     )
+    weather_enabled = get_net_config(db, event.net_id, "weather.enabled") == "true"
     return {
-        "event": _event_to_response(event),
+        "event": _event_to_response(event, weather_enabled=weather_enabled),
         "posts": [_post_to_response(p) for p in posts],
         "participants": [_participant_to_response(p) for p in participants],
         "log": [_log_to_response(e) for e in log],
@@ -310,7 +314,8 @@ async def list_events_route(
     db: Session = Depends(get_db_session),
 ):
     events = db.query(Event).filter(Event.net_id == ctx.net.id).order_by(Event.created_at.desc()).all()
-    return [_event_to_response(e) for e in events]
+    weather_enabled = get_net_config(db, ctx.net.id, "weather.enabled") == "true"
+    return [_event_to_response(e, weather_enabled=weather_enabled) for e in events]
 
 
 @events_router.post("", status_code=201)
@@ -332,7 +337,8 @@ async def create_event_route(
     )
     if event.status == EventStatus.ACTIVE:
         aprs_manager.ensure_started(request.app.state.session_factory, event.id)
-    return _event_to_response(event)
+    weather_enabled = get_net_config(db, event.net_id, "weather.enabled") == "true"
+    return _event_to_response(event, weather_enabled=weather_enabled)
 
 
 @events_router.get("/{event_id}")
@@ -363,7 +369,8 @@ async def update_event_route(
         raise HTTPException(status_code=404, detail="Event not found")
     aprs_manager.ensure_started(request.app.state.session_factory, event_id)
     aprs_manager.nudge(event_id)
-    return _event_to_response(event)
+    weather_enabled = get_net_config(db, event.net_id, "weather.enabled") == "true"
+    return _event_to_response(event, weather_enabled=weather_enabled)
 
 
 @events_router.post("/{event_id}/activate")
@@ -379,7 +386,8 @@ async def activate_event_route(
     except EventError as err:
         _raise_for(err)
     aprs_manager.ensure_started(request.app.state.session_factory, event_id)
-    return _event_to_response(event)
+    weather_enabled = get_net_config(db, event.net_id, "weather.enabled") == "true"
+    return _event_to_response(event, weather_enabled=weather_enabled)
 
 
 @events_router.post("/{event_id}/close")
@@ -394,7 +402,8 @@ async def close_event_route(
     except EventError as err:
         _raise_for(err)
     aprs_manager.stop(event_id)
-    return _event_to_response(event)
+    weather_enabled = get_net_config(db, event.net_id, "weather.enabled") == "true"
+    return _event_to_response(event, weather_enabled=weather_enabled)
 
 
 @events_router.post("/{event_id}/reopen")
@@ -410,7 +419,8 @@ async def reopen_event_route(
     except EventError as err:
         _raise_for(err)
     aprs_manager.ensure_started(request.app.state.session_factory, event_id)
-    return _event_to_response(event)
+    weather_enabled = get_net_config(db, event.net_id, "weather.enabled") == "true"
+    return _event_to_response(event, weather_enabled=weather_enabled)
 
 
 # --- Post routes ---
@@ -647,6 +657,19 @@ async def positions_route(
     return snapshot
 
 
+# --- Weather alerts ---
+
+
+@events_router.get("/{event_id}/weather")
+async def weather_route(
+    event_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.VIEWER)),
+    db: Session = Depends(get_db_session),
+):
+    _get_event_or_404(db, ctx.net.id, event_id)
+    return get_event_alerts(db, event_id)
+
+
 # --- Message routes ---
 
 
@@ -665,12 +688,10 @@ async def list_messages_route(
     if not include_dismissed:
         query = query.filter(EventMessage.status != MessageStatus.DISMISSED)
     messages = query.order_by(EventMessage.msg_seq).all()
-    from backend.modules.nets.config_service import get_net_config as _get_net_config
-
     from backend.integrations.winlink.pat_config import pat_transport_enabled as _pat_enabled
 
-    pat_mailbox = _get_net_config(db, event.net_id, "pat_mailbox_path", "") or ""
-    net_addr = _get_net_config(db, event.net_id, "net_address", "") or ""
+    pat_mailbox = get_net_config(db, event.net_id, "pat_mailbox_path", "") or ""
+    net_addr = get_net_config(db, event.net_id, "net_address", "") or ""
     messaging_configured = bool(pat_mailbox and net_addr) or _pat_enabled(db, event.net_id)
     return {
         "messages": [_message_to_response(m, _message_extras(db, m)) for m in messages],
@@ -738,7 +759,6 @@ async def rescan_route(
     )
     from backend.integrations.winlink.pat_client import PatUnavailable
     from backend.integrations.winlink.pat_inbound import fetch_inbound_messages
-    from backend.modules.nets.config_service import get_net_config
 
     event = _get_event_or_404(db, ctx.net.id, event_id)
     if event.status != EventStatus.ACTIVE:
