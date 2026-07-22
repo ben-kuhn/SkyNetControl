@@ -41,7 +41,7 @@ class WeatherClient:
         features: dict[str, dict] = {}
         for state in states:
             data = self._get("/alerts/active", params={"area": state})
-            for feat in data.get("features", []):
+            for feat in (data.get("features") or []):
                 fid = feat.get("id") or feat.get("properties", {}).get("id")
                 if fid:
                     features[fid] = feat
@@ -49,5 +49,7 @@ class WeatherClient:
 
     def lookup_state(self, lat: float, lon: float) -> str | None:
         data = self._get(f"/points/{lat},{lon}")
-        rel = data.get("properties", {}).get("relativeLocation", {})
-        return rel.get("properties", {}).get("state") or None
+        try:
+            return data["properties"]["relativeLocation"]["properties"]["state"] or None
+        except (KeyError, TypeError):
+            return None

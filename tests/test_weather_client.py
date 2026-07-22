@@ -51,3 +51,29 @@ def test_http_error_maps_to_unavailable():
         raise httpx.ConnectError("refused")
     with pytest.raises(WeatherUnavailable):
         _client(handler).fetch_active_alerts(["MN"])
+
+
+def test_fetch_active_alerts_http_error_raises_unavailable():
+    def handler(request):
+        return httpx.Response(500)
+    with pytest.raises(WeatherUnavailable):
+        _client(handler).fetch_active_alerts(["MN"])
+
+
+def test_fetch_active_alerts_null_features_handles_gracefully():
+    def handler(request):
+        return httpx.Response(200, json={"features": None})
+    fc = _client(handler).fetch_active_alerts(["MN"])
+    assert fc["features"] == []
+
+
+def test_lookup_state_malformed_properties_returns_none():
+    def handler(request):
+        return httpx.Response(200, json={"properties": None})
+    assert _client(handler).lookup_state(0.0, 0.0) is None
+
+
+def test_lookup_state_non_dict_relative_location_returns_none():
+    def handler(request):
+        return httpx.Response(200, json={"properties": {"relativeLocation": "str"}})
+    assert _client(handler).lookup_state(0.0, 0.0) is None
