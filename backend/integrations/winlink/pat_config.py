@@ -62,5 +62,39 @@ def pat_transport_enabled(db: Session, net_id: int) -> bool:
     return cfg.enabled and bool(cfg.base_url)
 
 
+def _get_event(db: Session, event_id: int, key: str, default: str = "") -> str:
+    # get_event_config falls back event override -> global AppConfig -> default and
+    # already decrypts sensitive keys, so no secret_box.decrypt here (would double-decrypt).
+    from backend.modules.events.event_config_service import get_event_config
+
+    val = get_event_config(db, event_id, key)
+    return val if val is not None else default
+
+
+def resolve_pat_config_for_event(db: Session, event_id: int) -> PatHttpConfig:
+    enabled = _get_event(db, event_id, "pat_transport_enabled").strip().lower() == "true"
+    base_url = _get_event(db, event_id, "pat_http_base_url").strip()
+    mode = _get_event(db, event_id, "pat_http_auth_mode", "none").strip().lower() or "none"
+    username = _get_event(db, event_id, "pat_http_username")
+    password = _get_event(db, event_id, "pat_http_password")
+    token = _get_event(db, event_id, "pat_http_token")
+    raw_timeout = _get_event(db, event_id, "pat_http_timeout_seconds", "15").strip()
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        timeout = 15.0
+    return PatHttpConfig(
+        base_url=base_url,
+        auth=PatAuth(mode=mode, username=username, password=password, token=token),
+        timeout=timeout,
+        enabled=enabled,
+    )
+
+
+def pat_transport_enabled_for_event(db: Session, event_id: int) -> bool:
+    cfg = resolve_pat_config_for_event(db, event_id)
+    return cfg.enabled and bool(cfg.base_url)
+
+
 def build_pat_client(cfg: PatHttpConfig) -> PatClient:
     return PatClient(cfg.base_url, auth=cfg.auth, timeout=cfg.timeout)
