@@ -34,14 +34,41 @@ def _base_callsign(address: str) -> str:
     return local.split("-")[0].strip().upper()
 
 
-def route_event_messages(db: Session, net_id: int, raw_messages: list[dict]) -> int:
-    """Create inbound EventMessages for every active event of net_id. Returns the
-    total number of new messages created across all active events."""
+def route_event_messages(db: Session, net_id: int | None, raw_messages: list[dict]) -> int:
+    """Create inbound EventMessages for every active event. Returns the total
+    number of new messages created across all active events.
+
+    ``net_id`` is accepted for caller compatibility (scanner passes it) but is
+    no longer used to filter events — events are net-independent since EP1.
+    Messages are routed to every ACTIVE event whose event-config ``net_address``
+    matches the ``to_address`` of the incoming message, or to all active events
+    when no per-event net_address is configured (fallback: accept all)."""
+    from backend.modules.events.event_config_service import get_event_config
+
     events = (
         db.query(Event)
-        .filter(Event.net_id == net_id, Event.status == EventStatus.ACTIVE)
+        .filter(Event.status == EventStatus.ACTIVE)
         .all()
     )
+
+    # Build a to_address→base_address set from the incoming messages so we can
+    # match against per-event net_address (e.g. "W0NE@winlink.org").
+    def _to_base(addr: str) -> str:
+        """W0NE@winlink.org -> W0NE; bare callsigns returned as-is."""
+        return addr.split("@")[0].upper() if addr else ""
+
+    def _event_accepts(event: Event, to_addresses: set[str]) -> bool:
+        """Return True if this event should receive the batch of messages.
+        When the event has a net_address configured, only accept messages
+        whose to_address base matches. Without net_address, accept all."""
+        net_address = get_event_config(db, event.id, "net_address", "") or ""
+        if not net_address:
+            return True  # unconfigured → accept everything (backward compat)
+        net_base = _to_base(net_address)
+        return net_base in to_addresses
+
+    to_bases = {_to_base(m.get("to_address", "")) for m in raw_messages if m.get("to_address")}
+    events = [e for e in events if _event_accepts(e, to_bases)]
     if not events:
         return 0
 

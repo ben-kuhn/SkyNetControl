@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from backend.auth.dependencies import get_current_user, get_db_session
 from backend.auth.models import User
 from backend.integrations.aprs import manager as aprs_manager
 from backend.integrations.weather.service import get_event_alerts
+from backend.modules.checkins.mailbox_reader import read_mailbox
 from backend.modules.events.event_auth import EventContext, EventRole, require_event_role
 from backend.modules.events.event_config_service import get_event_config
 from backend.modules.events.models import (
@@ -123,6 +124,19 @@ class MessageCompose(BaseModel):
 
 class MessageStatusUpdate(BaseModel):
     status: MessageStatus
+
+
+class FormPreview(BaseModel):
+    template_path: str
+    variables: dict = Field(default_factory=dict)
+    datetime_stamp: str = ""
+
+
+class FormSend(BaseModel):
+    template_path: str
+    variables: dict = Field(default_factory=dict)
+    datetime_stamp: str = ""
+    reply_to_id: int | None = None
 
 
 # --- Helpers (kept net-free; Tasks 10-12 add sub-resource routes that use these) ---
@@ -652,3 +666,273 @@ async def weather_route(
     db: Session = Depends(get_db_session),
 ):
     return get_event_alerts(db, ctx.event.id)
+
+
+# --- Message routes ---
+
+
+@events_router.get("/{event_id}/messages")
+async def list_messages_route(
+    since: int = Query(default=0, ge=0),
+    include_dismissed: bool = Query(default=False),
+    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.integrations.winlink.pat_config import pat_transport_enabled_for_event
+
+    q = db.query(EventMessage).filter(
+        EventMessage.event_id == ctx.event.id,
+        EventMessage.msg_seq > since,
+    )
+    if not include_dismissed:
+        q = q.filter(EventMessage.status != MessageStatus.DISMISSED)
+    messages = q.order_by(EventMessage.msg_seq).all()
+
+    net_address = get_event_config(db, ctx.event.id, "net_address", "") or ""
+    mailbox_path = get_event_config(db, ctx.event.id, "pat_mailbox_path", "") or ""
+    pat_enabled = pat_transport_enabled_for_event(db, ctx.event.id)
+    messaging_configured = bool(net_address and (mailbox_path or pat_enabled))
+
+    return {
+        "latest_msg_seq": ctx.event.msg_seq,
+        "messaging_configured": messaging_configured,
+        "messages": [_message_to_response(m, _message_extras(db, m)) for m in messages],
+    }
+
+
+@events_router.post("/{event_id}/messages", status_code=201)
+async def compose_message_route(
+    body: MessageCompose,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.events.message_service import send_event_message
+    from backend.modules.events.service import EventNotActiveError
+
+    try:
+        message = send_event_message(
+            db, ctx.event.id,
+            actor=ctx.user.callsign,
+            to_address=body.to_address,
+            subject=body.subject,
+            body=body.body,
+            reply_to_id=body.reply_to_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except EventNotActiveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    extras = _message_extras(db, message)
+    return {
+        "message": _message_to_response(message, extras),
+        "delivered": extras.get("delivery_status") is not None,
+    }
+
+
+@events_router.patch("/{event_id}/messages/{message_id}")
+async def patch_message_route(
+    message_id: int,
+    body: MessageStatusUpdate,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.events.message_service import set_message_status
+
+    if ctx.event.status != EventStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail="Event is not active")
+    message = set_message_status(db, ctx.event.id, message_id, body.status)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return _message_to_response(message)
+
+
+@events_router.post("/{event_id}/messages/{message_id}/retry")
+async def retry_message_route(
+    message_id: int,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.integrations.delivery.service import retry_failed
+    from backend.modules.events.message_service import _build_context
+    from backend.modules.events.models import EventMessage
+
+    msg = db.query(EventMessage).filter(
+        EventMessage.id == message_id, EventMessage.event_id == ctx.event.id
+    ).one_or_none()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    config_overrides: dict = {"target_address": msg.to_address}
+    subject = msg.subject
+    body_text = msg.body
+
+    rec = msg.form_record  # EventMessageForm; None for plain messages
+    if rec is not None:
+        from backend.modules.forms.builder import FormBuildError, build_form_message
+        from backend.modules.events.models import Event
+
+        event = db.get(Event, ctx.event.id)
+        try:
+            build_ctx = _build_context(db, event, rec.datetime_stamp)
+            composed = build_form_message(rec.template_path, rec.variables, build_ctx)
+        except (FormBuildError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Cannot rebuild form attachment for retry: {exc}",
+            )
+        config_overrides["attachments"] = [composed.attachment]
+        subject = composed.subject
+        body_text = composed.body
+
+    success = retry_failed(
+        db, "event_message", message_id,
+        event_id=ctx.event.id,
+        backends=["winlink"],
+        config_overrides=config_overrides,
+        subject_override=subject,
+        body_override=body_text,
+    )
+    return {"retried": success}
+
+
+@events_router.get("/{event_id}/messages/{message_id}/attachments/{attachment_id}")
+async def download_attachment_route(
+    message_id: int,
+    attachment_id: int,
+    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.checkins.models import RawMessageAttachment
+    from backend.modules.events.models import EventMessage
+
+    msg = db.query(EventMessage).filter(
+        EventMessage.id == message_id, EventMessage.event_id == ctx.event.id
+    ).one_or_none()
+    if msg is None or msg.raw_message_id is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    att = db.query(RawMessageAttachment).filter(
+        RawMessageAttachment.id == attachment_id,
+        RawMessageAttachment.raw_message_id == msg.raw_message_id,
+    ).one_or_none()
+    if att is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    return Response(
+        content=att.data,
+        media_type=att.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{att.filename}"'},
+    )
+
+
+# --- Rescan route ---
+
+
+@events_router.post("/{event_id}/rescan")
+async def rescan_route(
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.integrations.winlink.pat_config import (
+        build_pat_client, pat_transport_enabled_for_event, resolve_pat_config_for_event,
+    )
+    from backend.integrations.winlink.pat_inbound import fetch_inbound_messages
+    from backend.integrations.winlink.pat_client import PatUnavailable
+    from backend.modules.events.messages import route_event_messages
+
+    if ctx.event.status != EventStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail="Event is not active")
+
+    net_address = get_event_config(db, ctx.event.id, "net_address", "") or ""
+    mailbox_path = get_event_config(db, ctx.event.id, "pat_mailbox_path", "") or ""
+
+    if pat_transport_enabled_for_event(db, ctx.event.id):
+        cfg = resolve_pat_config_for_event(db, ctx.event.id)
+        client = build_pat_client(cfg)
+        try:
+            raw_messages = fetch_inbound_messages(client)
+            if net_address:
+                from backend.modules.checkins.mailbox_reader import _to_matches_net
+                raw_messages = [m for m in raw_messages if _to_matches_net(net_address, m.get("to_address", ""))]
+        except PatUnavailable as exc:
+            raise HTTPException(status_code=502, detail=f"PAT unreachable: {exc}")
+    elif mailbox_path and net_address:
+        import os
+        inbox_path = os.path.join(mailbox_path, "in")
+        raw_messages = read_mailbox(inbox_path, net_address)
+    else:
+        raise HTTPException(status_code=409, detail="Messaging not configured for this event")
+
+    # Persist raw message rows so route_event_messages can resolve them by message_id.
+    from backend.integrations.scanner.service import _persist_raw_messages
+    _persist_raw_messages(db, raw_messages)
+
+    new_messages = route_event_messages(db, None, raw_messages)
+    return {"new_messages": new_messages}
+
+
+# --- Form routes ---
+
+
+@events_router.post("/{event_id}/forms/preview")
+async def form_preview_route(
+    body: FormPreview,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.events.message_service import compose_form_preview
+
+    try:
+        result = compose_form_preview(
+            db, ctx.event.id,
+            template_path=body.template_path,
+            variables=body.variables,
+            datetime_stamp=body.datetime_stamp,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return result
+
+
+@events_router.post("/{event_id}/form-messages", status_code=201)
+async def form_send_route(
+    body: FormSend,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.events.message_service import send_event_form_message
+    from backend.modules.events.service import EventNotActiveError
+
+    try:
+        message = send_event_form_message(
+            db, ctx.event.id,
+            actor=ctx.user.callsign,
+            template_path=body.template_path,
+            variables=body.variables,
+            datetime_stamp=body.datetime_stamp,
+            reply_to_id=body.reply_to_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except EventNotActiveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    extras = _message_extras(db, message)
+    return {
+        "message": _message_to_response(message, extras),
+        "delivered": extras.get("delivery_status") is not None,
+    }
+
+
+@events_router.get("/{event_id}/messages/{message_id}/reply-form")
+async def reply_form_route(
+    message_id: int,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    from backend.modules.events.message_service import resolve_reply_form
+
+    try:
+        result = resolve_reply_form(db, ctx.event.id, message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return result

@@ -60,12 +60,15 @@ scanner_state = ScannerState()
 
 
 def _has_active_event(db: Session, net_id: int) -> bool:
-    """Return True if the net has at least one ACTIVE event."""
+    """Return True if there is at least one ACTIVE event.
+
+    net_id is accepted for caller compatibility but events are net-independent
+    since EP1, so we check for any active event globally."""
     from backend.modules.events.models import Event, EventStatus
 
     return (
         db.query(Event)
-        .filter(Event.net_id == net_id, Event.status == EventStatus.ACTIVE)
+        .filter(Event.status == EventStatus.ACTIVE)
         .first()
     ) is not None
 

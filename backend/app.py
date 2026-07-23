@@ -39,7 +39,7 @@ from backend.auth.recovery_routes import recovery_router
 from backend.modules.forms.routes import forms_router
 from backend.modules.forms.net_routes import net_forms_router
 from backend.modules.events.routes import events_router
-from backend.modules.events.pat_routes import pat_router as winlink_pat_router
+from backend.modules.events.pat_routes import pat_router as winlink_pat_router, event_pat_router
 
 
 _DEFAULT_JWT_SECRET = "change-me-in-production"
@@ -317,7 +317,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(checkins_router)
     app.include_router(reminders_router)  # prefix: /api/nets/{net_slug}/reminders
     app.include_router(roster_router)  # prefix: /api/nets/{net_slug}/roster
-    app.include_router(events_router)  # prefix: /api/nets/{net_slug}/events
+    app.include_router(events_router)  # prefix: /api/events
+    app.include_router(event_pat_router)  # prefix: /api/events/{event_id}/pat/…
     app.include_router(winlink_pat_router)  # prefix: /api/nets/{net_slug}/pat
     app.include_router(net_forms_router)  # prefix: /api/nets/{net_slug}/forms
     app.include_router(notifications_router)  # prefix: /api/nets/{net_slug}/notifications
