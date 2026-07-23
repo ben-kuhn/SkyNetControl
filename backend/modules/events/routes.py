@@ -73,7 +73,7 @@ class EventCreate(BaseModel):
     name: str = Field(min_length=1)
     event_type: EventType
     description: str | None = None
-    scheduled_start: str | None = None
+    scheduled_start: datetime | None = None
 
 
 class EventUpdate(BaseModel):

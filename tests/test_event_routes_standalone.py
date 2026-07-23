@@ -456,3 +456,23 @@ async def test_delete_cascades_operator_config_and_nulls_pat_session(app_s):
         pat_row = db.get(PatConnectionSession, pat_id)
         assert pat_row is not None, "PAT session should still exist"
         assert pat_row.event_id is None, f"Expected event_id=None, got {pat_row.event_id}"
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: scheduled_start type fix — EventCreate accepts datetime, not bare str
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_event_with_iso_scheduled_start(app_s):
+    """Fix 5: POST /api/events with a valid ISO-8601 scheduled_start must return 201."""
+    app, settings = app_s
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.post("/api/events", json={
+            "name": "E",
+            "event_type": "emergency",
+            "scheduled_start": "2025-06-01T12:00:00Z",
+        })
+    assert r.status_code == 201, f"Expected 201, got {r.status_code}: {r.text}"
+    body = r.json()
+    assert body["scheduled_start"] is not None
