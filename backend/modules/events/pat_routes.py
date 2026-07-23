@@ -50,8 +50,7 @@ def _client(db: Session, net_id: int) -> PatClient:
     return build_pat_client(resolve_pat_config(db, net_id))
 
 
-async def _do_connect(request: Request, db: Session, ctx: NetContext,
-                      body: ConnectRequest, event_id: int | None):
+async def _do_connect(request: Request, db: Session, ctx: NetContext, body: ConnectRequest):
     _require_enabled(db, ctx.net.id)
     client = _client(db, ctx.net.id)
     try:
@@ -68,7 +67,7 @@ async def _do_connect(request: Request, db: Session, ctx: NetContext,
     session_factory = request.app.state.session_factory
     try:
         session_id = await engine.start(
-            session_factory, net_id=ctx.net.id, event_id=event_id,
+            session_factory, net_id=ctx.net.id, event_id=None,
             actor=actor, connect_url=url, method_label=label, client=client,
         )
     except SessionBusy as exc:
@@ -76,18 +75,11 @@ async def _do_connect(request: Request, db: Session, ctx: NetContext,
     return {"session_id": session_id}
 
 
-@pat_router.post("/events/{event_id}/pat/connect", status_code=201)
-async def event_connect_route(event_id: int, body: ConnectRequest, request: Request,
-                              ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
-                              db: Session = Depends(get_db_session)):
-    return await _do_connect(request, db, ctx, body, event_id)
-
-
 @pat_router.post("/pat/connect", status_code=201)
 async def net_connect_route(body: ConnectRequest, request: Request,
                             ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
                             db: Session = Depends(get_db_session)):
-    return await _do_connect(request, db, ctx, body, None)
+    return await _do_connect(request, db, ctx, body)
 
 
 @pat_router.get("/pat/sessions/{session_id}")
