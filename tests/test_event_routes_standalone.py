@@ -396,3 +396,63 @@ async def test_co_operator_403_on_transfer(owner_event):
     async with _c(app, settings, "W0COP") as c:
         r = await c.post(f"/api/events/{eid}/transfer", json={"callsign": "W0COP"})
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: ORM cascade for EventOperator + EventConfig; PAT session NULL out
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_delete_cascades_operator_config_and_nulls_pat_session(app_s):
+    from datetime import datetime, timezone
+    from backend.modules.events.models import Event, EventOperator, EventConfig, EventType, EventStatus
+    from backend.integrations.winlink.models import PatConnectionSession, PatSessionStatus
+
+    app, settings = app_s
+
+    # Create event via service so public_token etc. are set
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.post("/api/events", json={"name": "CascadeTest", "event_type": "emergency"})
+        assert r.status_code == 201
+        eid = r.json()["id"]
+
+    # Directly add an EventOperator and EventConfig row
+    with app.state.session_factory() as db:
+        db.add(EventOperator(event_id=eid, callsign="W0OP", added_by="W0NC",
+                             added_at=datetime.now(timezone.utc)))
+        db.add(EventConfig(event_id=eid, key="net_address", value="W0NE@winlink.org"))
+        # Add a PatConnectionSession referencing this event
+        from backend.modules.nets.models import Net
+        net = db.query(Net).first()
+        net_id = net.id if net else None
+        # Use a bare engine to get nets.id (may not exist); create dummy session
+        pat = PatConnectionSession(
+            net_id=None,
+            event_id=eid,
+            connect_url="http://localhost:8080",
+            method_label="test",
+            status=PatSessionStatus.COMPLETED,
+            actor="W0NC",
+            started_at=datetime.now(timezone.utc),
+        )
+        db.add(pat)
+        db.commit()
+        pat_id = pat.id
+
+    # DELETE the event via the API
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.delete(f"/api/events/{eid}")
+        assert r.status_code == 204
+
+    # Assert operator row and config row are GONE
+    with app.state.session_factory() as db:
+        op_rows = db.query(EventOperator).filter(EventOperator.event_id == eid).all()
+        cfg_rows = db.query(EventConfig).filter(EventConfig.event_id == eid).all()
+        assert op_rows == [], f"Expected no operator rows, got {op_rows}"
+        assert cfg_rows == [], f"Expected no config rows, got {cfg_rows}"
+
+        # PAT session still exists but event_id is NULL
+        pat_row = db.get(PatConnectionSession, pat_id)
+        assert pat_row is not None, "PAT session should still exist"
+        assert pat_row.event_id is None, f"Expected event_id=None, got {pat_row.event_id}"

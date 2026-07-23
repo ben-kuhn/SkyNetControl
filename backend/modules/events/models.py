@@ -97,6 +97,8 @@ class Event(Base):
     messages: Mapped[list["EventMessage"]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
+    operator_rows: Mapped[list["EventOperator"]] = relationship(cascade="all, delete-orphan")
+    config_rows: Mapped[list["EventConfig"]] = relationship(cascade="all, delete-orphan")
 
 
 class EventPost(Base):

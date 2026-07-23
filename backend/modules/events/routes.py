@@ -448,6 +448,8 @@ async def delete_event_route(
     if ctx.event.created_by != ctx.user.callsign and not ctx.user.is_admin:
         raise HTTPException(status_code=403, detail="Only the owner can delete")
     aprs_manager.stop(ctx.event.id)
+    from backend.integrations.winlink.models import PatConnectionSession
+    db.query(PatConnectionSession).filter(PatConnectionSession.event_id == ctx.event.id).update({"event_id": None})
     db.delete(ctx.event)
     db.commit()
 
