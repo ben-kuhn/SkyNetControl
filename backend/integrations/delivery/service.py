@@ -13,12 +13,33 @@ from backend.modules.nets.config_service import get_net_config
 logger = logging.getLogger(__name__)
 
 
-def _build_config(db: Session, backend_name: str, net_id: int) -> dict:
-    """Build config dict for a backend from per-net NetConfig + global AppConfig + Settings."""
+def _scoped_config_getter(db: Session, net_id: int | None, event_id: int | None):
+    """Return a getter reading per-scope config: net config when net_id is set,
+    event config (event override -> global -> default) when event_id is set."""
+    if event_id is not None:
+        from backend.modules.events.event_config_service import get_event_config
+
+        def _get(key: str, default: str = "") -> str:
+            val = get_event_config(db, event_id, key, default)
+            return val if val is not None else default
+
+        return _get
+
+    def _get(key: str, default: str = "") -> str:
+        return get_net_config(db, net_id, key, default)
+
+    return _get
+
+
+def _build_config(db: Session, backend_name: str, *, net_id: int | None = None, event_id: int | None = None) -> dict:
+    """Build config dict for a backend, sourced from per-net NetConfig (net_id) or
+    per-event EventConfig (event_id), plus global AppConfig + Settings. Exactly one
+    of net_id/event_id is set. Global keys (SMTP, groups.io api_key) stay global."""
     config: dict = {}
+    get = _scoped_config_getter(db, net_id, event_id)
 
     if backend_name == "email":
-        config["to_address"] = get_net_config(db, net_id, "delivery.email.to_address", "")
+        config["to_address"] = get("delivery.email.to_address", "")
         smtp = get_smtp_config(db)
         if smtp is not None:
             config["smtp_host"] = smtp.host
@@ -32,15 +53,19 @@ def _build_config(db: Session, backend_name: str, net_id: int) -> dict:
 
     elif backend_name == "groupsio":
         config["api_key"] = get_config_value(db, "delivery.groupsio.api_key", "")
-        config["group_name"] = get_net_config(db, net_id, "delivery.groupsio.group_name", "")
+        config["group_name"] = get("delivery.groupsio.group_name", "")
 
     elif backend_name == "winlink":
-        config["target_address"] = get_net_config(db, net_id, "delivery.winlink.target_address", "")
-        config["mailbox_path"] = get_net_config(db, net_id, "pat_mailbox_path", "")
-        net_address = get_net_config(db, net_id, "net_address", "")
+        config["target_address"] = get("delivery.winlink.target_address", "")
+        config["mailbox_path"] = get("pat_mailbox_path", "")
+        net_address = get("net_address", "")
         config["callsign"] = net_address.split("@")[0].upper() if "@" in net_address else net_address.upper()
-        from backend.integrations.winlink.pat_config import resolve_pat_config
-        config["pat_http"] = resolve_pat_config(db, net_id)
+        if event_id is not None:
+            from backend.integrations.winlink.pat_config import resolve_pat_config_for_event
+            config["pat_http"] = resolve_pat_config_for_event(db, event_id)
+        else:
+            from backend.integrations.winlink.pat_config import resolve_pat_config
+            config["pat_http"] = resolve_pat_config(db, net_id)
 
     return config
 
@@ -51,8 +76,9 @@ def dispatch_delivery(
     content_id: int,
     subject: str,
     body: str,
-    net_id: int,
+    net_id: int | None = None,
     *,
+    event_id: int | None = None,
     backends: list[str] | None = None,
     config_overrides: dict | None = None,
 ) -> bool:
@@ -60,14 +86,23 @@ def dispatch_delivery(
 
     Returns True if at least one backend succeeds.
 
+    Exactly one of net_id/event_id must be set: net_id for net workflows
+    (roster/reminders), event_id for event messages (sources event config).
+
     Optional keyword args:
       backends: if provided, use this list instead of reading delivery.backends
-                from net config.
+                from net/event config.
       config_overrides: a dict merged into the per-backend config after
                         _build_config (e.g. {"target_address": to_address}).
     """
+    assert (net_id is None) != (event_id is None), "exactly one of net_id/event_id must be set"
     if backends is not None:
         backend_names = backends
+    elif event_id is not None:
+        from backend.modules.events.event_config_service import get_event_config
+
+        backends_json = get_event_config(db, event_id, "delivery.backends", "[]")
+        backend_names = json.loads(backends_json)
     else:
         backends_json = get_net_config(db, net_id, "delivery.backends", "[]")
         backend_names = json.loads(backends_json)
@@ -79,7 +114,7 @@ def dispatch_delivery(
     any_success = False
 
     for name in backend_names:
-        config = _build_config(db, name, net_id)
+        config = _build_config(db, name, net_id=net_id, event_id=event_id)
         if config_overrides:
             config.update(config_overrides)
         # UNIQUE(content_type, content_id, backend) constrains delivery_logs
@@ -190,14 +225,17 @@ def retry_failed(
     db: Session,
     content_type: str,
     content_id: int,
-    net_id: int,
+    net_id: int | None = None,
     *,
+    event_id: int | None = None,
     backends: list[str] | None = None,
     config_overrides: dict | None = None,
     subject_override: str | None = None,
     body_override: str | None = None,
 ) -> bool:
     """Retry only failed delivery attempts for a piece of content.
+
+    Exactly one of net_id/event_id must be set (net vs event config scope).
 
     Optional keyword args:
       backends: if provided, only retry failed attempts for these backends
@@ -209,6 +247,7 @@ def retry_failed(
                         stored subject/body (used for form-message retries where
                         the form is rebuilt from EventMessageForm to re-attach).
     """
+    assert (net_id is None) != (event_id is None), "exactly one of net_id/event_id must be set"
     query = db.query(DeliveryLog).filter_by(
         content_type=content_type, content_id=content_id, status=DeliveryStatus.FAILED
     )
@@ -226,7 +265,7 @@ def retry_failed(
 
     any_success = False
     for log in failed_logs:
-        config = _build_config(db, log.backend, net_id)
+        config = _build_config(db, log.backend, net_id=net_id, event_id=event_id)
         if config_overrides:
             config.update(config_overrides)
         try:
