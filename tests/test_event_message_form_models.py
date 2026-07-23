@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timezone
 
 import pytest
@@ -9,7 +10,6 @@ from backend.db.base import Base
 from backend.modules.events.models import (
     Event, EventMessage, EventMessageForm, EventType, MessageDirection, MessageStatus,
 )
-from tests.conftest import make_test_net
 
 
 @pytest.fixture
@@ -23,8 +23,8 @@ def db():
 
 
 def _msg(db):
-    net = make_test_net(db)
-    event = Event(net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE")
+    event = Event(name="E", event_type=EventType.EMERGENCY, created_by="W0NE",
+                  public_token=secrets.token_urlsafe(16))
     db.add(event); db.commit(); db.refresh(event)
     m = EventMessage(event_id=event.id, msg_seq=1, direction=MessageDirection.OUTBOUND,
                      from_callsign="W0NE", to_address="KE0XYZ", subject="s", body="b",

@@ -10,9 +10,8 @@ from backend.modules.events.message_service import (
     set_message_status,
     validate_to_address,
 )
-from backend.modules.events.service import EventNotActiveError, close_event, create_event
-from backend.modules.nets.config_service import set_net_config_bulk
-from tests.conftest import make_test_net
+from backend.modules.events.service import EventNotActiveError, activate_event, close_event, create_event
+from backend.modules.events.event_config_service import set_event_config_bulk
 
 
 @pytest.fixture
@@ -32,12 +31,13 @@ def _no_callbook(monkeypatch):
 
 @pytest.fixture
 def event(db):
-    net = make_test_net(db)
     # No delivery backends configured → dispatch_delivery returns False but the
     # outbound row is still created (send failure is non-fatal, per spec).
-    set_net_config_bulk(db, net.id, {"net_address": "W0NE@winlink.org"})
-    return create_event(db, net_id=net.id, name="E", event_type=EventType.EMERGENCY,
-                        created_by="W0NE", activate=True)
+    e = create_event(db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE")
+    set_event_config_bulk(db, e.id, {"net_address": "W0NE@winlink.org"})
+    activate_event(db, e.id, actor="W0NE")
+    db.refresh(e)
+    return e
 
 
 class TestValidateAddress:
@@ -117,28 +117,26 @@ class TestDeliveryRouting:
 
     def test_sends_to_composed_recipient_not_roster_address(self, db, tmp_path):
         """The .b2f file written to the mailbox out/ dir must be addressed to
-        the composed to_address, NOT the net's roster delivery target_address."""
-        from pathlib import Path
+        the composed to_address, NOT any roster delivery target_address."""
         from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
 
         out_dir = tmp_path / "out"
         out_dir.mkdir()
 
-        net = make_test_net(db, slug="dr1")
-        set_net_config_bulk(db, net.id, {
+        e = create_event(db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE")
+        set_event_config_bulk(db, e.id, {
             "net_address": "W0NE@winlink.org",
             "pat_mailbox_path": str(tmp_path),
-            # net has email configured as its roster delivery backend,
+            # event has email configured as a delivery backend,
             # but event messages must override this with winlink-only
             "delivery.backends": '["email"]',
             "delivery.winlink.target_address": "ROSTER@winlink.org",
         })
-
-        event = create_event(db, net_id=net.id, name="E", event_type=EventType.EMERGENCY,
-                             created_by="W0NE", activate=True)
+        activate_event(db, e.id, actor="W0NE")
+        db.refresh(e)
 
         msg = send_event_message(
-            db, event.id, actor="W0NC", to_address="jane@redcross.org",
+            db, e.id, actor="W0NC", to_address="jane@redcross.org",
             subject="Status update", body="All clear",
         )
 
@@ -161,7 +159,7 @@ class TestDeliveryRouting:
         assert logs[0].status == DeliveryStatus.SENT
 
     def test_email_backend_not_invoked_even_when_configured(self, db, tmp_path):
-        """Even if the net's delivery.backends includes email, event messages
+        """Even if delivery.backends includes email, event messages
         go to winlink only (backends override)."""
         from unittest.mock import patch, MagicMock
         from backend.integrations.delivery.backends.base import DeliveryResult
@@ -170,20 +168,17 @@ class TestDeliveryRouting:
         out_dir = tmp_path / "out"
         out_dir.mkdir()
 
-        net = make_test_net(db, slug="dr2")
-        set_net_config_bulk(db, net.id, {
+        e = create_event(db, name="E2", event_type=EventType.EMERGENCY, created_by="W0NE")
+        set_event_config_bulk(db, e.id, {
             "net_address": "W0NE@winlink.org",
             "pat_mailbox_path": str(tmp_path),
             "delivery.backends": '["email"]',
             "delivery.email.to_address": "net@example.com",
         })
-
-        event = create_event(db, net_id=net.id, name="E2", event_type=EventType.EMERGENCY,
-                             created_by="W0NE", activate=True)
+        activate_event(db, e.id, actor="W0NE")
+        db.refresh(e)
 
         email_send_called = []
-
-        original_get_backend = None
 
         def mock_get_backend(name):
             from backend.integrations.delivery.backends import get_backend as _real
@@ -195,7 +190,7 @@ class TestDeliveryRouting:
 
         with patch("backend.integrations.delivery.service.get_backend", side_effect=mock_get_backend):
             send_event_message(
-                db, event.id, actor="W0NC", to_address="jane@redcross.org",
+                db, e.id, actor="W0NC", to_address="jane@redcross.org",
                 subject="Status", body="all clear",
             )
 

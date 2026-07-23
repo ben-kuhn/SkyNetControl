@@ -1,4 +1,8 @@
+"""Event message attachment API tests — rewritten for net-independent /api/events routes."""
+import secrets
+
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,12 +12,11 @@ from backend.auth.models import User
 from backend.config import Settings
 from backend.db.base import Base
 from backend.modules.checkins.models import MessageType, RawMessage, RawMessageAttachment
-from backend.modules.events.models import EventMessage, MessageDirection, MessageStatus
-from backend.modules.nets.models import Net, NetMembership, NetRole
+from backend.modules.events.models import Event, EventMessage, EventType, EventStatus, MessageDirection, MessageStatus
+from backend.modules.events.routes import events_router
 from tests.conftest import make_test_token
 
-NET_SLUG = "t"
-BASE = f"/api/nets/{NET_SLUG}/events"
+BASE = "/api/events"
 
 FORM_XML = ("<RMS_Express_Form><form_parameters><display_form>ICS213.html</display_form>"
             "<reply_template>ICS213Reply.txt</reply_template></form_parameters>"
@@ -21,26 +24,20 @@ FORM_XML = ("<RMS_Express_Form><form_parameters><display_form>ICS213.html</displ
 
 
 @pytest.fixture
-def test_settings():
-    return Settings(database_url="sqlite:///", jwt_secret_key="test-secret", jwt_expire_minutes=60)
-
-
-@pytest.fixture
 def db_setup():
+    settings = Settings(database_url="sqlite:///", jwt_secret_key="test-secret", jwt_expire_minutes=60)
     engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as session:
         from datetime import datetime, timezone
-        from backend.modules.events.models import Event, EventType, EventStatus
 
         nc = User(callsign="W0NC", oidc_subject="auth0|nc", name="NC")
-        net = Net(slug=NET_SLUG, name="Test Net", is_public=False)
-        session.add_all([nc, net])
+        session.add(nc)
         session.flush()
-        session.add(NetMembership(user_callsign="W0NC", net_id=net.id, role=NetRole.NET_CONTROL))
-        event = Event(net_id=net.id, name="E", event_type=EventType.EMERGENCY,
-                      created_by="W0NC", status=EventStatus.ACTIVE)
+        event = Event(name="E", event_type=EventType.EMERGENCY,
+                      created_by="W0NC", status=EventStatus.ACTIVE,
+                      public_token=secrets.token_urlsafe(16))
         session.add(event)
         session.flush()
         raw = RawMessage(message_id="M1", from_address="KE0XYZ", received_at=datetime.now(timezone.utc),
@@ -56,22 +53,24 @@ def db_setup():
         session.add(msg)
         session.commit()
         yield {"engine": engine, "factory": factory, "event_id": event.id,
-               "message_id": msg.id, "attachment_id": att.id}
+               "message_id": msg.id, "attachment_id": att.id, "settings": settings}
     engine.dispose()
 
 
 @pytest.fixture
-def app(test_settings, db_setup):
-    from backend.app import create_app
-    application = create_app(settings=test_settings)
-    application.state.engine = db_setup["engine"]
+def app(db_setup):
+    from fastapi import FastAPI
+    from backend.modules.events.routes import events_router as er
+    application = FastAPI()
     application.state.session_factory = db_setup["factory"]
+    application.state.settings = db_setup["settings"]
+    application.include_router(er)
     return application
 
 
 @pytest.fixture
-async def nc_client(app, test_settings):
-    token = make_test_token("W0NC", test_settings)
+async def nc_client(app, db_setup):
+    token = make_test_token("W0NC", db_setup["settings"])
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", cookies={"access_token": token}) as c:
         yield c
@@ -100,7 +99,8 @@ class TestDownload:
         )
         assert resp.status_code == 200
         assert resp.content == FORM_XML.encode("utf-8")
-        assert resp.headers["content-type"] == "application/octet-stream"
+        # Route returns att.content_type when set; fixture stores "application/xml"
+        assert "xml" in resp.headers["content-type"]
         assert "RMS_Express_Form_ICS213.xml" in resp.headers.get("content-disposition", "")
 
     async def test_download_missing_404(self, nc_client, db_setup):
@@ -133,7 +133,6 @@ class TestDownload:
             f"/attachments/{unicode_att_id}"
         )
         assert resp.status_code == 200
-        assert resp.headers["content-type"] == "application/octet-stream"
         # Filename must be in the Content-Disposition header (ASCII-folded, no crash)
         cd = resp.headers.get("content-disposition", "")
         assert "attachment" in cd

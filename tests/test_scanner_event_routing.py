@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 import backend.integrations.scanner.service as scanner_service
 from backend.db.base import Base
 from backend.modules.events.models import EventMessage, EventType
-from backend.modules.events.service import create_event
+from backend.modules.events.service import activate_event, create_event
 from backend.modules.nets.config_service import set_net_config_bulk
 from tests.conftest import make_test_net
 
@@ -32,8 +32,8 @@ def _no_callbook(monkeypatch):
 def test_scan_one_routes_to_active_event(db, monkeypatch):
     net = make_test_net(db)
     set_net_config_bulk(db, net.id, {"net_address": "W0NE@winlink.org"})
-    create_event(db, net_id=net.id, name="E", event_type=EventType.EMERGENCY,
-                 created_by="W0NE", activate=True)
+    e = create_event(db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE")
+    activate_event(db, e.id, actor="W0NE")
 
     # Stub the mailbox read to return one message; no session window needed for events.
     def fake_read_mailbox(inbox_path, net_address):

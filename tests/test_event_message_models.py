@@ -1,3 +1,5 @@
+import secrets
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +15,6 @@ from backend.modules.events.models import (
     MessageDirection,
     MessageStatus,
 )
-from tests.conftest import make_test_net
 
 
 @pytest.fixture
@@ -28,8 +29,8 @@ def db():
 
 @pytest.fixture
 def event(db):
-    net = make_test_net(db)
-    event = Event(net_id=net.id, name="Tornado", event_type=EventType.EMERGENCY, created_by="W0NE")
+    event = Event(name="Tornado", event_type=EventType.EMERGENCY, created_by="W0NE",
+                  public_token=secrets.token_urlsafe(16))
     db.add(event)
     db.commit()
     db.refresh(event)

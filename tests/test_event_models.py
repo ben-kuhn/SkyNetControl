@@ -1,3 +1,5 @@
+import secrets
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +17,6 @@ from backend.modules.events.models import (
     EventType,
     ParticipantStatus,
 )
-from tests.conftest import make_test_net
 
 
 @pytest.fixture
@@ -32,17 +33,12 @@ def db():
     engine.dispose()
 
 
-@pytest.fixture
-def net(db):
-    return make_test_net(db)
-
-
-def make_event(db, net, **overrides):
+def make_event(db, **overrides):
     event = Event(
-        net_id=net.id,
         name=overrides.get("name", "Field Day"),
         event_type=overrides.get("event_type", EventType.PUBLIC_SERVICE),
         created_by=overrides.get("created_by", "W0NE"),
+        public_token=secrets.token_urlsafe(16),
     )
     db.add(event)
     db.commit()
@@ -50,8 +46,8 @@ def make_event(db, net, **overrides):
     return event
 
 
-def test_event_defaults(db, net):
-    event = make_event(db, net)
+def test_event_defaults(db):
+    event = make_event(db)
     assert event.status == EventStatus.DRAFT
     assert event.log_seq == 0
     assert event.activated_at is None
@@ -59,8 +55,8 @@ def test_event_defaults(db, net):
     assert event.created_at is not None
 
 
-def test_post_unique_name_per_event(db, net):
-    event = make_event(db, net)
+def test_post_unique_name_per_event(db):
+    event = make_event(db)
     db.add(EventPost(event_id=event.id, name="Rest Stop 3"))
     db.commit()
     db.add(EventPost(event_id=event.id, name="Rest Stop 3"))
@@ -68,13 +64,13 @@ def test_post_unique_name_per_event(db, net):
         db.commit()
     db.rollback()
     # Same name on a different event is fine
-    other = make_event(db, net, name="Other")
+    other = make_event(db, name="Other")
     db.add(EventPost(event_id=other.id, name="Rest Stop 3"))
     db.commit()
 
 
-def test_participant_unique_callsign_per_event(db, net):
-    event = make_event(db, net)
+def test_participant_unique_callsign_per_event(db):
+    event = make_event(db)
     db.add(EventParticipant(event_id=event.id, callsign="KE0XYZ"))
     db.commit()
     db.add(EventParticipant(event_id=event.id, callsign="KE0XYZ"))
@@ -83,8 +79,8 @@ def test_participant_unique_callsign_per_event(db, net):
     db.rollback()
 
 
-def test_participant_defaults(db, net):
-    event = make_event(db, net)
+def test_participant_defaults(db):
+    event = make_event(db)
     p = EventParticipant(event_id=event.id, callsign="KE0XYZ")
     db.add(p)
     db.commit()
@@ -95,8 +91,8 @@ def test_participant_defaults(db, net):
     assert p.post_id is None
 
 
-def test_log_entry_unique_seq_per_event(db, net):
-    event = make_event(db, net)
+def test_log_entry_unique_seq_per_event(db):
+    event = make_event(db)
     db.add(EventLogEntry(
         event_id=event.id, seq=1, entry_type=EventLogType.SYSTEM,
         actor="W0NE", message="Event activated",
@@ -111,8 +107,8 @@ def test_log_entry_unique_seq_per_event(db, net):
     db.rollback()
 
 
-def test_log_entry_defaults(db, net):
-    event = make_event(db, net)
+def test_log_entry_defaults(db):
+    event = make_event(db)
     entry = EventLogEntry(
         event_id=event.id, seq=1, entry_type=EventLogType.SYSTEM,
         actor="W0NE", message="KE0XYZ checked in", callsign="KE0XYZ",
@@ -125,8 +121,8 @@ def test_log_entry_defaults(db, net):
     assert entry.created_at is not None
 
 
-def test_event_cascade_delete(db, net):
-    event = make_event(db, net)
+def test_event_cascade_delete(db):
+    event = make_event(db)
     db.add(EventPost(event_id=event.id, name="EOC"))
     db.add(EventParticipant(event_id=event.id, callsign="KE0XYZ"))
     db.add(EventLogEntry(

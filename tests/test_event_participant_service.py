@@ -18,6 +18,7 @@ from backend.modules.events.service import (
     EventNotActiveError,
     InvalidPostError,
     InvalidStatusTransitionError,
+    activate_event,
     add_note,
     check_in,
     close_event,
@@ -27,7 +28,6 @@ from backend.modules.events.service import (
     set_log_pinned,
     update_participant,
 )
-from tests.conftest import make_test_net
 
 
 @pytest.fixture
@@ -45,16 +45,13 @@ def db():
 
 
 @pytest.fixture
-def net(db):
-    return make_test_net(db)
-
-
-@pytest.fixture
-def event(db, net):
-    return create_event(
-        db, net_id=net.id, name="Tornado Watch", event_type=EventType.EMERGENCY,
-        created_by="W0NE", activate=True,
+def event(db):
+    e = create_event(
+        db, name="Tornado Watch", event_type=EventType.EMERGENCY, created_by="W0NE"
     )
+    activate_event(db, e.id, actor="W0NE")
+    db.refresh(e)
+    return e
 
 
 @pytest.fixture(autouse=True)
@@ -124,18 +121,18 @@ class TestCheckIn:
         assert p.post_id == post.id
         assert "EOC" in _last_log(db, event.id).message
 
-    def test_check_in_with_foreign_post_raises(self, db, net, event):
+    def test_check_in_with_foreign_post_raises(self, db, event):
         other = create_event(
-            db, net_id=net.id, name="Other", event_type=EventType.EMERGENCY,
-            created_by="W0NE", activate=True,
+            db, name="Other", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, other.id, actor="W0NE")
         foreign_post = create_post(db, other.id, name="Elsewhere")
         with pytest.raises(InvalidPostError):
             check_in(db, event.id, callsign="KE0XYZ", actor="W0NC", post_id=foreign_post.id)
 
-    def test_check_in_on_inactive_event_raises(self, db, net):
+    def test_check_in_on_inactive_event_raises(self, db):
         draft = create_event(
-            db, net_id=net.id, name="D", event_type=EventType.EMERGENCY, created_by="W0NE"
+            db, name="D", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
         with pytest.raises(EventNotActiveError):
             check_in(db, draft.id, callsign="KE0XYZ", actor="W0NC")

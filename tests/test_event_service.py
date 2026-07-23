@@ -28,7 +28,6 @@ from backend.modules.events.service import (
     update_post,
     add_note,
 )
-from tests.conftest import make_test_net
 
 
 @pytest.fixture
@@ -45,11 +44,6 @@ def db():
     engine.dispose()
 
 
-@pytest.fixture
-def net(db):
-    return make_test_net(db)
-
-
 def _log_messages(db, event_id):
     entries = (
         db.query(EventLogEntry)
@@ -61,77 +55,83 @@ def _log_messages(db, event_id):
 
 
 class TestLifecycle:
-    def test_create_draft(self, db, net):
+    def test_create_draft(self, db):
         event = create_event(
-            db, net_id=net.id, name="Marathon", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
+            db, name="Marathon", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
         )
         assert event.status == EventStatus.DRAFT
         assert event.activated_at is None
         assert _log_messages(db, event.id) == []
 
-    def test_create_and_activate(self, db, net):
+    def test_create_and_activate(self, db):
         event = create_event(
-            db, net_id=net.id, name="Tornado", event_type=EventType.EMERGENCY,
-            created_by="W0NE", activate=True,
+            db, name="Tornado", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
+        db.refresh(event)
         assert event.status == EventStatus.ACTIVE
         assert event.activated_at is not None
         msgs = _log_messages(db, event.id)
         assert msgs == [(1, EventLogType.SYSTEM, "Event activated")]
         assert event.log_seq == 1
 
-    def test_activate_draft(self, db, net):
+    def test_activate_draft(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
+            db, name="E", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
         )
         result = activate_event(db, event.id, actor="W0NC")
         assert result.status == EventStatus.ACTIVE
         assert result.activated_at is not None
 
-    def test_activate_non_draft_raises(self, db, net):
+    def test_activate_non_draft_raises(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE", activate=True
+            db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
         with pytest.raises(InvalidLifecycleError):
             activate_event(db, event.id, actor="W0NE")
 
-    def test_close_active(self, db, net):
+    def test_close_active(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE", activate=True
+            db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
         result = close_event(db, event.id, actor="W0NE")
         assert result.status == EventStatus.CLOSED
         assert result.closed_at is not None
         assert _log_messages(db, event.id)[-1][2] == "Event closed"
 
-    def test_close_draft_raises(self, db, net):
+    def test_close_draft_raises(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
+            db, name="E", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
         )
         with pytest.raises(InvalidLifecycleError):
             close_event(db, event.id, actor="W0NE")
 
-    def test_reopen_closed(self, db, net):
+    def test_reopen_closed(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE", activate=True
+            db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
         close_event(db, event.id, actor="W0NE")
         result = reopen_event(db, event.id, actor="W0NE")
         assert result.status == EventStatus.ACTIVE
         assert result.closed_at is None
         assert _log_messages(db, event.id)[-1][2] == "Event reopened"
 
-    def test_reopen_active_raises(self, db, net):
+    def test_reopen_active_raises(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE", activate=True
+            db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
         with pytest.raises(InvalidLifecycleError):
             reopen_event(db, event.id, actor="W0NE")
 
-    def test_seq_is_monotonic(self, db, net):
+    def test_seq_is_monotonic(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE", activate=True
+            db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
         close_event(db, event.id, actor="W0NE")
         reopen_event(db, event.id, actor="W0NE")
         seqs = [s for s, _, _ in _log_messages(db, event.id)]
@@ -139,18 +139,19 @@ class TestLifecycle:
         db.refresh(event)
         assert event.log_seq == 3
 
-    def test_update_event_fields(self, db, net):
+    def test_update_event_fields(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
+            db, name="E", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
         )
         result = update_event(db, event.id, name="Renamed", description="desc")
         assert result.name == "Renamed"
         assert result.description == "desc"
 
-    def test_update_closed_event_raises(self, db, net):
+    def test_update_closed_event_raises(self, db):
         event = create_event(
-            db, net_id=net.id, name="E", event_type=EventType.EMERGENCY, created_by="W0NE", activate=True
+            db, name="E", event_type=EventType.EMERGENCY, created_by="W0NE"
         )
+        activate_event(db, event.id, actor="W0NE")
         close_event(db, event.id, actor="W0NE")
         with pytest.raises(EventNotActiveError):
             update_event(db, event.id, name="Nope")
@@ -158,20 +159,22 @@ class TestLifecycle:
 
 class TestPosts:
     @pytest.fixture
-    def event(self, db, net):
-        return create_event(
-            db, net_id=net.id, name="Marathon", event_type=EventType.PUBLIC_SERVICE,
-            created_by="W0NE", activate=True,
+    def event(self, db):
+        e = create_event(
+            db, name="Marathon", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
         )
+        activate_event(db, e.id, actor="W0NE")
+        db.refresh(e)
+        return e
 
     def test_create_post(self, db, event):
         post = create_post(db, event.id, name="Rest Stop 3", lat=39.1, lon=-94.6)
         assert post.id is not None
         assert post.lat == 39.1
 
-    def test_create_post_on_draft_event(self, db, net):
+    def test_create_post_on_draft_event(self, db):
         draft = create_event(
-            db, net_id=net.id, name="D", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
+            db, name="D", event_type=EventType.PUBLIC_SERVICE, created_by="W0NE"
         )
         post = create_post(db, draft.id, name="SAG 1")
         assert post.id is not None
