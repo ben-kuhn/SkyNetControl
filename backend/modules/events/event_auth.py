@@ -66,7 +66,9 @@ def require_event_role(min_role: EventRole) -> Callable:
         if event.visibility == "public":
             if user is not None:
                 return EventContext(user=user, event=event, is_control=False)
-            if token and secrets.compare_digest(token, event.public_token):
+            # Compare UTF-8 bytes: compare_digest raises TypeError on non-ASCII str,
+            # which would 500 (and leak a public-event existence oracle) on a bad token.
+            if token and secrets.compare_digest(token.encode("utf-8"), event.public_token.encode("utf-8")):
                 return EventContext(user=None, event=event, is_control=False)
             # Anonymous with wrong/absent token: 404 (no existence signal)
             raise HTTPException(status_code=404, detail="Event not found")

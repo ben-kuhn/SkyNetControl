@@ -136,3 +136,14 @@ async def test_constant_time_token_comparison_denies_wrong_token(app_ctx):
     pub = ids["pub"]
     async with _c(app, settings) as c:
         assert (await c.get(f"/ev/{pub}/read?token=wrongtoken")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_token_is_404_not_500(app_ctx):
+    """Regression: a non-ASCII token must compare cleanly (UTF-8 bytes) and 404 —
+    compare_digest on a non-ASCII str raises TypeError, which would 500 and leak
+    a public-event existence oracle."""
+    app, settings, ids = app_ctx
+    pub = ids["pub"]
+    async with _c(app, settings) as c:
+        assert (await c.get(f"/ev/{pub}/read?token=é")).status_code == 404
