@@ -99,8 +99,8 @@ class TestDownload:
         )
         assert resp.status_code == 200
         assert resp.content == FORM_XML.encode("utf-8")
-        # Route returns att.content_type when set; fixture stores "application/xml"
-        assert "xml" in resp.headers["content-type"]
+        # Route always returns application/octet-stream (hardened — no attacker-controlled type)
+        assert "octet-stream" in resp.headers["content-type"]
         assert "RMS_Express_Form_ICS213.xml" in resp.headers.get("content-disposition", "")
 
     async def test_download_missing_404(self, nc_client, db_setup):
@@ -136,3 +136,38 @@ class TestDownload:
         # Filename must be in the Content-Disposition header (ASCII-folded, no crash)
         cd = resp.headers.get("content-disposition", "")
         assert "attachment" in cd
+
+    async def test_download_injection_filename_sanitized(self, nc_client, db_setup):
+        """Fix 3: filename with CRLF, quotes, backslash, non-ASCII and content_type text/html
+        must be served as octet-stream with sanitized filename (no quotes, no CRLF)."""
+        from backend.modules.checkins.models import RawMessageAttachment
+
+        with db_setup["factory"]() as session:
+            existing = session.get(RawMessageAttachment, db_setup["attachment_id"])
+            evil_att = RawMessageAttachment(
+                raw_message_id=existing.raw_message_id,
+                filename='evil\r\nfile"name\\test\xc3\xa9.txt',
+                content_type="text/html",
+                data=b"<script>alert(1)</script>",
+            )
+            session.add(evil_att)
+            session.commit()
+            evil_id = evil_att.id
+
+        resp = await nc_client.get(
+            f"{BASE}/{db_setup['event_id']}/messages/{db_setup['message_id']}"
+            f"/attachments/{evil_id}"
+        )
+        assert resp.status_code == 200
+        # Must be octet-stream, not text/html
+        assert "octet-stream" in resp.headers["content-type"]
+        cd = resp.headers.get("content-disposition", "")
+        # No raw quote characters in the filename
+        # The header value is: attachment; filename="..." — the surrounding quotes
+        # are part of the header format. We check that no extra unescaped quotes appear
+        # inside the filename portion.
+        filename_part = cd.split('filename="', 1)[-1] if 'filename="' in cd else ""
+        # Strip the closing quote
+        filename_part = filename_part.rstrip('"')
+        assert '"' not in filename_part, f"Unescaped quote in filename: {cd}"
+        assert "\r" not in cd and "\n" not in cd, f"CRLF in Content-Disposition: {cd!r}"

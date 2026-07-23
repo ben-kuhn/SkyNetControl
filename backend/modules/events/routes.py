@@ -842,10 +842,14 @@ async def download_attachment_route(
     if att is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
+    safe_name = att.filename.replace("\r", "").replace("\n", "").replace('"', "").replace("\\", "")
+    safe_name = safe_name.encode("ascii", errors="replace").decode("ascii").replace("?", "_")
+    if not safe_name:
+        safe_name = "attachment"
     return Response(
         content=att.data,
-        media_type=att.content_type or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{att.filename}"'},
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
     )
 
 
