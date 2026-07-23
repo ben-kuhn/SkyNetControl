@@ -749,7 +749,7 @@ async def compose_message_route(
     extras = _message_extras(db, message)
     return {
         "message": _message_to_response(message, extras),
-        "delivered": extras.get("delivery_status") is not None,
+        "delivered": extras.get("delivery_status") == "sent",
     }
 
 
@@ -947,7 +947,7 @@ async def form_send_route(
     extras = _message_extras(db, message)
     return {
         "message": _message_to_response(message, extras),
-        "delivered": extras.get("delivery_status") is not None,
+        "delivered": extras.get("delivery_status") == "sent",
     }
 
 

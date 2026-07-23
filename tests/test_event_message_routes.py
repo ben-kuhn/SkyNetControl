@@ -430,3 +430,64 @@ class TestRetryMessage:
     async def test_retry_missing_404(self, nc_client, active_event):
         resp = await nc_client.post(f"{BASE}/{active_event}/messages/9999/retry")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: delivered flag only true when delivery_status == "sent"
+# ---------------------------------------------------------------------------
+
+
+class TestDeliveredFlag:
+    async def test_delivered_false_when_status_is_failed(self, nc_client, active_event, db_setup, monkeypatch):
+        """Fix 4: compose endpoint returns delivered=False when delivery_log status is 'failed'."""
+        from backend.integrations.delivery.backends.winlink import WinlinkBackend
+        from backend.integrations.delivery.models import DeliveryLog, DeliveryStatus
+        from backend.modules.events.event_config_service import set_event_config
+
+        # Configure winlink backend so delivery actually runs
+        with db_setup["factory"]() as db:
+            set_event_config(db, active_event, "delivery.backends", '["winlink"]')
+
+        def mock_send_fail(self, subject, body, config):
+            from backend.integrations.delivery.backends.base import DeliveryResult
+            return DeliveryResult(success=False, error="connection refused")
+
+        monkeypatch.setattr(WinlinkBackend, "send", mock_send_fail)
+
+        # Send — delivery fails → delivery_status="failed" → delivered=False
+        resp = await nc_client.post(f"{BASE}/{active_event}/messages", json={
+            "to_address": "dest@example.com", "subject": "Test", "body": "hello",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["delivered"] is False, (
+            f"Expected delivered=False for failed delivery, got {resp.json()['delivered']}"
+        )
+
+        # Also verify list endpoint reflects delivery_status=failed
+        message_id = resp.json()["message"]["id"]
+        msgs = (await nc_client.get(f"{BASE}/{active_event}/messages")).json()["messages"]
+        out = [m for m in msgs if m["id"] == message_id]
+        assert len(out) == 1
+        assert out[0]["delivery_status"] == "failed"
+
+    async def test_delivered_true_when_status_is_sent(self, nc_client, active_event, db_setup, monkeypatch):
+        """Fix 4: compose endpoint returns delivered=True when delivery_log status is 'sent'."""
+        from backend.integrations.delivery.backends.winlink import WinlinkBackend
+        from backend.modules.events.event_config_service import set_event_config
+
+        # Configure winlink backend so delivery actually runs and sets status=sent
+        with db_setup["factory"]() as db:
+            set_event_config(db, active_event, "delivery.backends", '["winlink"]')
+
+        def mock_send(self, subject, body, config):
+            from backend.integrations.delivery.backends.base import DeliveryResult
+            return DeliveryResult(success=True, error=None)
+
+        monkeypatch.setattr(WinlinkBackend, "send", mock_send)
+
+        resp = await nc_client.post(f"{BASE}/{active_event}/messages", json={
+            "to_address": "dest@example.com", "subject": "Sent Test", "body": "ok",
+        })
+        assert resp.status_code == 201
+        # Backend sent successfully → delivery_status is "sent" → delivered=True
+        assert resp.json()["delivered"] is True
