@@ -43,10 +43,11 @@ no longer own events.
 
 ### Data model
 
-- **`events`**: `net_id` leaves the event workflow — nullable in the migration and
-  removed from the permission/config path. `created_by` (existing) is the
-  **owner**. Add `public_token` (unguessable, `secrets.token_urlsafe`, rotatable)
-  and `visibility` (`private` | `public`, default `private`).
+- **`events`**: `net_id` is **dropped entirely** — events are net-free, and no
+  consumer remains after the config/permission re-sourcing below. `created_by`
+  (existing) is the **owner**. Add `public_token` (unguessable,
+  `secrets.token_urlsafe`, rotatable) and `visibility` (`private` | `public`,
+  default `private`).
 - **`event_operators`** (new): `(event_id, callsign, added_by, added_at)` —
   co-operators with equal NCS control. PK `(event_id, callsign)`.
 - **`event_config`** (new): `(event_id, key, value)`, PK `(event_id, key)` —
@@ -142,17 +143,21 @@ by `event_id`, so only config-sourcing and auth change under them.
 
 A single Alembic migration:
 
-1. Create `event_config` and `event_operators`.
-2. Add `public_token` + `visibility` to `events`.
-3. Make `events.net_id` and `pat_connection_sessions.net_id` **nullable** (remove
-   from the event flow).
-4. **Delete all existing events and their child rows** (`event_posts`,
+1. **Delete all existing events and their child rows** (`event_posts`,
    `event_participants`, `event_log`, `event_messages`, `event_message_forms`,
-   event-scoped `pat_connection_sessions`) for a clean slate — no data
-   preservation.
+   event-scoped `pat_connection_sessions`) FIRST — clean slate, no data
+   preservation. (Done before the column drop so the `events.net_id` FK has no
+   dependent rows.)
+2. Create `event_config` and `event_operators`.
+3. Add `public_token` + `visibility` to `events`.
+4. **Drop `events.net_id`** (column + FK) entirely — events are net-free.
+5. Make `pat_connection_sessions.net_id` **nullable** — an event-triggered PAT
+   session has no net; a net-scoped session (async-net Winlink) still sets it.
 
-Downgrade recreates the prior nullability constraints and drops the new
-tables/columns (data loss on downgrade is acceptable — this is a reset).
+Downgrade recreates `events.net_id` (nullable — the original data is gone) and the
+`pat_connection_sessions.net_id` NOT NULL constraint, and drops the new
+tables/columns. Data loss on downgrade is acceptable — this is a reset. SQLite
+column drop/re-add uses `batch_alter_table`.
 
 ## Build sequence
 
