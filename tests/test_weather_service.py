@@ -4,9 +4,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.db.base import Base
-from backend.modules.nets.models import Net
-from backend.modules.nets.config_service import set_net_config
 from backend.modules.events.models import Event, EventPost, EventType, EventStatus
+from backend.modules.events.event_config_service import set_event_config
 from backend.integrations.weather import service as weather_service
 from backend.integrations.weather.client import WeatherUnavailable
 
@@ -35,11 +34,10 @@ def _db():
     engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine, expire_on_commit=False)()
-    net = Net(slug="t", name="T"); db.add(net); db.flush()
-    ev = Event(net_id=net.id, name="E", event_type=EventType.EMERGENCY, status=EventStatus.ACTIVE,
-               created_by="W0NE", aprs_range_lat=44.98, aprs_range_lon=-93.27)
+    ev = Event(name="E", event_type=EventType.EMERGENCY, status=EventStatus.ACTIVE,
+               created_by="W0NE", public_token="test_token", aprs_range_lat=44.98, aprs_range_lon=-93.27)
     db.add(ev); db.flush()
-    return db, net.id, ev.id
+    return db, ev.id
 
 
 def setup_function():
@@ -47,16 +45,16 @@ def setup_function():
 
 
 def test_disabled_returns_disabled_status():
-    db, net_id, ev_id = _db()
+    db, ev_id = _db()
     r = weather_service.get_event_alerts(db, ev_id, client=FakeClient())
     assert r["status"] == "disabled"
     assert r["alerts"] == EMPTY
 
 
 def test_enabled_with_configured_states_fetches_ok():
-    db, net_id, ev_id = _db()
-    set_net_config(db, net_id, "weather.enabled", "true")
-    set_net_config(db, net_id, "weather.alert_states", '["MN"]')
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
+    set_event_config(db, ev_id, "weather.alert_states", '["MN"]')
     r = weather_service.get_event_alerts(db, ev_id, client=FakeClient(alerts=ONE))
     assert r["status"] == "ok"
     assert r["alerts"]["features"][0]["id"] == "A"
@@ -64,16 +62,16 @@ def test_enabled_with_configured_states_fetches_ok():
 
 
 def test_area_derived_from_event_location_when_no_states():
-    db, net_id, ev_id = _db()
-    set_net_config(db, net_id, "weather.enabled", "true")
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
     fc = FakeClient(state="MN")
     r = weather_service.get_event_alerts(db, ev_id, client=fc)
     assert r["status"] == "ok"  # derived MN from aprs_range_lat/lon
 
 
 def test_no_area_when_no_states_and_no_location():
-    db, net_id, ev_id = _db()
-    set_net_config(db, net_id, "weather.enabled", "true")
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
     # remove the event location + posts
     ev = db.get(Event, ev_id); ev.aprs_range_lat = None; ev.aprs_range_lon = None; db.commit()
     r = weather_service.get_event_alerts(db, ev_id, client=FakeClient(state=None))
@@ -81,9 +79,9 @@ def test_no_area_when_no_states_and_no_location():
 
 
 def test_cache_shared_within_ttl():
-    db, net_id, ev_id = _db()
-    set_net_config(db, net_id, "weather.enabled", "true")
-    set_net_config(db, net_id, "weather.alert_states", '["MN"]')
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
+    set_event_config(db, ev_id, "weather.alert_states", '["MN"]')
     fc = FakeClient()
     weather_service.get_event_alerts(db, ev_id, client=fc, now=1000.0)
     weather_service.get_event_alerts(db, ev_id, client=fc, now=1030.0)  # within 60s
@@ -93,9 +91,9 @@ def test_cache_shared_within_ttl():
 
 
 def test_stale_while_error_serves_last_good():
-    db, net_id, ev_id = _db()
-    set_net_config(db, net_id, "weather.enabled", "true")
-    set_net_config(db, net_id, "weather.alert_states", '["MN"]')
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
+    set_event_config(db, ev_id, "weather.alert_states", '["MN"]')
     weather_service.get_event_alerts(db, ev_id, client=FakeClient(alerts=ONE), now=1000.0)
     r = weather_service.get_event_alerts(db, ev_id, client=FakeClient(unavailable=True), now=1100.0)
     assert r["status"] == "stale"
@@ -103,9 +101,9 @@ def test_stale_while_error_serves_last_good():
 
 
 def test_unavailable_with_no_cache():
-    db, net_id, ev_id = _db()
-    set_net_config(db, net_id, "weather.enabled", "true")
-    set_net_config(db, net_id, "weather.alert_states", '["MN"]')
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
+    set_event_config(db, ev_id, "weather.alert_states", '["MN"]')
     r = weather_service.get_event_alerts(db, ev_id, client=FakeClient(unavailable=True))
     assert r["status"] == "unavailable"
     assert r["alerts"] == EMPTY

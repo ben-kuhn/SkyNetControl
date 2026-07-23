@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from backend.modules.events.models import Event, EventPost
-from backend.modules.nets.config_service import get_net_config
+from backend.modules.events.event_config_service import get_event_config, event_from_callsign
 from backend.integrations.weather.client import WeatherClient, WeatherUnavailable
 
 WEATHER_TTL_SECONDS = 60.0
@@ -25,13 +25,15 @@ def clear_weather_cache() -> None:
     _CACHE.clear()
 
 
-def _weather_enabled(db: Session, net_id: int) -> bool:
-    return (get_net_config(db, net_id, "weather.enabled") or "").strip().lower() == "true"
+def _weather_enabled(db: Session, event: Event) -> bool:
+    return (get_event_config(db, event.id, "weather.enabled") or "").strip().lower() == "true"
 
 
-def _user_agent(db: Session, net_id: int) -> str:
-    contact = (get_net_config(db, net_id, "weather.nws_contact")
-               or get_net_config(db, net_id, "net_address") or "").strip()
+def _user_agent(db: Session, event: Event) -> str:
+    contact = (get_event_config(db, event.id, "weather.nws_contact") or "").strip()
+    if not contact:
+        na = (get_event_config(db, event.id, "net_address") or "").strip()
+        contact = na or event_from_callsign(db, event)
     return f"SkyNetControl ({contact})" if contact else "SkyNetControl"
 
 
@@ -46,7 +48,7 @@ def _event_location(db: Session, event: Event) -> tuple[float, float] | None:
 
 
 def _resolve_states(db: Session, event: Event, client: WeatherClient) -> list[str]:
-    raw = get_net_config(db, event.net_id, "weather.alert_states")
+    raw = get_event_config(db, event.id, "weather.alert_states")
     if raw:
         try:
             states = [str(s).strip().upper() for s in json.loads(raw) if str(s).strip()]
@@ -66,11 +68,11 @@ def get_event_alerts(db: Session, event_id: int, *, client: WeatherClient | None
     event = db.get(Event, event_id)
     if event is None:
         return {"alerts": _EMPTY, "updated_at": None, "status": "no_area"}
-    if not _weather_enabled(db, event.net_id):
+    if not _weather_enabled(db, event):
         return {"alerts": _EMPTY, "updated_at": None, "status": "disabled"}
 
     if client is None:
-        client = WeatherClient(user_agent=_user_agent(db, event.net_id))
+        client = WeatherClient(user_agent=_user_agent(db, event))
     if now is None:
         now = _time.monotonic()
 
