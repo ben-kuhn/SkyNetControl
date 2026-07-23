@@ -17,8 +17,9 @@ from backend.modules.events.models import (
     MessageDirection,
     MessageStatus,
 )
+from backend.modules.events.event_config_service import set_event_config
 from backend.modules.events.messages import route_event_messages
-from backend.modules.events.service import check_in, create_event
+from backend.modules.events.service import activate_event, check_in, create_event
 from tests.conftest import make_test_net
 
 
@@ -60,8 +61,8 @@ def _persist_raw(db, d):
 
 
 def _active_event(db, net, name="E"):
-    return create_event(db, net_id=net.id, name=name, event_type=EventType.EMERGENCY,
-                        created_by="W0NE", activate=True)
+    event = create_event(db, name=name, event_type=EventType.EMERGENCY, created_by="W0NE")
+    return activate_event(db, event.id, actor="W0NE")
 
 
 class TestRouting:
@@ -127,7 +128,7 @@ class TestRouting:
         assert {m.event_id for m in db.query(EventMessage).all()} == {e1.id, e2.id}
 
     def test_skips_non_active_events(self, db, net):
-        draft = create_event(db, net_id=net.id, name="D", event_type=EventType.EMERGENCY, created_by="W0NE")
+        draft = create_event(db, name="D", event_type=EventType.EMERGENCY, created_by="W0NE")
         assert draft.status == EventStatus.DRAFT
         d = _raw_dict("M1")
         _persist_raw(db, d)
@@ -139,3 +140,57 @@ class TestRouting:
         # Note: NOT persisted — routing must resolve the RawMessage by message_id
         # and skip if absent (check-in pass persists it; if it didn't, skip).
         assert route_event_messages(db, net.id, [d]) == 0
+
+    # ------------------------------------------------------------------
+    # Cross-event address isolation (EP1 multi-concurrent-event scenario)
+    # ------------------------------------------------------------------
+
+    def test_cross_event_no_fanout(self, db, net):
+        """Two active events with distinct net_address callsigns each receive ONLY
+        messages addressed to them — no cross-event mis-routing."""
+        e1 = _active_event(db, net, "E-W0NE")
+        e2 = _active_event(db, net, "E-W0NC")
+        set_event_config(db, e1.id, "net_address", "W0NE@winlink.org")
+        set_event_config(db, e2.id, "net_address", "W0NC@winlink.org")
+
+        d1 = {"message_id": "X1", "from_address": "KE0AAA@winlink.org",
+               "to_address": "W0NE@winlink.org", "subject": "to-NE", "body": "",
+               "received_at": _raw_dict("X1")["received_at"], "path": None}
+        d2 = {"message_id": "X2", "from_address": "KE0BBB@winlink.org",
+               "to_address": "W0NC@winlink.org", "subject": "to-NC", "body": "",
+               "received_at": _raw_dict("X2")["received_at"], "path": None}
+        _persist_raw(db, d1)
+        _persist_raw(db, d2)
+
+        n = route_event_messages(db, net.id, [d1, d2])
+        assert n == 2  # one per event, not four
+
+        e1_msgs = db.query(EventMessage).filter(EventMessage.event_id == e1.id).all()
+        e2_msgs = db.query(EventMessage).filter(EventMessage.event_id == e2.id).all()
+
+        assert len(e1_msgs) == 1
+        assert e1_msgs[0].to_address == "W0NE@winlink.org"
+
+        assert len(e2_msgs) == 1
+        assert e2_msgs[0].to_address == "W0NC@winlink.org"
+
+    def test_catchall_event_receives_all(self, db, net):
+        """An active event with NO net_address configured acts as a catch-all and
+        receives every inbound message regardless of to_address (backward compat)."""
+        event = _active_event(db, net, "Catchall")
+        # Deliberately do NOT set net_address — it stays unconfigured.
+
+        d1 = {"message_id": "Y1", "from_address": "KE0AAA@winlink.org",
+               "to_address": "W0NE@winlink.org", "subject": "msg1", "body": "",
+               "received_at": _raw_dict("Y1")["received_at"], "path": None}
+        d2 = {"message_id": "Y2", "from_address": "KE0BBB@winlink.org",
+               "to_address": "W0NC@winlink.org", "subject": "msg2", "body": "",
+               "received_at": _raw_dict("Y2")["received_at"], "path": None}
+        _persist_raw(db, d1)
+        _persist_raw(db, d2)
+
+        n = route_event_messages(db, net.id, [d1, d2])
+        assert n == 2  # both delivered to the one catch-all event
+
+        msgs = db.query(EventMessage).filter(EventMessage.event_id == event.id).all()
+        assert len(msgs) == 2

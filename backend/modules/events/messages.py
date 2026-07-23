@@ -51,26 +51,9 @@ def route_event_messages(db: Session, net_id: int | None, raw_messages: list[dic
         .all()
     )
 
-    # Build a to_address→base_address set from the incoming messages so we can
-    # match against per-event net_address (e.g. "W0NE@winlink.org").
     def _to_base(addr: str) -> str:
         """W0NE@winlink.org -> W0NE; bare callsigns returned as-is."""
         return addr.split("@")[0].upper() if addr else ""
-
-    def _event_accepts(event: Event, to_addresses: set[str]) -> bool:
-        """Return True if this event should receive the batch of messages.
-        When the event has a net_address configured, only accept messages
-        whose to_address base matches. Without net_address, accept all."""
-        net_address = get_event_config(db, event.id, "net_address", "") or ""
-        if not net_address:
-            return True  # unconfigured → accept everything (backward compat)
-        net_base = _to_base(net_address)
-        return net_base in to_addresses
-
-    to_bases = {_to_base(m.get("to_address", "")) for m in raw_messages if m.get("to_address")}
-    events = [e for e in events if _event_accepts(e, to_bases)]
-    if not events:
-        return 0
 
     # Resolve RawMessage rows by message_id (the check-in pass already upserted
     # them). A message with no RawMessage row is skipped.
@@ -80,13 +63,30 @@ def route_event_messages(db: Session, net_id: int | None, raw_messages: list[dic
         for r in db.query(RawMessage).filter(RawMessage.message_id.in_(msg_ids)).all()
     }
 
+    # Pre-resolve each event's accept-callsign once (avoid repeated DB calls).
+    # None means "catch-all" (no net_address configured → accepts every message).
+    event_accept_base: dict[int, str | None] = {}
+    for event in events:
+        net_address = get_event_config(db, event.id, "net_address", "") or ""
+        event_accept_base[event.id] = _to_base(net_address) if net_address else None
+
+    if not events:
+        return 0
+
     created = 0
     for event in events:
+        accept_base = event_accept_base[event.id]  # None = catch-all
         participants = {
             p.callsign.upper(): p
             for p in db.query(EventParticipant).filter(EventParticipant.event_id == event.id).all()
         }
         for m in raw_messages:
+            # Per-message address check: only deliver if this message's to_address
+            # matches the event's net_address (or the event is a catch-all).
+            msg_to_base = _to_base(m.get("to_address", ""))
+            if accept_base is not None and msg_to_base != accept_base:
+                continue
+
             raw = raw_by_id.get(m["message_id"])
             if raw is None:
                 continue
