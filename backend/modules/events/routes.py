@@ -1,13 +1,14 @@
 from datetime import datetime
 from typing import NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user, get_db_session
 from backend.auth.models import User
 from backend.integrations.aprs import manager as aprs_manager
+from backend.integrations.weather.service import get_event_alerts
 from backend.modules.events.event_auth import EventContext, EventRole, require_event_role
 from backend.modules.events.event_config_service import get_event_config
 from backend.modules.events.models import (
@@ -20,17 +21,26 @@ from backend.modules.events.models import (
     EventStatus,
     EventType,
     MessageStatus,
+    ParticipantStatus,
 )
 from backend.modules.events.service import (
     EventError,
     InvalidPostError,
     InvalidStatusTransitionError,
     activate_event as activate_event_service,
+    add_note,
+    check_in,
     close_event as close_event_service,
+    compute_report,
     create_event as create_event_service,
+    create_post,
+    delete_post,
     list_operators,
     reopen_event as reopen_event_service,
+    set_log_pinned,
     update_event as update_event_service,
+    update_participant,
+    update_post,
 )
 
 events_router = APIRouter(prefix="/api/events", tags=["events"])
@@ -78,6 +88,30 @@ class PostUpdate(BaseModel):
     description: str | None = None
     lat: float | None = None
     lon: float | None = None
+
+
+class ParticipantCheckIn(BaseModel):
+    callsign: str
+    name: str | None = None
+    post_id: int | None = None
+    location: str | None = None
+
+
+class ParticipantUpdate(BaseModel):
+    status: ParticipantStatus | None = None
+    post_id: int | None = None
+    location: str | None = None
+    name: str | None = None
+
+
+class NoteCreate(BaseModel):
+    message: str
+    callsign: str | None = None
+    pinned: bool = False
+
+
+class LogPinUpdate(BaseModel):
+    pinned: bool
 
 
 class MessageCompose(BaseModel):
@@ -424,3 +458,197 @@ async def reopen_event_route(
         _raise_for(err)
     aprs_manager.ensure_started(request.app.state.session_factory, ctx.event.id)
     return _event_to_response(db, event, ctx)
+
+
+# --- Post routes ---
+
+
+@events_router.post("/{event_id}/posts", status_code=201)
+async def create_post_route(
+    body: PostCreate,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        post = create_post(db, ctx.event.id, name=body.name, description=body.description, lat=body.lat, lon=body.lon)
+    except EventError as err:
+        _raise_for(err)
+    aprs_manager.nudge(ctx.event.id)
+    return _post_to_response(post)
+
+
+@events_router.patch("/{event_id}/posts/{post_id}")
+async def update_post_route(
+    post_id: int,
+    body: PostUpdate,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    data = body.model_dump(exclude_unset=True)
+    try:
+        post = update_post(db, ctx.event.id, post_id, **data)
+    except EventError as err:
+        _raise_for(err)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    aprs_manager.nudge(ctx.event.id)
+    return _post_to_response(post)
+
+
+@events_router.delete("/{event_id}/posts/{post_id}", status_code=204)
+async def delete_post_route(
+    post_id: int,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        deleted = delete_post(db, ctx.event.id, post_id)
+    except EventError as err:
+        _raise_for(err)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Post not found")
+    aprs_manager.nudge(ctx.event.id)
+
+
+# --- Participant routes ---
+
+
+@events_router.post("/{event_id}/participants", status_code=201)
+async def check_in_route(
+    body: ParticipantCheckIn,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        participant = check_in(
+            db, ctx.event.id,
+            callsign=body.callsign,
+            actor=ctx.user.callsign,
+            name=body.name,
+            post_id=body.post_id,
+            location=body.location,
+        )
+    except EventError as err:
+        _raise_for(err)
+    aprs_manager.nudge(ctx.event.id)
+    return _participant_to_response(participant)
+
+
+@events_router.patch("/{event_id}/participants/{participant_id}")
+async def update_participant_route(
+    participant_id: int,
+    body: ParticipantUpdate,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    data = body.model_dump(exclude_unset=True)
+    try:
+        participant = update_participant(db, ctx.event.id, participant_id, actor=ctx.user.callsign, **data)
+    except EventError as err:
+        _raise_for(err)
+    if participant is None:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    aprs_manager.nudge(ctx.event.id)
+    return _participant_to_response(participant)
+
+
+# --- Log routes ---
+
+
+@events_router.post("/{event_id}/log", status_code=201)
+async def add_note_route(
+    body: NoteCreate,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        entry = add_note(
+            db, ctx.event.id,
+            actor=ctx.user.callsign,
+            message=body.message,
+            callsign=body.callsign,
+            pinned=body.pinned,
+        )
+    except EventError as err:
+        _raise_for(err)
+    return _log_to_response(entry)
+
+
+@events_router.patch("/{event_id}/log/{entry_id}")
+async def pin_log_route(
+    entry_id: int,
+    body: LogPinUpdate,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        entry = set_log_pinned(db, ctx.event.id, entry_id, body.pinned)
+    except EventError as err:
+        _raise_for(err)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Log entry not found")
+    return _log_to_response(entry)
+
+
+# --- Updates (polling cursor) + report ---
+
+
+@events_router.get("/{event_id}/updates")
+async def updates_route(
+    since: int = Query(default=0, ge=0),
+    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    db: Session = Depends(get_db_session),
+):
+    snapshot = _snapshot(db, ctx.event, ctx)
+    log = (
+        db.query(EventLogEntry)
+        .filter(EventLogEntry.event_id == ctx.event.id, EventLogEntry.seq > since)
+        .order_by(EventLogEntry.seq)
+        .all()
+    )
+    snapshot["log"] = [_log_to_response(e) for e in log]
+    snapshot["latest_seq"] = ctx.event.log_seq
+    return snapshot
+
+
+@events_router.get("/{event_id}/report")
+async def report_route(
+    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    db: Session = Depends(get_db_session),
+):
+    return {"participants": compute_report(db, ctx.event)}
+
+
+# --- APRS positions ---
+
+
+@events_router.get("/{event_id}/positions")
+async def positions_route(
+    since: int = Query(default=0, ge=0),
+    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    db: Session = Depends(get_db_session),
+):
+    state = aprs_manager.get_state(ctx.event.id)
+    if state is None:
+        return {
+            "stations": [], "latest_pos_seq": 0,
+            "aprs_status": "disabled", "aprs_status_detail": "", "objects": [],
+        }
+    snapshot = state.store.snapshot(since)
+    snapshot["aprs_status"] = state.status
+    snapshot["aprs_status_detail"] = state.status_detail
+    snapshot["objects"] = [
+        {"post_id": post_id, "name": name} for post_id, name in sorted(state.objects_by_post.items())
+    ]
+    return snapshot
+
+
+# --- Weather alerts ---
+
+
+@events_router.get("/{event_id}/weather")
+async def weather_route(
+    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    db: Session = Depends(get_db_session),
+):
+    return get_event_alerts(db, ctx.event.id)
