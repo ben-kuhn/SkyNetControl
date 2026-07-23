@@ -60,6 +60,12 @@ def _build_config(db: Session, backend_name: str, *, net_id: int | None = None, 
         config["mailbox_path"] = get("pat_mailbox_path", "")
         net_address = get("net_address", "")
         config["callsign"] = net_address.split("@")[0].upper() if "@" in net_address else net_address.upper()
+        if event_id is not None and not config["callsign"]:
+            from backend.modules.events.models import Event as _Event
+            from backend.modules.events.event_config_service import event_from_callsign
+            _event = db.get(_Event, event_id)
+            if _event:
+                config["callsign"] = event_from_callsign(db, _event)
         if event_id is not None:
             from backend.integrations.winlink.pat_config import resolve_pat_config_for_event
             config["pat_http"] = resolve_pat_config_for_event(db, event_id)
