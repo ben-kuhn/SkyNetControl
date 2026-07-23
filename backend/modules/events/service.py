@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,7 @@ from backend.modules.events.models import (
     Event,
     EventLogEntry,
     EventLogType,
+    EventOperator,
     EventParticipant,
     EventPost,
     EventStatus,
@@ -98,31 +100,79 @@ def add_log_entry(
 def create_event(
     db: Session,
     *,
-    net_id: int,
     name: str,
     event_type: EventType,
     created_by: str,
     description: str | None = None,
     scheduled_start: datetime | None = None,
-    activate: bool = False,
 ) -> Event:
     event = Event(
-        net_id=net_id,
         name=name,
         event_type=event_type,
+        status=EventStatus.DRAFT,
         description=description,
         scheduled_start=scheduled_start,
         created_by=created_by,
+        public_token=secrets.token_urlsafe(16),
+        visibility="private",
     )
     db.add(event)
-    db.flush()
-    if activate:
-        event.status = EventStatus.ACTIVE
-        event.activated_at = _utcnow()
-        add_log_entry(db, event, entry_type=EventLogType.SYSTEM, message="Event activated", actor=created_by)
     db.commit()
     db.refresh(event)
     return event
+
+
+# --- Ownership / operator helpers ----------------------------------------
+
+
+def add_operator(db: Session, event: Event, callsign: str, *, added_by: str) -> None:
+    cs = callsign.strip().upper()
+    exists = (
+        db.query(EventOperator)
+        .filter(EventOperator.event_id == event.id, EventOperator.callsign == cs)
+        .first()
+    )
+    if exists is None and cs and cs != (event.created_by or "").upper():
+        db.add(EventOperator(event_id=event.id, callsign=cs, added_by=added_by,
+                             added_at=datetime.now(timezone.utc)))
+        db.commit()
+
+
+def remove_operator(db: Session, event: Event, callsign: str) -> None:
+    (
+        db.query(EventOperator)
+        .filter(EventOperator.event_id == event.id, EventOperator.callsign == callsign.strip().upper())
+        .delete()
+    )
+    db.commit()
+
+
+def list_operators(db: Session, event: Event) -> list[str]:
+    return [
+        o.callsign
+        for o in db.query(EventOperator)
+        .filter(EventOperator.event_id == event.id)
+        .order_by(EventOperator.callsign)
+        .all()
+    ]
+
+
+def transfer_owner(db: Session, event: Event, new_owner: str) -> None:
+    event.created_by = new_owner.strip().upper()
+    db.commit()
+
+
+def set_visibility(db: Session, event: Event, visibility: str) -> None:
+    if visibility not in ("private", "public"):
+        raise ValueError("visibility must be 'private' or 'public'")
+    event.visibility = visibility
+    db.commit()
+
+
+def rotate_public_token(db: Session, event: Event) -> str:
+    event.public_token = secrets.token_urlsafe(16)
+    db.commit()
+    return event.public_token
 
 
 def activate_event(db: Session, event_id: int, *, actor: str) -> Event:
