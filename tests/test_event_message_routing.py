@@ -194,3 +194,22 @@ class TestRouting:
 
         msgs = db.query(EventMessage).filter(EventMessage.event_id == event.id).all()
         assert len(msgs) == 2
+
+    def test_ssid_stripped_for_to_address_matching(self, db, net):
+        """Fix 8: message addressed to W0NE-7@winlink.org routes to event with net_address=W0NE."""
+        event = _active_event(db, net, "SSID-Test")
+        set_event_config(db, event.id, "net_address", "W0NE")
+
+        # Message to W0NE-7@winlink.org — SSID must be stripped before matching
+        d = {
+            "message_id": "SSID1", "from_address": "KE0XYZ@winlink.org",
+            "to_address": "W0NE-7@winlink.org", "subject": "SSID test", "body": "",
+            "received_at": _raw_dict("SSID1")["received_at"], "path": None,
+        }
+        _persist_raw(db, d)
+
+        n = route_event_messages(db, net.id, [d])
+        assert n == 1, "Message to W0NE-7@winlink.org should be routed to event with net_address=W0NE"
+
+        msgs = db.query(EventMessage).filter(EventMessage.event_id == event.id).all()
+        assert len(msgs) == 1

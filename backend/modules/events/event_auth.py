@@ -3,6 +3,7 @@ or a public event for any authenticated user, or anonymous with a valid public_t
 from __future__ import annotations
 
 import enum
+import secrets
 from dataclasses import dataclass
 from typing import Callable
 
@@ -65,7 +66,7 @@ def require_event_role(min_role: EventRole) -> Callable:
         if event.visibility == "public":
             if user is not None:
                 return EventContext(user=user, event=event, is_control=False)
-            if token and token == event.public_token:
+            if token and secrets.compare_digest(token, event.public_token):
                 return EventContext(user=None, event=event, is_control=False)
             # Anonymous with wrong/absent token: 404 (no existence signal)
             raise HTTPException(status_code=404, detail="Event not found")

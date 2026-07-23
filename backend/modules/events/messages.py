@@ -52,8 +52,11 @@ def route_event_messages(db: Session, net_id: int | None, raw_messages: list[dic
     )
 
     def _to_base(addr: str) -> str:
-        """W0NE@winlink.org -> W0NE; bare callsigns returned as-is."""
-        return addr.split("@")[0].upper() if addr else ""
+        """W0NE-7@winlink.org -> W0NE; bare callsigns W0NE-7 -> W0NE."""
+        if not addr:
+            return ""
+        local = addr.split("@")[0].upper()
+        return local.split("-")[0]
 
     # Resolve RawMessage rows by message_id (the check-in pass already upserted
     # them). A message with no RawMessage row is skipped.

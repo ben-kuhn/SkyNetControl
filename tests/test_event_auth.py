@@ -112,3 +112,27 @@ async def test_read_matrix(app_ctx):
         assert (await c.get(f"/ev/{pub}/read?token=bad")).status_code == 404
     async with _c(app, settings) as c:
         assert (await c.get(f"/ev/{priv}/read?token=ptok")).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Fix 7: constant-time token comparison
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_constant_time_token_comparison_grants_access(app_ctx):
+    """Fix 7: secrets.compare_digest still grants access for matching token."""
+    app, settings, ids = app_ctx
+    pub = ids["pub"]
+    async with _c(app, settings) as c:
+        # Correct public token should still work with compare_digest
+        assert (await c.get(f"/ev/{pub}/read?token=utok")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_constant_time_token_comparison_denies_wrong_token(app_ctx):
+    """Fix 7: secrets.compare_digest still denies wrong token."""
+    app, settings, ids = app_ctx
+    pub = ids["pub"]
+    async with _c(app, settings) as c:
+        assert (await c.get(f"/ev/{pub}/read?token=wrongtoken")).status_code == 404
