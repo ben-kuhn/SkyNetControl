@@ -1,13 +1,14 @@
 """Outbound event Winlink messages and message-status transitions.
 
 Outbound send reuses the existing delivery pipeline (dispatch_delivery) with the
-'event_message' content type — no new backend. Messages go out under the net
-callsign (derived from net_address by _build_config in the delivery service).
+'event_message' content type — no new backend. Messages go out under the event
+callsign (derived from event config / creator callsign via event_from_callsign).
 Outbound event messages are always delivered via the winlink backend only,
 addressed directly to the composed recipient (to_address)."""
 from sqlalchemy.orm import Session
 
 from backend.integrations.delivery.service import dispatch_delivery
+from backend.modules.events.event_config_service import event_from_callsign
 from backend.modules.events.messages import next_msg_seq
 from backend.modules.events.models import (
     EventMessage,
@@ -32,13 +33,6 @@ def validate_to_address(raw: str) -> str:
     return cleaned
 
 
-def _net_callsign(db: Session, net_id: int) -> str:
-    from backend.modules.nets.config_service import get_net_config
-
-    net_address = get_net_config(db, net_id, "net_address", "") or ""
-    return net_address.split("@")[0].upper() if net_address else ""
-
-
 def send_event_message(
     db: Session,
     event_id: int,
@@ -59,7 +53,7 @@ def send_event_message(
         event_id=event_id,
         msg_seq=seq,
         direction=MessageDirection.OUTBOUND,
-        from_callsign=_net_callsign(db, event.net_id),
+        from_callsign=event_from_callsign(db, event),
         to_address=to_address,
         subject=subject,
         body=body,
@@ -72,11 +66,12 @@ def send_event_message(
     db.refresh(message)
 
     # Private Winlink reply: always goes to the composed recipient via winlink
-    # backend only, regardless of the net's delivery.backends configuration.
+    # backend only, regardless of the event's delivery.backends configuration.
     # A failure is non-fatal: the row persists and the operator can retry via
     # the delivery routes.
     dispatch_delivery(
-        db, "event_message", message.id, subject, body, event.net_id,
+        db, "event_message", message.id, subject, body,
+        event_id=event.id,
         backends=["winlink"],
         config_overrides={"target_address": to_address},
     )
@@ -84,12 +79,10 @@ def send_event_message(
     return message
 
 
-def _build_context(db, net_id: int, datetime_stamp: str):
+def _build_context(db, event, datetime_stamp: str):
     from backend.modules.forms.builder import BuildContext
-    from backend.modules.nets.config_service import get_net_config
 
-    net_address = get_net_config(db, net_id, "net_address", "") or ""
-    callsign = net_address.split("@")[0].upper() if net_address else ""
+    callsign = event_from_callsign(db, event)
     return BuildContext(callsign=callsign, datetime_stamp=datetime_stamp, grid="")
 
 
@@ -98,7 +91,7 @@ def compose_form_preview(db, event_id, *, template_path, variables, datetime_sta
     from backend.modules.events.models import Event
 
     event = db.get(Event, event_id)
-    ctx = _build_context(db, event.net_id, datetime_stamp)
+    ctx = _build_context(db, event, datetime_stamp)
     try:
         composed = build_form_message(template_path, variables, ctx)
     except FormBuildError as exc:
@@ -123,7 +116,7 @@ def send_event_form_message(db, event_id, *, actor, template_path, variables, da
     event = locked_event(db, event_id)
     if event is None or event.status != EventStatus.ACTIVE:
         raise EventNotActiveError("Event is not active")
-    ctx = _build_context(db, event.net_id, datetime_stamp)
+    ctx = _build_context(db, event, datetime_stamp)
     try:
         composed = build_form_message(template_path, variables, ctx)
     except FormBuildError as exc:
@@ -149,7 +142,8 @@ def send_event_form_message(db, event_id, *, actor, template_path, variables, da
     db.refresh(message)
 
     dispatch_delivery(
-        db, "event_message", message.id, composed.subject, composed.body, event.net_id,
+        db, "event_message", message.id, composed.subject, composed.body,
+        event_id=event.id,
         backends=["winlink"],
         config_overrides={"target_address": composed.to, "attachments": [composed.attachment]},
     )
