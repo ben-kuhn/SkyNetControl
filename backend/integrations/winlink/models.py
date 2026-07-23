@@ -22,7 +22,7 @@ class PatConnectionSession(Base):
     __tablename__ = "pat_connection_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    net_id: Mapped[int] = mapped_column(ForeignKey("nets.id", ondelete="CASCADE"), nullable=False)
+    net_id: Mapped[int | None] = mapped_column(ForeignKey("nets.id", ondelete="CASCADE"), nullable=True)
     event_id: Mapped[int | None] = mapped_column(
         ForeignKey("events.id", ondelete="SET NULL"), nullable=True
     )

@@ -62,7 +62,6 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    net_id: Mapped[int] = mapped_column(Integer, ForeignKey("nets.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_type: Mapped[EventType] = mapped_column(Enum(EventType), nullable=False)
@@ -71,6 +70,8 @@ class Event(Base):
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(20), nullable=False)
+    public_token: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="private")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     # Last-assigned event_log.seq for this event. Incremented under the event
     # row lock (SELECT ... FOR UPDATE on PostgreSQL; SQLite serializes writes)
@@ -208,3 +209,25 @@ class EventMessageForm(Base):
     variables: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     datetime_stamp: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class EventOperator(Base):
+    __tablename__ = "event_operators"
+    __table_args__ = (UniqueConstraint("event_id", "callsign", name="uq_event_operator"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    callsign: Mapped[str] = mapped_column(String(20), nullable=False)
+    added_by: Mapped[str] = mapped_column(String(20), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class EventConfig(Base):
+    __tablename__ = "event_config"
+
+    event_id: Mapped[int] = mapped_column(
+        ForeignKey("events.id", ondelete="CASCADE"), primary_key=True
+    )
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
