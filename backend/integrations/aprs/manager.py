@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from backend.integrations.aprs.store import EventPositionStore
-from backend.modules.nets.config_service import get_net_config
+from backend.modules.events.event_config_service import get_event_config, event_from_callsign
+from backend.modules.events.models import Event
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,19 @@ def get_state(event_id: int) -> AprsClientState | None:
     return _states.get(event_id)
 
 
-def aprs_config(db: Session, net_id: int) -> dict | None:
-    """The net's APRS connection settings, or None when APRS is off/unusable."""
-    if get_net_config(db, net_id, "aprs.enabled", "false") != "true":
+def aprs_config(db: Session, event_id: int) -> dict | None:
+    """The event's APRS connection settings, or None when APRS is off/unusable."""
+    if get_event_config(db, event_id, "aprs.enabled", "false") != "true":
         return None
-    callsign = (get_net_config(db, net_id, "aprs.callsign", "") or "").strip()
+    callsign = (get_event_config(db, event_id, "aprs.callsign", "") or "").strip()
+    if not callsign:
+        event = db.get(Event, event_id)
+        callsign = event_from_callsign(db, event) if event else ""
     if not callsign:
         return None
-    server = get_net_config(db, net_id, "aprs.server", "rotate.aprs2.net") or "rotate.aprs2.net"
+    server = get_event_config(db, event_id, "aprs.server", "rotate.aprs2.net") or "rotate.aprs2.net"
     try:
-        port = int(get_net_config(db, net_id, "aprs.port", "14580"))
+        port = int(get_event_config(db, event_id, "aprs.port", "14580"))
     except (TypeError, ValueError):
         port = 14580
     return {"callsign": callsign, "server": server, "port": port}
@@ -58,13 +62,13 @@ def ensure_started(session_factory, event_id: int) -> None:
     existing = _states.get(event_id)
     if existing is not None and existing.running:
         return
-    from backend.modules.events.models import Event, EventStatus
+    from backend.modules.events.models import EventStatus
 
     with session_factory() as db:
         event = db.get(Event, event_id)
         if event is None or event.status != EventStatus.ACTIVE:
             return
-        config = aprs_config(db, event.net_id)
+        config = aprs_config(db, event.id)
     if config is None:
         return
     try:

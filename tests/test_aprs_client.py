@@ -10,9 +10,8 @@ import backend.integrations.aprs.client as aprs_client
 from backend.db.base import Base
 from backend.integrations.aprs import manager
 from backend.modules.events.models import Event, EventType
-from backend.modules.events.service import check_in, create_event
-from backend.modules.nets.config_service import set_net_config_bulk
-from tests.conftest import make_test_net
+from backend.modules.events.event_config_service import set_event_config_bulk
+from backend.modules.events.service import activate_event, check_in, create_event
 
 
 class FakeAprsServer:
@@ -70,20 +69,20 @@ def db_factory():
 
 @pytest.fixture
 def aprs_event(db_factory, monkeypatch):
-    """An active event on an APRS-enabled net with one checked-in participant."""
+    """An active event with APRS enabled and one checked-in participant."""
     monkeypatch.setattr(
         "backend.modules.events.service.lookup_callsign", lambda db, cs: None
     )
     with db_factory() as db:
-        net = make_test_net(db)
-        set_net_config_bulk(db, net.id, {
+        event = create_event(
+            db, name="Tornado", event_type=EventType.EMERGENCY,
+            created_by="W0NE",
+        )
+        activate_event(db, event.id, actor="W0NE")
+        set_event_config_bulk(db, event.id, {
             "aprs.enabled": "true",
             "aprs.callsign": "W0NE",
         })
-        event = create_event(
-            db, net_id=net.id, name="Tornado", event_type=EventType.EMERGENCY,
-            created_by="W0NE", activate=True,
-        )
         check_in(db, event.id, callsign="KE0XYZ", actor="W0NC")
         return event.id
 
@@ -106,19 +105,21 @@ async def _wait_for(predicate, timeout=5.0):
 
 
 class TestConfig:
-    def test_aprs_config_reads_net_config(self, db_factory):
+    def test_aprs_config_reads_event_config(self, db_factory):
         with db_factory() as db:
-            net = make_test_net(db)
-            assert manager.aprs_config(db, net.id) is None  # disabled by default
-            set_net_config_bulk(db, net.id, {"aprs.enabled": "true", "aprs.callsign": "W0NE"})
-            cfg = manager.aprs_config(db, net.id)
+            event = create_event(db, name="Config Test", event_type=EventType.EMERGENCY, created_by="W0NE")
+            assert manager.aprs_config(db, event.id) is None  # disabled by default
+            set_event_config_bulk(db, event.id, {"aprs.enabled": "true", "aprs.callsign": "W0NE"})
+            cfg = manager.aprs_config(db, event.id)
             assert cfg == {"callsign": "W0NE", "server": "rotate.aprs2.net", "port": 14580}
 
-    def test_missing_callsign_means_disabled(self, db_factory):
+    def test_missing_callsign_defaults_to_creator(self, db_factory):
         with db_factory() as db:
-            net = make_test_net(db)
-            set_net_config_bulk(db, net.id, {"aprs.enabled": "true"})
-            assert manager.aprs_config(db, net.id) is None
+            event = create_event(db, name="Default CS Test", event_type=EventType.EMERGENCY, created_by="W0NE")
+            set_event_config_bulk(db, event.id, {"aprs.enabled": "true"})
+            cfg = manager.aprs_config(db, event.id)
+            assert cfg is not None
+            assert cfg["callsign"] == "W0NE"
 
 
 class TestClientLoop:
@@ -127,8 +128,7 @@ class TestClientLoop:
         await server.start()
         try:
             with db_factory() as db:
-                net_id = db.get(Event, aprs_event).net_id
-                set_net_config_bulk(db, net_id, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
+                set_event_config_bulk(db, aprs_event, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
 
             manager.ensure_started(db_factory, aprs_event)
             state = manager.get_state(aprs_event)
@@ -172,8 +172,7 @@ class TestClientLoop:
         await server.start()
         try:
             with db_factory() as db:
-                net_id = db.get(Event, aprs_event).net_id
-                set_net_config_bulk(db, net_id, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
+                set_event_config_bulk(db, aprs_event, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
 
             manager.ensure_started(db_factory, aprs_event)
             state = manager.get_state(aprs_event)
@@ -199,8 +198,7 @@ class TestClientLoop:
         await server.start()
         try:
             with db_factory() as db:
-                net_id = db.get(Event, aprs_event).net_id
-                set_net_config_bulk(db, net_id, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
+                set_event_config_bulk(db, aprs_event, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
 
             manager.ensure_started(db_factory, aprs_event)
             state = manager.get_state(aprs_event)
@@ -224,11 +222,11 @@ class TestClientLoop:
             "backend.modules.events.service.lookup_callsign", lambda db, cs: None
         )
         with db_factory() as db:
-            net = make_test_net(db, slug="noaprs")
             event = create_event(
-                db, net_id=net.id, name="E", event_type=EventType.EMERGENCY,
-                created_by="W0NE", activate=True,
+                db, name="E", event_type=EventType.EMERGENCY,
+                created_by="W0NE",
             )
+            activate_event(db, event.id, actor="W0NE")
         manager.ensure_started(db_factory, event.id)
         assert manager.get_state(event.id) is None
 
@@ -256,8 +254,7 @@ class TestClientLoop:
         await server.start()
         try:
             with db_factory() as db:
-                net_id = db.get(Event, aprs_event).net_id
-                set_net_config_bulk(db, net_id, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
+                set_event_config_bulk(db, aprs_event, {"aprs.server": "127.0.0.1", "aprs.port": str(server.port)})
 
             manager.ensure_started(db_factory, aprs_event)
             state = manager.get_state(aprs_event)

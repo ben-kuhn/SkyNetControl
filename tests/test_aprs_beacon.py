@@ -9,9 +9,8 @@ from backend.db.base import Base
 from backend.integrations.aprs import manager
 from backend.integrations.aprs.beacon import desired_objects, kill_all, send_objects
 from backend.modules.events.models import EventType
-from backend.modules.events.service import close_event, create_event, create_post, update_event
-from backend.modules.nets.config_service import set_net_config_bulk
-from tests.conftest import make_test_net
+from backend.modules.events.event_config_service import set_event_config_bulk
+from backend.modules.events.service import activate_event, close_event, create_event, create_post, update_event
 
 CONFIG = {"callsign": "W0NE", "server": "x", "port": 1}
 
@@ -44,12 +43,12 @@ def db_factory():
 @pytest.fixture
 def event_with_posts(db_factory):
     with db_factory() as db:
-        net = make_test_net(db)
-        set_net_config_bulk(db, net.id, {"aprs.enabled": "true", "aprs.callsign": "W0NE"})
         event = create_event(
-            db, net_id=net.id, name="Marathon", event_type=EventType.PUBLIC_SERVICE,
-            created_by="W0NE", activate=True,
+            db, name="Marathon", event_type=EventType.PUBLIC_SERVICE,
+            created_by="W0NE",
         )
+        activate_event(db, event.id, actor="W0NE")
+        set_event_config_bulk(db, event.id, {"aprs.enabled": "true", "aprs.callsign": "W0NE"})
         create_post(db, event.id, name="Rest Stop 3", lat=39.0625, lon=-94.5786)
         create_post(db, event.id, name="No Coords Post")  # must not beacon
         update_event(db, event.id, aprs_beacon_posts=True)
