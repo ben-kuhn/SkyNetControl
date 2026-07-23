@@ -117,6 +117,20 @@ class TestLifecycleRoutes:
             resp = await c.patch(f"{BASE}/{event_id}", json={"name": "Nope"})
         assert resp.status_code == 409
 
+    async def test_missing_event_404(self, app_s):
+        """GET on a nonexistent event returns 404."""
+        app, settings = app_s
+        async with _client(app, settings, "W0NC") as c:
+            resp = await c.get(f"{BASE}/9999")
+        assert resp.status_code == 404
+
+    async def test_patch_missing_event_404(self, app_s):
+        """PATCH on a nonexistent event returns 404."""
+        app, settings = app_s
+        async with _client(app, settings, "W0NC") as c:
+            resp = await c.patch(f"{BASE}/9999", json={"name": "Nope"})
+        assert resp.status_code == 404
+
 
 class TestPostRoutes:
     async def test_post_crud(self, app_s):
@@ -232,7 +246,7 @@ class TestPermissions:
             await c.post(f"{BASE}/{event_id}/activate")
         async with _client(app, settings, "W0OUT") as c:
             resp = await c.post(f"{BASE}/{event_id}/posts", json={"name": "X"})
-        assert resp.status_code in (403, 404)
+        assert resp.status_code == 403
 
     async def test_anonymous_denied(self, app_s):
         app, settings = app_s

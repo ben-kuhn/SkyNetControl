@@ -113,7 +113,7 @@ class TestParticipantRoutes:
         app, settings, eid = active_event
         async with _c(app, settings, "KD0TST") as c:
             resp = await c.post(f"{BASE}/{eid}/participants", json={"callsign": "KE0XYZ"})
-        assert resp.status_code in (403, 404)
+        assert resp.status_code == 403
 
 
 class TestLogRoutes:
