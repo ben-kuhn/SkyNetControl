@@ -30,6 +30,7 @@ from backend.modules.events.service import (
     InvalidStatusTransitionError,
     activate_event as activate_event_service,
     add_note,
+    add_operator,
     check_in,
     close_event as close_event_service,
     compute_report,
@@ -37,8 +38,12 @@ from backend.modules.events.service import (
     create_post,
     delete_post,
     list_operators,
+    remove_operator,
     reopen_event as reopen_event_service,
+    rotate_public_token,
     set_log_pinned,
+    set_visibility,
+    transfer_owner,
     update_event as update_event_service,
     update_participant,
     update_post,
@@ -54,6 +59,11 @@ def _require_approved_user(user: User = Depends(get_current_user)) -> User:
     if user.is_pending or user.is_deleted:
         raise HTTPException(status_code=403, detail="Account not approved")
     return user
+
+
+def _require_owner(ctx: EventContext) -> None:
+    if not (ctx.user and (ctx.user.is_admin or ctx.event.created_by == ctx.user.callsign)):
+        raise HTTPException(status_code=403, detail="Only the owner can do this")
 
 
 # --- Pydantic schemas ---
@@ -137,6 +147,18 @@ class FormSend(BaseModel):
     variables: dict = Field(default_factory=dict)
     datetime_stamp: str = ""
     reply_to_id: int | None = None
+
+
+class OperatorBody(BaseModel):
+    callsign: str
+
+
+class VisibilityBody(BaseModel):
+    visibility: str
+
+
+class TransferBody(BaseModel):
+    callsign: str
 
 
 # --- Helpers (kept net-free; Tasks 10-12 add sub-resource routes that use these) ---
@@ -936,3 +958,61 @@ async def reply_form_route(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return result
+
+
+# --- Owner-only routes ---
+
+
+@events_router.post("/{event_id}/operators", status_code=201)
+async def add_operator_route(
+    body: OperatorBody,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _require_owner(ctx)
+    add_operator(db, ctx.event, body.callsign, added_by=ctx.user.callsign)
+    return {"operators": list_operators(db, ctx.event)}
+
+
+@events_router.delete("/{event_id}/operators/{callsign}", status_code=204)
+async def remove_operator_route(
+    callsign: str,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _require_owner(ctx)
+    remove_operator(db, ctx.event, callsign)
+
+
+@events_router.patch("/{event_id}/visibility")
+async def set_visibility_route(
+    body: VisibilityBody,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _require_owner(ctx)
+    try:
+        set_visibility(db, ctx.event, body.visibility)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"visibility": ctx.event.visibility}
+
+
+@events_router.post("/{event_id}/token/rotate")
+async def rotate_token_route(
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _require_owner(ctx)
+    return {"public_token": rotate_public_token(db, ctx.event)}
+
+
+@events_router.post("/{event_id}/transfer")
+async def transfer_route(
+    body: TransferBody,
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    _require_owner(ctx)
+    transfer_owner(db, ctx.event, body.callsign)
+    return {"owner": ctx.event.created_by}

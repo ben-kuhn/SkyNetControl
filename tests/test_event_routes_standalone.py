@@ -238,3 +238,161 @@ async def test_private_positions_anonymous_returns_404(active_event):
     async with _c(app, settings) as c:
         r = await c.get(f"/api/events/{eid}/positions")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Owner-only routes: operators, visibility, token rotation, transfer (Task 12)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def owner_event(app_s):
+    """Creates an event owned by W0NC; W0COP is a co-operator (control but not owner).
+    Returns (app, settings, event_id).
+    """
+    app, settings = app_s
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.post("/api/events", json={"name": "OwnerTest", "event_type": "emergency"})
+        assert r.status_code == 201
+        eid = r.json()["id"]
+        # Add W0COP as a co-operator via service directly so we can test the co-op 403 path
+    with app.state.session_factory() as db:
+        from backend.modules.events.models import Event
+        from backend.modules.events.service import add_operator
+        ev = db.get(Event, eid)
+        add_operator(db, ev, "W0COP", added_by="W0NC")
+    # Also add W0COP as an approved User so auth resolves
+    with app.state.session_factory() as db:
+        from backend.auth.models import User as UserModel
+        existing = db.get(UserModel, "W0COP")
+        if existing is None:
+            db.add(UserModel(callsign="W0COP", oidc_subject="x|cop", name="Co-op"))
+            db.commit()
+    return app, settings, eid
+
+
+@pytest.mark.asyncio
+async def test_owner_can_add_operator(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.post(f"/api/events/{eid}/operators", json={"callsign": "KE0NEW"})
+    assert r.status_code == 201
+    assert "KE0NEW" in r.json()["operators"]
+
+
+@pytest.mark.asyncio
+async def test_owner_can_remove_operator(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0NC") as c:
+        # W0COP was added by the fixture; remove them
+        r = await c.delete(f"/api/events/{eid}/operators/W0COP")
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_owner_can_set_visibility(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.patch(f"/api/events/{eid}/visibility", json={"visibility": "public"})
+    assert r.status_code == 200
+    assert r.json()["visibility"] == "public"
+
+
+@pytest.mark.asyncio
+async def test_visibility_invalid_returns_422(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.patch(f"/api/events/{eid}/visibility", json={"visibility": "secret"})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_owner_can_rotate_token_and_old_token_revoked(owner_event):
+    """After rotation the old public_token no longer grants anonymous access."""
+    app, settings, eid = owner_event
+    # First make the event public and active so anonymous read is meaningful
+    async with _c(app, settings, "W0NC") as c:
+        await c.post(f"/api/events/{eid}/activate")
+        await c.patch(f"/api/events/{eid}/visibility", json={"visibility": "public"})
+        # Fetch the current token
+        detail = await c.get(f"/api/events/{eid}")
+        old_token = detail.json()["event"]["public_token"]
+        # Rotate it
+        r = await c.post(f"/api/events/{eid}/token/rotate")
+        assert r.status_code == 200
+        new_token = r.json()["public_token"]
+    assert new_token != old_token
+    # Old token: anonymous positions endpoint should return 404 (token no longer valid)
+    async with _c(app, settings) as c:
+        r_old = await c.get(f"/api/events/{eid}/positions?token={old_token}")
+        assert r_old.status_code == 404
+    # New token works
+    async with _c(app, settings) as c:
+        r_new = await c.get(f"/api/events/{eid}/positions?token={new_token}")
+        assert r_new.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_owner_can_transfer_ownership(owner_event):
+    """After transfer: new owner has control; old owner does not."""
+    app, settings, eid = owner_event
+    # Add W0OUT as approved user if needed
+    with app.state.session_factory() as db:
+        from backend.auth.models import User as UserModel
+        existing = db.get(UserModel, "W0OUT")
+        if existing is None:
+            db.add(UserModel(callsign="W0OUT", oidc_subject="x|o", name="Out"))
+            db.commit()
+    async with _c(app, settings, "W0NC") as c:
+        r = await c.post(f"/api/events/{eid}/transfer", json={"callsign": "W0OUT"})
+    assert r.status_code == 200
+    assert r.json()["owner"] == "W0OUT"
+    # New owner W0OUT can now access the event with control
+    async with _c(app, settings, "W0OUT") as c:
+        r2 = await c.get(f"/api/events/{eid}")
+        assert r2.status_code == 200
+        assert r2.json()["event"]["is_control"] is True
+    # Old owner W0NC no longer has control (not in operators list, not owner)
+    async with _c(app, settings, "W0NC") as c:
+        r3 = await c.get(f"/api/events/{eid}")
+        assert r3.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_co_operator_403_on_add_operator(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0COP") as c:
+        r = await c.post(f"/api/events/{eid}/operators", json={"callsign": "KE0BAD"})
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_co_operator_403_on_remove_operator(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0COP") as c:
+        r = await c.delete(f"/api/events/{eid}/operators/W0COP")
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_co_operator_403_on_visibility(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0COP") as c:
+        r = await c.patch(f"/api/events/{eid}/visibility", json={"visibility": "public"})
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_co_operator_403_on_rotate_token(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0COP") as c:
+        r = await c.post(f"/api/events/{eid}/token/rotate")
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_co_operator_403_on_transfer(owner_event):
+    app, settings, eid = owner_event
+    async with _c(app, settings, "W0COP") as c:
+        r = await c.post(f"/api/events/{eid}/transfer", json={"callsign": "W0COP"})
+    assert r.status_code == 403
