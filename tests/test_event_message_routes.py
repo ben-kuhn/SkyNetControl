@@ -96,7 +96,8 @@ def _seed_inbound(db_setup, event_id, mid="M1", frm="KE0XYZ@winlink.org", subj="
 class TestListMessages:
     async def test_lists_inbound(self, nc_client, viewer_client, active_event, db_setup):
         _seed_inbound(db_setup, active_event)
-        resp = await viewer_client.get(f"{BASE}/{active_event}/messages", params={"since": 0})
+        # viewer (non-control) no longer has access to messages — use nc_client (CONTROL)
+        resp = await nc_client.get(f"{BASE}/{active_event}/messages", params={"since": 0})
         assert resp.status_code == 200
         body = resp.json()
         assert body["latest_msg_seq"] == 1

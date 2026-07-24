@@ -699,7 +699,7 @@ async def weather_route(
 async def list_messages_route(
     since: int = Query(default=0, ge=0),
     include_dismissed: bool = Query(default=False),
-    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     from backend.integrations.winlink.pat_config import pat_transport_enabled_for_event
@@ -823,7 +823,7 @@ async def retry_message_route(
 async def download_attachment_route(
     message_id: int,
     attachment_id: int,
-    ctx: EventContext = Depends(require_event_role(EventRole.READ)),
+    ctx: EventContext = Depends(require_event_role(EventRole.CONTROL)),
     db: Session = Depends(get_db_session),
 ):
     from backend.modules.checkins.models import RawMessageAttachment
