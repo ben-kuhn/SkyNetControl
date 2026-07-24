@@ -362,6 +362,7 @@ def _snapshot(db: Session, event: Event, ctx: EventContext | None) -> dict:
         .order_by(EventLogEntry.seq)
         .all()
     )
+    is_control = bool(ctx and ctx.is_control)
     return {
         "event": _event_to_response(db, event, ctx),
         "posts": [_post_to_response(p) for p in posts],
@@ -369,6 +370,9 @@ def _snapshot(db: Session, event: Event, ctx: EventContext | None) -> dict:
         "log": [_log_to_response(e) for e in log],
         # pinned is the one mutable log field; ride the full-log state, not the delta
         "pinned_seqs": [e.seq for e in log if e.pinned],
+        # exposed at top level so the frontend EventSnapshot type can read it directly,
+        # consistent with the flat shape returned by the by-token endpoint
+        "is_control": is_control,
     }
 
 

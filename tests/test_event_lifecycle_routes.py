@@ -88,6 +88,45 @@ class TestLifecycleRoutes:
         assert body["participants"] == []
         assert len(body["log"]) == 1  # "Event activated"
 
+    async def test_snapshot_is_control_top_level_true_for_owner(self, app_s):
+        """GET /{id} exposes is_control=True at top level for the event owner."""
+        app, settings = app_s
+        async with _client(app, settings, "W0NC") as c:
+            event_id = (await c.post(BASE, json=ACTIVE_BODY)).json()["id"]
+            resp = await c.get(f"{BASE}/{event_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "is_control" in body, "is_control must be present at top level of snapshot"
+        assert body["is_control"] is True
+
+    async def test_snapshot_is_control_top_level_false_for_viewer(self, app_s):
+        """GET /{id} exposes is_control=False at top level for a read-only viewer of a public event."""
+        app, settings = app_s
+        async with _client(app, settings, "W0NC") as c:
+            event_id = (await c.post(BASE, json={"name": "Public Net", "event_type": "public_service"})).json()["id"]
+            # Make it public so KD0TST (authenticated non-owner) gets READ access
+            await c.patch(f"{BASE}/{event_id}/visibility", json={"visibility": "public"})
+            await c.post(f"{BASE}/{event_id}/activate")
+        # KD0TST is a viewer — not the owner and not granted control
+        async with _client(app, settings, "KD0TST") as c:
+            resp = await c.get(f"{BASE}/{event_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "is_control" in body, "is_control must be present at top level of snapshot"
+        assert body["is_control"] is False
+
+    async def test_updates_is_control_top_level(self, app_s):
+        """GET /{id}/updates also exposes is_control at top level (inherits from _snapshot)."""
+        app, settings = app_s
+        async with _client(app, settings, "W0NC") as c:
+            event_id = (await c.post(BASE, json=ACTIVE_BODY)).json()["id"]
+            await c.post(f"{BASE}/{event_id}/activate")
+            resp = await c.get(f"{BASE}/{event_id}/updates")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "is_control" in body
+        assert body["is_control"] is True
+
     async def test_activate_close_reopen(self, app_s):
         app, settings = app_s
         async with _client(app, settings, "W0NC") as c:
