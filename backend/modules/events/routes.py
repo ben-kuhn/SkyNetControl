@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 from typing import NoReturn
 
@@ -411,6 +412,25 @@ async def list_public_route(db: Session = Depends(get_db_session)):
         .all()
     )
     return [_event_to_response(db, e, None) for e in events]
+
+
+@events_router.get("/by-token/{token}")
+async def get_event_by_token_route(
+    token: str,
+    db: Session = Depends(get_db_session),
+):
+    # Anonymous public resolver: turn a public_token into the read snapshot so the
+    # /e/{token} page can bootstrap, then poll sub-resources by id with ?token=.
+    ev = (
+        db.query(Event)
+        .filter(Event.visibility == "public")
+        .filter(Event.public_token == token)
+        .first()
+    )
+    # constant-time confirm (query already filtered; this guards against any driver quirk)
+    if ev is None or not secrets.compare_digest(token.encode("utf-8"), ev.public_token.encode("utf-8")):
+        raise HTTPException(status_code=404, detail="Event not found")
+    return _event_to_response(db, ev, None)  # ctx=None -> non-control: no token/operators
 
 
 @events_router.get("/{event_id}")
