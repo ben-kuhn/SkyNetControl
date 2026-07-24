@@ -16,7 +16,6 @@ const netNavItems: NavItem[] = [
   { label: "Schedule",   subpath: "schedule",   minRole: "viewer" },
   { label: "Check-ins",  subpath: "checkins",   minRole: null },
   { label: "Members",    subpath: "members",    minRole: "viewer" },
-  { label: "Events",     subpath: "events",     minRole: "viewer" },
   { label: "Reminders",  subpath: "reminders",  minRole: "net_control" },
   { label: "Roster",     subpath: "roster",     minRole: "net_control" },
   { label: "Activities", subpath: "activities", minRole: "net_control" },
@@ -27,6 +26,11 @@ const globalNavItems: NavItem[] = [
   { label: "Users",  subpath: null, absolutePath: "/users",  minRole: "admin" },
   { label: "Config", subpath: null, absolutePath: "/config", minRole: "admin" },
   { label: "Nets",   subpath: null, absolutePath: "/nets",   minRole: "admin" },
+];
+
+// Items visible to any authenticated non-pending user (not admin-gated)
+const authedNavItems: NavItem[] = [
+  { label: "Events", subpath: null, absolutePath: "/events", minRole: null },
 ];
 
 const ROLE_RANK: Record<NetRole | "admin", number> = {
@@ -75,10 +79,16 @@ export function MobileMenu({ open, onClose }: MobileMenuProps) {
     meetsRole(netRole, item.minRole),
   );
 
+  const visibleAuthedItems = (user && !user.is_pending) ? authedNavItems : [];
+
   const allItems = [
     ...visibleNetItems.map((item) => ({
       label: item.label,
       to: `/nets/${slug}/${item.subpath}`,
+    })),
+    ...visibleAuthedItems.map((item) => ({
+      label: item.label,
+      to: item.absolutePath!,
     })),
     ...visibleGlobalItems.map((item) => ({
       label: item.label,

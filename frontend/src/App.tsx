@@ -28,8 +28,10 @@ import { EventReportPage } from "./pages/events/EventReportPage";
 import { EventMapPage } from "./pages/events/EventMapPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { RequireNetRole } from "./components/RequireNetRole";
+import { RequireEventRole } from "./components/RequireEventRole";
 import { SetupGate } from "./components/SetupGate";
 import { CurrentNetProvider } from "./context/CurrentNetContext";
+import { EventProvider } from "./context/EventProvider";
 import { useAuth } from "./hooks/useAuth";
 
 /** Resolves the best slug for a slug-less redirect:
@@ -113,6 +115,13 @@ function GatedRoutes() {
           <Route path="/config" element={<ProtectedRoute adminOnly><ConfigPage /></ProtectedRoute>} />
           <Route path="/nets" element={<ProtectedRoute adminOnly><NetsAdminPage /></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          {/* Top-level event routes — net-free */}
+          <Route path="/events" element={<EventsPage />} />
+          <Route path="/events/:eventId" element={<EventProvider><RequireEventRole min="read"><EventDashboardPage /></RequireEventRole></EventProvider>} />
+          <Route path="/events/:eventId/map" element={<EventProvider><RequireEventRole min="read"><EventMapPage /></RequireEventRole></EventProvider>} />
+          <Route path="/events/:eventId/report" element={<EventProvider><RequireEventRole min="read"><EventReportPage /></RequireEventRole></EventProvider>} />
+          {/* /events/:eventId/settings — Task 10 (EventSettingsPage not yet implemented) */}
+          {/* /e/:token — Task 12 (PublicEventPage not yet implemented) */}
         </Route>
 
         {/* Per-net routes: /nets/:slug/... */}
@@ -141,10 +150,6 @@ function GatedRoutes() {
         >
           <Route path="schedule" element={<RequireNetRole min="viewer"><SchedulePage /></RequireNetRole>} />
           <Route path="members" element={<RequireNetRole min="viewer"><MembersPage /></RequireNetRole>} />
-          <Route path="events" element={<RequireNetRole min="viewer"><EventsPage /></RequireNetRole>} />
-          <Route path="events/:eventId" element={<RequireNetRole min="viewer"><EventDashboardPage /></RequireNetRole>} />
-          <Route path="events/:eventId/report" element={<RequireNetRole min="viewer"><EventReportPage /></RequireNetRole>} />
-          <Route path="events/:eventId/map" element={<RequireNetRole min="viewer"><EventMapPage /></RequireNetRole>} />
           <Route path="reminders" element={<RequireNetRole min="net_control"><RemindersPage /></RequireNetRole>} />
           <Route path="roster" element={<RequireNetRole min="net_control"><RosterPage /></RequireNetRole>} />
           <Route path="activities" element={<RequireNetRole min="net_control"><ActivitiesPage /></RequireNetRole>} />
@@ -155,7 +160,6 @@ function GatedRoutes() {
         <Route path="/schedule" element={<SlugRedirect to="schedule" />} />
         <Route path="/checkins" element={<SlugRedirect to="checkins" />} />
         <Route path="/members" element={<SlugRedirect to="members" />} />
-        <Route path="/events" element={<SlugRedirect to="events" />} />
         <Route path="/reminders" element={<SlugRedirect to="reminders" />} />
         <Route path="/roster" element={<SlugRedirect to="roster" />} />
         <Route path="/activities" element={<SlugRedirect to="activities" />} />

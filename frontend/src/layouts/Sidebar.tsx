@@ -20,7 +20,6 @@ const netNavItems: NavItem[] = [
   { label: "Schedule",   subpath: "schedule",   minRole: "viewer" },
   { label: "Check-ins",  subpath: "checkins",   minRole: null },  // public
   { label: "Members",    subpath: "members",    minRole: "viewer" },
-  { label: "Events",     subpath: "events",     minRole: "viewer" },
   { label: "Reminders",  subpath: "reminders",  minRole: "net_control" },
   { label: "Roster",     subpath: "roster",     minRole: "net_control" },
   { label: "Activities", subpath: "activities", minRole: "net_control" },
@@ -31,6 +30,11 @@ const globalNavItems: NavItem[] = [
   { label: "Users",  subpath: null, absolutePath: "/users",  minRole: "admin" },
   { label: "Config", subpath: null, absolutePath: "/config", minRole: "admin" },
   { label: "Nets",   subpath: null, absolutePath: "/nets",   minRole: "admin" },
+];
+
+// Items visible to any authenticated non-pending user (not admin-gated)
+const authedNavItems: NavItem[] = [
+  { label: "Events", subpath: null, absolutePath: "/events", minRole: null },
 ];
 
 const ROLE_RANK: Record<NetRole | "admin", number> = {
@@ -75,6 +79,11 @@ export function Sidebar() {
     meetsRole(netRole, item.minRole),
   );
 
+  // Events and similar items visible to any approved logged-in user
+  const visibleAuthedItems = (user && !user.is_pending)
+    ? authedNavItems
+    : [];
+
   return (
     <aside className="hidden md:flex md:flex-col md:w-60 md:fixed md:inset-y-0 bg-bg-surface border-r border-border">
       {/* Header */}
@@ -108,8 +117,30 @@ export function Sidebar() {
           </NavLink>
         ))}
 
+        {/* Authed (non-admin) global items — visible to any approved logged-in user */}
+        {visibleAuthedItems.length > 0 && (
+          <>
+            {visibleNetItems.length > 0 && <div className="my-2 border-t border-border" />}
+            {visibleAuthedItems.map((item) => (
+              <NavLink
+                key={item.absolutePath}
+                to={item.absolutePath!}
+                className={({ isActive }) =>
+                  `block px-3 py-2 rounded-md text-sm mb-0.5 transition-colors ${
+                    isActive
+                      ? "text-accent bg-accent/10 border-l-2 border-accent pl-2.5"
+                      : "text-text-muted hover:text-text-primary hover:bg-bg-elevated"
+                  }`
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </>
+        )}
+
         {/* Divider before global admin links (when both sections have items) */}
-        {visibleNetItems.length > 0 && visibleGlobalItems.length > 0 && (
+        {(visibleNetItems.length > 0 || visibleAuthedItems.length > 0) && visibleGlobalItems.length > 0 && (
           <div className="my-2 border-t border-border" />
         )}
 

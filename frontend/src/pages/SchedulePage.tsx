@@ -777,22 +777,27 @@ export function SchedulePage() {
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <h1 className="text-xl font-bold text-text-primary">Net Schedule</h1>
-        {editSessions && (
-          <div className="flex gap-2">
-            {manageSeasons && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setShowSeasonModal(true)}
-              >
-                + New Season
+        <div className="flex gap-2 flex-wrap">
+          <Link to="/events?new=1" className="inline-flex items-center px-3 py-1.5 rounded-md text-sm font-medium bg-bg-elevated text-text-secondary hover:text-text-primary hover:bg-bg-elevated border border-border transition-colors">
+            New Event
+          </Link>
+          {editSessions && (
+            <>
+              {manageSeasons && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setShowSeasonModal(true)}
+                >
+                  + New Season
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setShowSessionModal(true)}>
+                + Add Session
               </Button>
-            )}
-            <Button size="sm" onClick={() => setShowSessionModal(true)}>
-              + Add Session
-            </Button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {loading ? (
