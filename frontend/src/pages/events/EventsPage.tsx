@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { createEvent, fetchEvents } from "../../api/events";
 import { Button } from "../../components/Button";
 import { Input } from "../../components/Input";
 import { Modal } from "../../components/Modal";
 import { Spinner } from "../../components/Spinner";
-import { useCurrentNet } from "../../hooks/useCurrentNet";
 import type { EventStatus, EventType, NetEvent } from "../../types";
 
 const STATUS_BADGE: Record<EventStatus, string> = {
@@ -20,13 +19,13 @@ const TYPE_LABEL: Record<EventType, string> = {
 };
 
 export function EventsPage() {
-  const { slug, role } = useCurrentNet();
-  const canWrite = role === "net_control" || role === "admin";
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [events, setEvents] = useState<NetEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(searchParams.get("new") === "1");
 
   // Create form state
   const [name, setName] = useState("");
@@ -54,20 +53,15 @@ export function EventsPage() {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await createEvent({
+      const created = await createEvent({
         name: name.trim(),
         event_type: eventType,
         description: description.trim() || null,
         scheduled_start: scheduledStart ? new Date(scheduledStart).toISOString() : null,
       });
-      setShowCreate(false);
-      setName("");
-      setDescription("");
-      setScheduledStart("");
-      await load();
+      navigate(`/events/${created.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create event");
-    } finally {
       setSaving(false);
     }
   }
@@ -84,7 +78,7 @@ export function EventsPage() {
     <div className="p-4 md:p-6 max-w-5xl">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-text-primary">Events</h1>
-        {canWrite && <Button onClick={() => setShowCreate(true)}>New event</Button>}
+        <Button onClick={() => setShowCreate(true)}>New event</Button>
       </div>
 
       {error && <p className="text-danger text-sm mb-3">{error}</p>}
@@ -106,7 +100,7 @@ export function EventsPage() {
             {events.map((event) => (
               <tr key={event.id} className="border-b border-border hover:bg-bg-elevated">
                 <td className="py-2 pr-4">
-                  <Link to={`/nets/${slug}/events/${event.id}`} className="text-accent hover:underline">
+                  <Link to={`/events/${event.id}`} className="text-accent hover:underline">
                     {event.name}
                   </Link>
                 </td>
