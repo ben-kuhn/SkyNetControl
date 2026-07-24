@@ -373,6 +373,7 @@ export interface EventSnapshot {
   participants: EventParticipant[];
   log: EventLogEntry[];
   pinned_seqs: number[];
+  is_control: boolean;
 }
 
 export interface EventUpdates extends EventSnapshot {

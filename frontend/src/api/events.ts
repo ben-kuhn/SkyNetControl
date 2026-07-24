@@ -29,22 +29,22 @@ export interface EventCreateInput {
   event_type: EventType;
   description?: string | null;
   scheduled_start?: string | null;
-  activate?: boolean;
 }
 
-export async function fetchEvents(netSlug: string): Promise<NetEvent[]> {
-  return apiFetch<NetEvent[]>(`/nets/${netSlug}/events`);
+export async function fetchEvents(): Promise<NetEvent[]> {
+  return apiFetch<NetEvent[]>(`/events`);
 }
 
-export async function createEvent(input: EventCreateInput, netSlug: string): Promise<NetEvent> {
-  return apiFetch<NetEvent>(`/nets/${netSlug}/events`, {
+export async function createEvent(input: EventCreateInput): Promise<NetEvent> {
+  return apiFetch<NetEvent>(`/events`, {
     method: "POST",
     body: JSON.stringify(input),
   });
 }
 
-export async function fetchEvent(id: number, netSlug: string): Promise<EventSnapshot> {
-  return apiFetch<EventSnapshot>(`/nets/${netSlug}/events/${id}`);
+export async function fetchEvent(id: number, token?: string): Promise<EventSnapshot> {
+  const t = token ? `?token=${encodeURIComponent(token)}` : "";
+  return apiFetch<EventSnapshot>(`/events/${id}${t}`);
 }
 
 export async function updateEvent(
@@ -62,24 +62,23 @@ export async function updateEvent(
       | "aprs_beacon_posts"
     >
   >,
-  netSlug: string,
 ): Promise<NetEvent> {
-  return apiFetch<NetEvent>(`/nets/${netSlug}/events/${id}`, {
+  return apiFetch<NetEvent>(`/events/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
 }
 
-export async function activateEvent(id: number, netSlug: string): Promise<NetEvent> {
-  return apiFetch<NetEvent>(`/nets/${netSlug}/events/${id}/activate`, { method: "POST" });
+export async function activateEvent(id: number): Promise<NetEvent> {
+  return apiFetch<NetEvent>(`/events/${id}/activate`, { method: "POST" });
 }
 
-export async function closeEvent(id: number, netSlug: string): Promise<NetEvent> {
-  return apiFetch<NetEvent>(`/nets/${netSlug}/events/${id}/close`, { method: "POST" });
+export async function closeEvent(id: number): Promise<NetEvent> {
+  return apiFetch<NetEvent>(`/events/${id}/close`, { method: "POST" });
 }
 
-export async function reopenEvent(id: number, netSlug: string): Promise<NetEvent> {
-  return apiFetch<NetEvent>(`/nets/${netSlug}/events/${id}/reopen`, { method: "POST" });
+export async function reopenEvent(id: number): Promise<NetEvent> {
+  return apiFetch<NetEvent>(`/events/${id}/reopen`, { method: "POST" });
 }
 
 // --- Posts ---
@@ -94,9 +93,8 @@ export interface PostInput {
 export async function createEventPost(
   eventId: number,
   input: PostInput & { name: string },
-  netSlug: string,
 ): Promise<EventPost> {
-  return apiFetch<EventPost>(`/nets/${netSlug}/events/${eventId}/posts`, {
+  return apiFetch<EventPost>(`/events/${eventId}/posts`, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -106,16 +104,15 @@ export async function updateEventPost(
   eventId: number,
   postId: number,
   input: PostInput,
-  netSlug: string,
 ): Promise<EventPost> {
-  return apiFetch<EventPost>(`/nets/${netSlug}/events/${eventId}/posts/${postId}`, {
+  return apiFetch<EventPost>(`/events/${eventId}/posts/${postId}`, {
     method: "PATCH",
     body: JSON.stringify(input),
   });
 }
 
-export async function deleteEventPost(eventId: number, postId: number, netSlug: string): Promise<void> {
-  return apiFetch<void>(`/nets/${netSlug}/events/${eventId}/posts/${postId}`, { method: "DELETE" });
+export async function deleteEventPost(eventId: number, postId: number): Promise<void> {
+  return apiFetch<void>(`/events/${eventId}/posts/${postId}`, { method: "DELETE" });
 }
 
 // --- Participants ---
@@ -130,9 +127,8 @@ export interface CheckInInput {
 export async function checkInParticipant(
   eventId: number,
   input: CheckInInput,
-  netSlug: string,
 ): Promise<EventParticipant> {
-  return apiFetch<EventParticipant>(`/nets/${netSlug}/events/${eventId}/participants`, {
+  return apiFetch<EventParticipant>(`/events/${eventId}/participants`, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -149,10 +145,9 @@ export async function updateParticipant(
   eventId: number,
   participantId: number,
   input: ParticipantUpdateInput,
-  netSlug: string,
 ): Promise<EventParticipant> {
   return apiFetch<EventParticipant>(
-    `/nets/${netSlug}/events/${eventId}/participants/${participantId}`,
+    `/events/${eventId}/participants/${participantId}`,
     { method: "PATCH", body: JSON.stringify(input) },
   );
 }
@@ -168,9 +163,8 @@ export interface NoteInput {
 export async function addEventNote(
   eventId: number,
   input: NoteInput,
-  netSlug: string,
 ): Promise<EventLogEntry> {
-  return apiFetch<EventLogEntry>(`/nets/${netSlug}/events/${eventId}/log`, {
+  return apiFetch<EventLogEntry>(`/events/${eventId}/log`, {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -180,9 +174,8 @@ export async function setEventLogPinned(
   eventId: number,
   entryId: number,
   pinned: boolean,
-  netSlug: string,
 ): Promise<EventLogEntry> {
-  return apiFetch<EventLogEntry>(`/nets/${netSlug}/events/${eventId}/log/${entryId}`, {
+  return apiFetch<EventLogEntry>(`/events/${eventId}/log/${entryId}`, {
     method: "PATCH",
     body: JSON.stringify({ pinned }),
   });
@@ -193,17 +186,17 @@ export async function setEventLogPinned(
 export async function fetchEventUpdates(
   eventId: number,
   since: number,
-  netSlug: string,
+  token?: string,
 ): Promise<EventUpdates> {
-  return apiFetch<EventUpdates>(`/nets/${netSlug}/events/${eventId}/updates?since=${since}`);
+  const t = token ? `&token=${encodeURIComponent(token)}` : "";
+  return apiFetch<EventUpdates>(`/events/${eventId}/updates?since=${since}${t}`);
 }
 
 export async function fetchEventReport(
   eventId: number,
-  netSlug: string,
 ): Promise<{ participants: EventReportParticipant[] }> {
   return apiFetch<{ participants: EventReportParticipant[] }>(
-    `/nets/${netSlug}/events/${eventId}/report`,
+    `/events/${eventId}/report`,
   );
 }
 
@@ -212,9 +205,10 @@ export async function fetchEventReport(
 export async function fetchEventPositions(
   eventId: number,
   since: number,
-  netSlug: string,
+  token?: string,
 ): Promise<EventPositions> {
-  return apiFetch<EventPositions>(`/nets/${netSlug}/events/${eventId}/positions?since=${since}`);
+  const t = token ? `&token=${encodeURIComponent(token)}` : "";
+  return apiFetch<EventPositions>(`/events/${eventId}/positions?since=${since}${t}`);
 }
 
 // --- Event messages (Winlink) ---
@@ -222,12 +216,11 @@ export async function fetchEventPositions(
 export async function fetchEventMessages(
   eventId: number,
   since: number,
-  netSlug: string,
   includeDismissed = false,
 ): Promise<EventMessages> {
   const params = new URLSearchParams({ since: String(since) });
   if (includeDismissed) params.set("include_dismissed", "true");
-  return apiFetch<EventMessages>(`/nets/${netSlug}/events/${eventId}/messages?${params}`);
+  return apiFetch<EventMessages>(`/events/${eventId}/messages?${params}`);
 }
 
 export interface ComposeMessageInput {
@@ -240,10 +233,9 @@ export interface ComposeMessageInput {
 export async function composeEventMessage(
   eventId: number,
   input: ComposeMessageInput,
-  netSlug: string,
 ): Promise<{ message: EventMessage; delivered: boolean }> {
   return apiFetch<{ message: EventMessage; delivered: boolean }>(
-    `/nets/${netSlug}/events/${eventId}/messages`,
+    `/events/${eventId}/messages`,
     { method: "POST", body: JSON.stringify(input) },
   );
 }
@@ -252,9 +244,8 @@ export async function setEventMessageStatus(
   eventId: number,
   messageId: number,
   status: MessageStatus,
-  netSlug: string,
 ): Promise<EventMessage> {
-  return apiFetch<EventMessage>(`/nets/${netSlug}/events/${eventId}/messages/${messageId}`, {
+  return apiFetch<EventMessage>(`/events/${eventId}/messages/${messageId}`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
@@ -262,9 +253,17 @@ export async function setEventMessageStatus(
 
 export async function rescanEventMailbox(
   eventId: number,
-  netSlug: string,
 ): Promise<{ new_messages: number }> {
-  return apiFetch<{ new_messages: number }>(`/nets/${netSlug}/events/${eventId}/rescan`, {
+  return apiFetch<{ new_messages: number }>(`/events/${eventId}/rescan`, {
+    method: "POST",
+  });
+}
+
+export async function retryEventMessage(
+  eventId: number,
+  messageId: number,
+): Promise<{ retried: boolean }> {
+  return apiFetch<{ retried: boolean }>(`/events/${eventId}/messages/${messageId}/retry`, {
     method: "POST",
   });
 }
@@ -273,20 +272,19 @@ export function eventAttachmentUrl(
   eventId: number,
   messageId: number,
   attachmentId: number,
-  netSlug: string,
 ): string {
-  return `/api/nets/${netSlug}/events/${eventId}/messages/${messageId}/attachments/${attachmentId}`;
+  return `/api/events/${eventId}/messages/${messageId}/attachments/${attachmentId}`;
 }
 
 // --- Form composition ---
 
-export async function fetchFormCatalog(netSlug: string, q = ""): Promise<FormCatalogNode> {
+export async function fetchFormCatalog(eventId: number, q = ""): Promise<FormCatalogNode> {
   const p = q ? `?q=${encodeURIComponent(q)}` : "";
-  return apiFetch<FormCatalogNode>(`/nets/${netSlug}/forms/catalog${p}`);
+  return apiFetch<FormCatalogNode>(`/events/${eventId}/forms/catalog${p}`);
 }
 
-export function formRenderUrl(netSlug: string, path: string, prefill?: Record<string, string>): string {
-  let url = `/api/nets/${netSlug}/forms/render?path=${encodeURIComponent(path)}`;
+export function formRenderUrl(eventId: number, path: string, prefill?: Record<string, string>): string {
+  let url = `/api/events/${eventId}/forms/render?path=${encodeURIComponent(path)}`;
   if (prefill && Object.keys(prefill).length > 0) {
     url += `&prefill=${encodeURIComponent(JSON.stringify(prefill))}`;
   }
@@ -300,54 +298,56 @@ export interface FormComposeInput {
   reply_to_id?: number | null;
 }
 
-export async function previewForm(eventId: number, input: FormComposeInput, netSlug: string): Promise<FormPreview> {
-  return apiFetch<FormPreview>(`/nets/${netSlug}/events/${eventId}/forms/preview`, {
+export async function previewForm(eventId: number, input: FormComposeInput): Promise<FormPreview> {
+  return apiFetch<FormPreview>(`/events/${eventId}/forms/preview`, {
     method: "POST", body: JSON.stringify(input),
   });
 }
 
 export async function sendFormMessage(
-  eventId: number, input: FormComposeInput, netSlug: string,
+  eventId: number, input: FormComposeInput,
 ): Promise<{ message: EventMessage; delivered: boolean }> {
   return apiFetch<{ message: EventMessage; delivered: boolean }>(
-    `/nets/${netSlug}/events/${eventId}/form-messages`,
+    `/events/${eventId}/form-messages`,
     { method: "POST", body: JSON.stringify(input) },
   );
 }
 
-export async function fetchReplyForm(eventId: number, messageId: number, netSlug: string): Promise<ReplyForm> {
-  return apiFetch<ReplyForm>(`/nets/${netSlug}/events/${eventId}/messages/${messageId}/reply-form`);
+export async function fetchReplyForm(eventId: number, messageId: number): Promise<ReplyForm> {
+  return apiFetch<ReplyForm>(`/events/${eventId}/messages/${messageId}/reply-form`);
 }
 
-// --- PAT transport ---
+// --- PAT transport (event-scoped) ---
 
-export async function fetchPatConnectOptions(netSlug: string): Promise<PatConnectOptions> {
-  return apiFetch<PatConnectOptions>(`/nets/${netSlug}/pat/connect-options`);
+export async function fetchPatConnectOptions(eventId: number): Promise<PatConnectOptions> {
+  return apiFetch<PatConnectOptions>(`/events/${eventId}/pat/connect-options`);
 }
 
-export async function patConnect(
-  netSlug: string, eventId: number | null, input: PatConnectInput,
-): Promise<{ session_id: number }> {
-  const path = eventId == null
-    ? `/nets/${netSlug}/pat/connect`
-    : `/nets/${netSlug}/events/${eventId}/pat/connect`;
-  return apiFetch<{ session_id: number }>(path, { method: "POST", body: JSON.stringify(input) });
+export async function patConnect(eventId: number, input: PatConnectInput): Promise<{ session_id: number }> {
+  return apiFetch<{ session_id: number }>(`/events/${eventId}/pat/connect`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export async function fetchPatSession(netSlug: string, sessionId: number): Promise<PatSession> {
-  return apiFetch<PatSession>(`/nets/${netSlug}/pat/sessions/${sessionId}`);
+export async function fetchPatSession(eventId: number, sessionId: number): Promise<PatSession> {
+  return apiFetch<PatSession>(`/events/${eventId}/pat/sessions/${sessionId}`);
 }
 
-export async function abortPatSession(netSlug: string, sessionId: number): Promise<{ ok: boolean }> {
-  return apiFetch<{ ok: boolean }>(`/nets/${netSlug}/pat/sessions/${sessionId}/abort`, { method: "POST" });
+export async function abortPatSession(eventId: number, sessionId: number): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/events/${eventId}/pat/sessions/${sessionId}/abort`, { method: "POST" });
 }
 
-export async function testPatConnection(netSlug: string): Promise<{ ok: boolean; error?: string }> {
-  return apiFetch<{ ok: boolean; error?: string }>(`/nets/${netSlug}/pat/test`, { method: "POST" });
+export async function testPatConnection(eventId: number): Promise<{ ok: boolean; error?: string }> {
+  return apiFetch<{ ok: boolean; error?: string }>(`/events/${eventId}/pat/test`, { method: "POST" });
 }
 
 // --- Weather ---
 
-export async function fetchEventWeather(eventId: number, netSlug: string): Promise<WeatherData> {
-  return apiFetch<WeatherData>(`/nets/${netSlug}/events/${eventId}/weather`);
+export async function fetchEventWeather(eventId: number, token?: string): Promise<WeatherData> {
+  const t = token ? `?token=${encodeURIComponent(token)}` : "";
+  return apiFetch<WeatherData>(`/events/${eventId}/weather${t}`);
+}
+
+// --- By token (public page) ---
+
+export async function fetchEventByToken(token: string): Promise<EventSnapshot> {
+  return apiFetch<EventSnapshot>(`/events/by-token/${encodeURIComponent(token)}`);
 }
