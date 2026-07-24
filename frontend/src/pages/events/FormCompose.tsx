@@ -8,7 +8,6 @@ import { FormCatalog } from "./FormCatalog";
 import { FormFillFrame } from "./FormFillFrame";
 
 interface Props {
-  netSlug: string;
   event: NetEvent;
   open: boolean;
   onClose: () => void;
@@ -17,7 +16,7 @@ interface Props {
   compose: ReturnType<typeof useFormCompose>;
 }
 
-export function FormCompose({ netSlug, event: _event, open, onClose, onSent, onError, compose }: Props) {
+export function FormCompose({ event, open, onClose, onSent, onError, compose }: Props) {
   const { step, inputFormPath, prefill, preview, pickForm, acceptVariables, send } = compose;
   const handleVariables = useCallback(
     (vars: Record<string, string>) => void acceptVariables(vars, onError),
@@ -26,10 +25,10 @@ export function FormCompose({ netSlug, event: _event, open, onClose, onSent, onE
   return (
     <Modal open={open} onClose={onClose} title="Winlink form" size="xl">
       {step === "catalog" && (
-        <FormCatalog netSlug={netSlug} onPick={(e) => pickForm(e.template_path, e.input_form_path)} />
+        <FormCatalog eventId={event.id} onPick={(e) => pickForm(e.template_path, e.input_form_path)} />
       )}
       {step === "fill" && (
-        <FormFillFrame netSlug={netSlug} inputFormPath={inputFormPath} prefill={prefill}
+        <FormFillFrame eventId={event.id} inputFormPath={inputFormPath} prefill={prefill}
           onVariables={handleVariables} />
       )}
       {step === "preview" && preview && (

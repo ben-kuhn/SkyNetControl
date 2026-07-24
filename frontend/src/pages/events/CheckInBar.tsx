@@ -5,7 +5,6 @@ import { Button } from "../../components/Button";
 import type { EventPost } from "../../types";
 
 interface CheckInBarProps {
-  netSlug: string;
   eventId: number;
   posts: EventPost[];
   onDone: () => Promise<void>;
@@ -15,7 +14,7 @@ interface CheckInBarProps {
 /** Keyboard-first check-in: callsign autofocused, Enter saves from any field
  *  (including the post select), Esc clears everything, and focus returns to
  *  the callsign field for the next check-in — hands never leave the keyboard. */
-export function CheckInBar({ netSlug, eventId, posts, onDone, onError }: CheckInBarProps) {
+export function CheckInBar({ eventId, posts, onDone, onError }: CheckInBarProps) {
   const [callsign, setCallsign] = useState("");
   const [postId, setPostId] = useState<number | "">("");
   const [location, setLocation] = useState("");
@@ -30,7 +29,6 @@ export function CheckInBar({ netSlug, eventId, posts, onDone, onError }: CheckIn
       await checkInParticipant(
         eventId,
         { callsign: cs, post_id: postId === "" ? null : postId, location: location.trim() || null },
-        netSlug,
       );
       setCallsign("");
       setLocation("");

@@ -13,7 +13,7 @@ const POLL_MS = 3000;
  * - On failure keeps last-known state and flips `connected` false; next
  *   successful poll recovers (never blank the dashboard mid-event).
  */
-export function useEventUpdates(netSlug: string, eventId: number) {
+export function useEventUpdates(eventId: number, token?: string) {
   const [updates, setUpdates] = useState<EventUpdates | null>(null);
   const [connected, setConnected] = useState(true);
   const sinceRef = useRef(0);
@@ -22,7 +22,7 @@ export function useEventUpdates(netSlug: string, eventId: number) {
 
   const refresh = useCallback(async () => {
     try {
-      const u = await fetchEventUpdates(eventId, sinceRef.current, netSlug);
+      const u = await fetchEventUpdates(eventId, sinceRef.current, token);
       // Deduplicate overlapping log ranges: if two polls fire concurrently
       // (interval fires during a slow in-flight poll, or write-triggered refresh
       // overlaps the interval), both capture the same sinceRef.current and the
@@ -42,7 +42,7 @@ export function useEventUpdates(netSlug: string, eventId: number) {
     } catch {
       setConnected(false);
     }
-  }, [netSlug, eventId]);
+  }, [eventId, token]);
 
   useEffect(() => {
     sinceRef.current = 0;

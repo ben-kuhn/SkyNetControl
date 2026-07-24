@@ -8,8 +8,7 @@ import { Spinner } from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../hooks/useAuth";
 import { useCurrentNet } from "../hooks/useCurrentNet";
-import { getNetConfig, patchNet, sendGroupsIoTest, setNetConfigBulk } from "../api/nets";
-import { testPatConnection } from "../api/events";
+import { getNetConfig, patchNet, sendGroupsIoTest, setNetConfigBulk, testNetPatConnection } from "../api/nets";
 
 function parseStringArray(raw: string): string[] {
   try {
@@ -340,7 +339,7 @@ export function NetSettingsPage() {
     setPatTesting(true);
     setPatTestResult(null);
     try {
-      const result = await testPatConnection(slug ?? "");
+      const result = await testNetPatConnection(slug ?? "");
       setPatTestResult(result);
     } catch (e: any) {
       setPatTestResult({ ok: false, error: e?.detail ?? e?.message ?? "request error" });

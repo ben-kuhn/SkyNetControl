@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Spinner } from "../../components/Spinner";
+import { useEvent } from "../../context/EventProvider";
 import { useEventPositions } from "../../hooks/useEventPositions";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
 import { useEventWeather } from "../../hooks/useEventWeather";
@@ -15,15 +16,15 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 export function EventMapPage() {
-  const { slug, eventId } = useParams<{ slug: string; eventId: string }>();
-  const { updates } = useEventUpdates(slug!, Number(eventId));
+  const { event: snapshot } = useEvent();
+  const eventId = snapshot.event.id;
+  const { updates } = useEventUpdates(eventId);
   const { stations, aprsStatus, aprsStatusDetail, objects } = useEventPositions(
-    slug!,
-    Number(eventId),
+    eventId,
     true,
   );
   const weatherEnabled = updates?.event.weather_enabled ?? false;
-  const weather = useEventWeather(slug!, Number(eventId), weatherEnabled);
+  const weather = useEventWeather(eventId, weatherEnabled);
   const radar = useRadarFrames(weatherEnabled);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [radarFrameIndex, setRadarFrameIndex] = useState(0);
@@ -56,7 +57,7 @@ export function EventMapPage() {
     <div className="flex flex-col h-[calc(100vh-4rem)] p-2 gap-2">
       <div className="flex items-center gap-3 px-2">
         <Link
-          to={`/nets/${slug}/events/${updates.event.id}`}
+          to={`/events/${updates.event.id}`}
           className="text-text-muted hover:text-accent text-sm"
         >
           ← {updates.event.name}

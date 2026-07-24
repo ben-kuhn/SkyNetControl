@@ -8,8 +8,7 @@ import { usePatSession } from "../../hooks/usePatSession";
 import type { PatConnectOptions } from "../../types";
 
 interface Props {
-  netSlug: string;
-  eventId: number | null;
+  eventId: number;
   open: boolean;
   onClose: () => void;
   onSettled: () => Promise<void>;
@@ -17,7 +16,7 @@ interface Props {
 
 const TERMINAL = new Set(["completed", "failed", "aborted"]);
 
-export function PatConnectModal({ netSlug, eventId, open, onClose, onSettled }: Props) {
+export function PatConnectModal({ eventId, open, onClose, onSettled }: Props) {
   const [options, setOptions] = useState<PatConnectOptions | null>(null);
   const [alias, setAlias] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -26,15 +25,15 @@ export function PatConnectModal({ netSlug, eventId, open, onClose, onSettled }: 
   const [freq, setFreq] = useState("");
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const session = usePatSession(netSlug, sessionId);
+  const session = usePatSession(eventId, sessionId);
 
   useEffect(() => {
     if (!open) return;
     setSessionId(null); setError(null); setAlias(""); setAdvanced(false);
-    fetchPatConnectOptions(netSlug)
+    fetchPatConnectOptions(eventId)
       .then((o) => { setOptions(o); if (o.aliases[0]) setAlias(o.aliases[0].name); })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load connect options"));
-  }, [open, netSlug]);
+  }, [open, eventId]);
 
   useEffect(() => {
     if (session && TERMINAL.has(session.status)) void onSettled();
@@ -44,7 +43,7 @@ export function PatConnectModal({ netSlug, eventId, open, onClose, onSettled }: 
     setError(null);
     try {
       const input = advanced ? { mode, gateway, freq: freq || undefined } : { alias };
-      const { session_id } = await patConnect(netSlug, eventId, input);
+      const { session_id } = await patConnect(eventId, input);
       setSessionId(session_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Connect failed");
@@ -111,7 +110,7 @@ export function PatConnectModal({ netSlug, eventId, open, onClose, onSettled }: 
           {session?.error && <p className="text-danger text-sm">{session.error}</p>}
           <div className="flex justify-end gap-2">
             {session && !TERMINAL.has(session.status) && (
-              <Button variant="secondary" onClick={() => void abortPatSession(netSlug, sessionId)}>Abort</Button>
+              <Button variant="secondary" onClick={() => void abortPatSession(eventId, sessionId)}>Abort</Button>
             )}
             {session && TERMINAL.has(session.status) && <Button onClick={onClose}>Done</Button>}
           </div>

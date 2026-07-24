@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   activateEvent,
   addEventNote,
@@ -10,8 +10,8 @@ import {
 } from "../../api/events";
 import { Button } from "../../components/Button";
 import { Spinner } from "../../components/Spinner";
+import { useEvent } from "../../context/EventProvider";
 import { useToast } from "../../context/ToastContext";
-import { useCurrentNet } from "../../hooks/useCurrentNet";
 import { useEventMessages } from "../../hooks/useEventMessages";
 import { useEventPositions } from "../../hooks/useEventPositions";
 import { useEventUpdates } from "../../hooks/useEventUpdates";
@@ -24,24 +24,22 @@ import { ParticipantBoard, STATUS_LABEL } from "./ParticipantBoard";
 import { PostsPanel } from "./PostsPanel";
 
 export function EventDashboardPage() {
-  const { slug, eventId } = useParams<{ slug: string; eventId: string }>();
-  const { role } = useCurrentNet();
-  const canWrite = role === "net_control" || role === "admin";
-  const { updates, connected, refresh } = useEventUpdates(slug!, Number(eventId));
+  const { event: snapshot, isControl } = useEvent();
+  const canWrite = isControl;
+  const eventId = snapshot.event.id;
+  const { updates, connected, refresh } = useEventUpdates(eventId);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [noteText, setNoteText] = useState("");
   const [participantNote, setParticipantNote] = useState("");
   const [pinNote, setPinNote] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
   const positions = useEventPositions(
-    slug!,
-    Number(eventId),
+    eventId,
     mapExpanded || (updates?.event.aprs_beacon_posts ?? false),
   );
   const [messagesOpen, setMessagesOpen] = useState(false);
   const eventMessages = useEventMessages(
-    slug!,
-    Number(eventId),
+    eventId,
     messagesOpen || (updates?.event.status === "active"),
   );
 
@@ -76,7 +74,7 @@ export function EventDashboardPage() {
     <div className="p-4 md:p-6">
       {/* Header */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <Link to={`/nets/${slug}/events`} className="text-text-muted hover:text-accent text-sm">
+        <Link to={`/events`} className="text-text-muted hover:text-accent text-sm">
           ← Events
         </Link>
         <h1 className="text-xl font-semibold text-text-primary">{event.name}</h1>
@@ -95,23 +93,23 @@ export function EventDashboardPage() {
         )}
         {/* Point 4: lifecycle buttons */}
         {canWrite && event.status === "draft" && (
-          <Button size="sm" onClick={() => void act(() => activateEvent(event.id, slug!), "Activate failed")}>
+          <Button size="sm" onClick={() => void act(() => activateEvent(event.id), "Activate failed")}>
             Activate
           </Button>
         )}
         {canWrite && event.status === "active" && (
-          <Button size="sm" variant="danger" onClick={() => void act(() => closeEvent(event.id, slug!), "Close failed")}>
+          <Button size="sm" variant="danger" onClick={() => void act(() => closeEvent(event.id), "Close failed")}>
             Close event
           </Button>
         )}
         {canWrite && event.status === "closed" && (
-          <Button size="sm" variant="secondary" onClick={() => void act(() => reopenEvent(event.id, slug!), "Reopen failed")}>
+          <Button size="sm" variant="secondary" onClick={() => void act(() => reopenEvent(event.id), "Reopen failed")}>
             Reopen
           </Button>
         )}
         <div className="ml-auto">
           <Link
-            to={`/nets/${slug}/events/${event.id}/report`}
+            to={`/events/${event.id}/report`}
             className="text-sm text-accent hover:underline"
           >
             Report
@@ -121,11 +119,10 @@ export function EventDashboardPage() {
 
       {/* Point 5: Check-in bar above the board */}
       {canWrite && event.status === "active" && (
-        <CheckInBar netSlug={slug!} eventId={event.id} posts={posts} onDone={refresh} onError={onError} />
+        <CheckInBar eventId={event.id} posts={posts} onDone={refresh} onError={onError} />
       )}
 
       <MapPanel
-        netSlug={slug!}
         event={event}
         participants={participants}
         posts={posts}
@@ -151,7 +148,7 @@ export function EventDashboardPage() {
                 value={p.current_status}
                 onChange={(e) =>
                   void act(
-                    () => updateParticipant(event.id, p.id, { status: e.target.value as ParticipantStatus }, slug!),
+                    () => updateParticipant(event.id, p.id, { status: e.target.value as ParticipantStatus }),
                     "Status change failed",
                   )
                 }
@@ -183,7 +180,7 @@ export function EventDashboardPage() {
                       {/* Point 8 unpin control */}
                       {canWrite && event.status === "active" && (
                         <button
-                          onClick={() => void act(() => setEventLogPinned(event.id, e.id, false, slug!), "Unpin failed")}
+                          onClick={() => void act(() => setEventLogPinned(event.id, e.id, false), "Unpin failed")}
                           className="ml-2 text-xs text-text-muted hover:text-danger"
                         >
                           unpin
@@ -224,7 +221,6 @@ export function EventDashboardPage() {
                         await addEventNote(
                           event.id,
                           { message: participantNote.trim(), callsign: selected.callsign, pinned: pinNote },
-                          slug!,
                         );
                         setParticipantNote("");
                         setPinNote(false);
@@ -242,7 +238,6 @@ export function EventDashboardPage() {
           {canWrite && event.status !== "closed" && (
             <div className="mt-4">
               <PostsPanel
-                netSlug={slug!}
                 eventId={event.id}
                 posts={posts}
                 onChanged={refresh}
@@ -268,7 +263,7 @@ export function EventDashboardPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && noteText.trim()) {
                       void act(async () => {
-                        await addEventNote(event.id, { message: noteText.trim() }, slug!);
+                        await addEventNote(event.id, { message: noteText.trim() });
                         setNoteText("");
                       }, "Failed to add note");
                     }
@@ -281,7 +276,7 @@ export function EventDashboardPage() {
                   disabled={!noteText.trim()}
                   onClick={() =>
                     void act(async () => {
-                      await addEventNote(event.id, { message: noteText.trim() }, slug!);
+                      await addEventNote(event.id, { message: noteText.trim() });
                       setNoteText("");
                     }, "Failed to add note")
                   }
@@ -310,7 +305,6 @@ export function EventDashboardPage() {
         {messagesOpen && (
           <div className="mt-2">
             <MessagesPanel
-              netSlug={slug!}
               event={event}
               messages={eventMessages.messages}
               messagingConfigured={eventMessages.messagingConfigured}

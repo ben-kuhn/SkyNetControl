@@ -5,7 +5,7 @@ import type { PatSession } from "../types";
 const TERMINAL = new Set(["completed", "failed", "aborted"]);
 const POLL_MS = 1500;
 
-export function usePatSession(netSlug: string, sessionId: number | null) {
+export function usePatSession(eventId: number, sessionId: number | null) {
   const [session, setSession] = useState<PatSession | null>(null);
   const timer = useRef<number | null>(null);
 
@@ -19,7 +19,7 @@ export function usePatSession(netSlug: string, sessionId: number | null) {
     let cancelled = false;
     const tick = async () => {
       try {
-        const s = await fetchPatSession(netSlug, sessionId);
+        const s = await fetchPatSession(eventId, sessionId);
         if (cancelled) return;
         setSession(s);
         if (TERMINAL.has(s.status)) stop();
@@ -28,7 +28,7 @@ export function usePatSession(netSlug: string, sessionId: number | null) {
     void tick();
     timer.current = window.setInterval(() => void tick(), POLL_MS);
     return () => { cancelled = true; stop(); };
-  }, [netSlug, sessionId, stop]);
+  }, [eventId, sessionId, stop]);
 
   return session;
 }

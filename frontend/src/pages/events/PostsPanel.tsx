@@ -6,7 +6,6 @@ import { Input } from "../../components/Input";
 import type { BeaconedObject, EventPost, NetEvent } from "../../types";
 
 interface PostsPanelProps {
-  netSlug: string;
   eventId: number;
   posts: EventPost[];
   onChanged: () => Promise<void>;
@@ -16,7 +15,7 @@ interface PostsPanelProps {
   objects: BeaconedObject[];
 }
 
-export function PostsPanel({ netSlug, eventId, posts, onChanged, onError, event, canWrite, objects }: PostsPanelProps) {
+export function PostsPanel({ eventId, posts, onChanged, onError, event, canWrite, objects }: PostsPanelProps) {
   const [name, setName] = useState("");
   const [lat, setLat] = useState("");
   const [lon, setLon] = useState("");
@@ -35,7 +34,6 @@ export function PostsPanel({ netSlug, eventId, posts, onChanged, onError, event,
           lat: lat.trim() ? Number(lat) : null,
           lon: lon.trim() ? Number(lon) : null,
         },
-        netSlug,
       );
       setName("");
       setLat("");
@@ -50,7 +48,7 @@ export function PostsPanel({ netSlug, eventId, posts, onChanged, onError, event,
 
   async function remove(postId: number) {
     try {
-      await deleteEventPost(eventId, postId, netSlug);
+      await deleteEventPost(eventId, postId);
       await onChanged();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Failed to delete post (still assigned?)");
@@ -67,7 +65,7 @@ export function PostsPanel({ netSlug, eventId, posts, onChanged, onError, event,
             checked={event.aprs_beacon_posts}
             onChange={async (e) => {
               try {
-                await updateEvent(event.id, { aprs_beacon_posts: e.target.checked }, netSlug);
+                await updateEvent(event.id, { aprs_beacon_posts: e.target.checked });
                 await onChanged();
               } catch (err) {
                 onError(err instanceof Error ? err.message : "Failed to toggle beaconing");

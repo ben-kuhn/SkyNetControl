@@ -1,7 +1,6 @@
 // frontend/src/pages/events/MessagesPanel.tsx
 import { useMemo, useState } from "react";
-import { retryDelivery } from "../../api/delivery";
-import { eventAttachmentUrl, fetchReplyForm, rescanEventMailbox, setEventMessageStatus } from "../../api/events";
+import { eventAttachmentUrl, fetchReplyForm, rescanEventMailbox, retryEventMessage, setEventMessageStatus } from "../../api/events";
 import { Button } from "../../components/Button";
 import { useFormCompose } from "../../hooks/useFormCompose";
 import type { EventMessage, NetEvent } from "../../types";
@@ -12,7 +11,6 @@ import { PatConnectModal } from "./PatConnectModal";
 type Filter = "all" | "unread" | "inbound" | "outbound";
 
 interface MessagesPanelProps {
-  netSlug: string;
   event: NetEvent;
   messages: EventMessage[];
   messagingConfigured: boolean;
@@ -23,7 +21,6 @@ interface MessagesPanelProps {
 }
 
 export function MessagesPanel({
-  netSlug,
   event,
   messages,
   messagingConfigured,
@@ -40,7 +37,7 @@ export function MessagesPanel({
   const [rescanning, setRescanning] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [patOpen, setPatOpen] = useState(false);
-  const compose = useFormCompose(netSlug, event.id);
+  const compose = useFormCompose(event.id);
 
   const visible = useMemo(() => {
     return messages.filter((m) => {
@@ -58,7 +55,7 @@ export function MessagesPanel({
     setOpenId(openId === m.id ? null : m.id);
     if (m.status === "unread" && m.direction === "inbound" && canWrite && active) {
       try {
-        await setEventMessageStatus(event.id, m.id, "read", netSlug);
+        await setEventMessageStatus(event.id, m.id, "read");
         await onChanged();
       } catch { /* non-fatal */ }
     }
@@ -66,7 +63,7 @@ export function MessagesPanel({
 
   async function dismiss(m: EventMessage) {
     try {
-      await setEventMessageStatus(event.id, m.id, "dismissed", netSlug);
+      await setEventMessageStatus(event.id, m.id, "dismissed");
       await onChanged();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Dismiss failed");
@@ -76,7 +73,7 @@ export function MessagesPanel({
   async function rescan() {
     setRescanning(true);
     try {
-      const { new_messages } = await rescanEventMailbox(event.id, netSlug);
+      const { new_messages } = await rescanEventMailbox(event.id);
       await onChanged();
       const msg = new_messages > 0 ? `${new_messages} new message(s)` : "No new mail";
       (onInfo ?? onError)(msg);
@@ -89,7 +86,7 @@ export function MessagesPanel({
 
   async function retry(m: EventMessage) {
     try {
-      await retryDelivery("event_message", m.id, netSlug);
+      await retryEventMessage(event.id, m.id);
       await onChanged();
       (onInfo ?? onError)("Retry attempted");
     } catch (e) {
@@ -137,7 +134,7 @@ export function MessagesPanel({
       {!messagingConfigured && (
         <p className="text-xs text-text-muted mb-2">
           No PAT mailbox configured for this net — inbound Winlink is off.{" "}
-          <a href={`/nets/${netSlug}/settings`} className="text-accent hover:underline">
+          <a href={`/settings`} className="text-accent hover:underline">
             Configure it in net settings.
           </a>
         </p>
@@ -183,7 +180,7 @@ export function MessagesPanel({
                       {m.attachments.map((a) => (
                         <a
                           key={a.id}
-                          href={eventAttachmentUrl(event.id, m.id, a.id, netSlug)}
+                          href={eventAttachmentUrl(event.id, m.id, a.id)}
                           download={a.filename}
                           className="text-xs text-accent hover:underline"
                         >
@@ -206,7 +203,7 @@ export function MessagesPanel({
                         <button
                           onClick={() => void (async () => {
                             try {
-                              const rf = await fetchReplyForm(event.id, m.id, netSlug);
+                              const rf = await fetchReplyForm(event.id, m.id);
                               if (rf.input_form_path !== null) {
                                 compose.startReply(rf.reply_template_path, rf.input_form_path, rf.prefill, m.id);
                                 setFormOpen(true);
@@ -245,7 +242,6 @@ export function MessagesPanel({
 
       <MessageComposer
         key={replyTo?.id ?? "new"}
-        netSlug={netSlug}
         eventId={event.id}
         open={composeOpen}
         onClose={() => setComposeOpen(false)}
@@ -255,7 +251,6 @@ export function MessagesPanel({
       />
 
       <FormCompose
-        netSlug={netSlug}
         event={event}
         open={formOpen}
         onClose={() => setFormOpen(false)}
@@ -265,7 +260,6 @@ export function MessagesPanel({
       />
 
       <PatConnectModal
-        netSlug={netSlug}
         eventId={event.id}
         open={patOpen}
         onClose={() => setPatOpen(false)}

@@ -7,7 +7,6 @@ import { Modal } from "../../components/Modal";
 import type { EventMessage } from "../../types";
 
 interface MessageComposerProps {
-  netSlug: string;
   eventId: number;
   open: boolean;
   onClose: () => void;
@@ -23,7 +22,7 @@ function replyDefaults(replyTo: EventMessage | null | undefined) {
   return { to: replyTo.from_callsign, subject: `Re: ${subject}`, body: `\n\n${quoted}` };
 }
 
-export function MessageComposer({ netSlug, eventId, open, onClose, replyTo, onSent, onError }: MessageComposerProps) {
+export function MessageComposer({ eventId, open, onClose, replyTo, onSent, onError }: MessageComposerProps) {
   const defaults = replyDefaults(replyTo);
   const [to, setTo] = useState(defaults.to);
   const [subject, setSubject] = useState(defaults.subject);
@@ -40,7 +39,6 @@ export function MessageComposer({ netSlug, eventId, open, onClose, replyTo, onSe
       const { delivered } = await composeEventMessage(
         eventId,
         { to_address: to.trim(), subject, body, reply_to_id: replyTo?.id ?? null },
-        netSlug,
       );
       onClose();
       await onSent();

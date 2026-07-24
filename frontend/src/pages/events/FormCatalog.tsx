@@ -20,14 +20,14 @@ function Node({ node, onPick, depth }: { node: FormCatalogNode; onPick: (e: Form
   );
 }
 
-export function FormCatalog({ netSlug, onPick }: { netSlug: string; onPick: (e: FormCatalogEntry) => void }) {
+export function FormCatalog({ eventId, onPick }: { eventId: number; onPick: (e: FormCatalogEntry) => void }) {
   const [tree, setTree] = useState<FormCatalogNode | null>(null);
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchFormCatalog(netSlug, q).then(setTree).catch((e) => setError(e instanceof Error ? e.message : "Failed"));
-  }, [netSlug, q]);
+    fetchFormCatalog(eventId, q).then(setTree).catch((e) => setError(e instanceof Error ? e.message : "Failed"));
+  }, [eventId, q]);
 
   if (error) return <p className="text-danger text-sm">{error}</p>;
   if (!tree) return <Spinner size="md" />;

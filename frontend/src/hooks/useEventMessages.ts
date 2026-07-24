@@ -11,7 +11,7 @@ const POLL_MS = 5000;
  * miss them. The message set per event is small (dozens), so a full read every
  * 5 s is acceptable. Polls only while `enabled` and the tab is visible.
  */
-export function useEventMessages(netSlug: string, eventId: number, enabled: boolean) {
+export function useEventMessages(eventId: number, enabled: boolean) {
   const [messages, setMessages] = useState<EventMessage[]>([]);
   const [latestMsgSeq, setLatestMsgSeq] = useState(0);
   const [messagingConfigured, setMessagingConfigured] = useState(false);
@@ -22,7 +22,7 @@ export function useEventMessages(netSlug: string, eventId: number, enabled: bool
       // Always re-read from 0: message status (read/dismissed) is mutable and
       // does not bump msg_seq, so a pure delta would miss status flips. The
       // message set per event is small (dozens), so a full read every 5s is fine.
-      const u = await fetchEventMessages(eventId, 0, netSlug, true);
+      const u = await fetchEventMessages(eventId, 0, true);
       const map = new Map<number, EventMessage>();
       for (const m of u.messages) map.set(m.id, m);
       byId.current = map;
@@ -32,7 +32,7 @@ export function useEventMessages(netSlug: string, eventId: number, enabled: bool
     } catch {
       // keep last-known messages on a failed poll
     }
-  }, [netSlug, eventId]);
+  }, [eventId]);
 
   useEffect(() => {
     if (!enabled) return;

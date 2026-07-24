@@ -12,7 +12,7 @@ const POLL_MS = 5000;
  * Polls only while `enabled` (a map is actually mounted/expanded) and the
  * tab is visible.
  */
-export function useEventPositions(netSlug: string, eventId: number, enabled: boolean) {
+export function useEventPositions(eventId: number, enabled: boolean, token?: string) {
   const [stations, setStations] = useState<Map<string, EventStation>>(new Map());
   const [aprsStatus, setAprsStatus] = useState("disabled");
   const [aprsStatusDetail, setAprsStatusDetail] = useState("");
@@ -22,7 +22,7 @@ export function useEventPositions(netSlug: string, eventId: number, enabled: boo
 
   const refresh = useCallback(async () => {
     try {
-      const u = await fetchEventPositions(eventId, sinceRef.current, netSlug);
+      const u = await fetchEventPositions(eventId, sinceRef.current, token);
       const next = new Map<string, EventStation>();
       for (const station of u.stations) {
         const prev = pointsRef.current.get(station.station_id);
@@ -44,7 +44,7 @@ export function useEventPositions(netSlug: string, eventId: number, enabled: boo
       // Keep last-known positions on a failed poll; the aprs_status badge
       // reflects backend connectivity, not this fetch.
     }
-  }, [netSlug, eventId]);
+  }, [eventId, token]);
 
   useEffect(() => {
     if (!enabled) return;

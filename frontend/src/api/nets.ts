@@ -83,3 +83,7 @@ export interface GroupsIoTestResult {
 export async function sendGroupsIoTest(slug: string): Promise<GroupsIoTestResult> {
   return apiFetch<GroupsIoTestResult>(`/nets/${encodeURIComponent(slug)}/test/groupsio`, { method: "POST" });
 }
+
+export async function testNetPatConnection(slug: string): Promise<{ ok: boolean; error?: string }> {
+  return apiFetch<{ ok: boolean; error?: string }>(`/nets/${encodeURIComponent(slug)}/pat/test`, { method: "POST" });
+}

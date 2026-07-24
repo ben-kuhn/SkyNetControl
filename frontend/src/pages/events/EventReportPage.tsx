@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { fetchEvent, fetchEventReport } from "../../api/events";
+import { Link } from "react-router-dom";
+import { fetchEventReport } from "../../api/events";
 import { Button } from "../../components/Button";
 import { Spinner } from "../../components/Spinner";
-import type { EventReportParticipant, EventSnapshot } from "../../types";
+import { useEvent } from "../../context/EventProvider";
+import type { EventReportParticipant } from "../../types";
 
 function csvEscape(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
@@ -34,32 +35,25 @@ function fmt(dt: string | null): string {
 }
 
 export function EventReportPage() {
-  const { slug, eventId } = useParams<{ slug: string; eventId: string }>();
-  const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null);
+  const { event: snapshot } = useEvent();
+  const { event, log } = snapshot;
   const [report, setReport] = useState<EventReportParticipant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!slug || !eventId) return;
-    const id = Number(eventId);
-    Promise.all([fetchEvent(id, slug), fetchEventReport(id, slug)])
-      .then(([snap, rep]) => {
-        setSnapshot(snap);
-        setReport(rep.participants);
-      })
+    fetchEventReport(event.id)
+      .then((rep) => setReport(rep.participants))
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load report"));
-  }, [slug, eventId]);
+  }, [event.id]);
 
   if (error) return <p className="p-6 text-danger text-sm">{error}</p>;
-  if (!snapshot || !report) {
+  if (!report) {
     return (
       <div className="flex justify-center py-16">
         <Spinner size="lg" />
       </div>
     );
   }
-
-  const { event, log } = snapshot;
 
   function participantsCsv() {
     downloadCsv(
@@ -91,7 +85,7 @@ export function EventReportPage() {
   return (
     <div className="p-4 md:p-6 max-w-4xl">
       <div className="flex items-center gap-3 mb-1 print:hidden">
-        <Link to={`/nets/${slug}/events/${event.id}`} className="text-text-muted hover:text-accent text-sm">
+        <Link to={`/events/${event.id}`} className="text-text-muted hover:text-accent text-sm">
           ← Dashboard
         </Link>
         <div className="ml-auto flex gap-2">

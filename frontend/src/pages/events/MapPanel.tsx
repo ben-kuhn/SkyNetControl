@@ -22,7 +22,6 @@ export interface PositionsData {
 }
 
 interface MapPanelProps {
-  netSlug: string;
   event: NetEvent;
   participants: EventParticipant[];
   posts: EventPost[];
@@ -35,7 +34,6 @@ interface MapPanelProps {
 }
 
 export function MapPanel({
-  netSlug,
   event,
   participants,
   posts,
@@ -49,7 +47,7 @@ export function MapPanel({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [rangeKm, setRangeKm] = useState(event.aprs_range_km?.toString() ?? "50");
   const { stations, aprsStatus, aprsStatusDetail, objects } = positions;
-  const weather = useEventWeather(netSlug, event.id, expanded && event.weather_enabled);
+  const weather = useEventWeather(event.id, expanded && event.weather_enabled);
   const radar = useRadarFrames(expanded && event.weather_enabled);
   const [frameCount, setFrameCount] = useState(0);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -88,10 +86,9 @@ export function MapPanel({
             aprs_range_lon: lon,
             aprs_range_km: Number(rangeKm) || 50,
           },
-          netSlug,
         );
       } else {
-        await updateEvent(event.id, { aprs_other_stations: false }, netSlug);
+        await updateEvent(event.id, { aprs_other_stations: false });
       }
       await onEventChanged();
     } catch (e) {
@@ -133,7 +130,7 @@ export function MapPanel({
           </span>
         )}
         {expanded && aprsStatus === "disabled" && (
-          <Link to={`/nets/${netSlug}/settings`} className="text-xs text-text-muted hover:text-accent underline">
+          <Link to={`/settings`} className="text-xs text-text-muted hover:text-accent underline">
             enable in net settings
           </Link>
         )}
@@ -164,7 +161,7 @@ export function MapPanel({
               )}
             </label>
           )}
-          <Link to={`/nets/${netSlug}/events/${event.id}/map`} className="text-xs text-accent hover:underline">
+          <Link to={`/events/${event.id}/map`} className="text-xs text-accent hover:underline">
             Expand
           </Link>
         </div>

@@ -11,7 +11,7 @@ function nowStamp(): string {
   return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
-export function useFormCompose(netSlug: string, eventId: number) {
+export function useFormCompose(eventId: number) {
   const [step, setStep] = useState<Step>("catalog");
   const [templatePath, setTemplatePath] = useState("");
   const [inputFormPath, setInputFormPath] = useState("");
@@ -40,24 +40,24 @@ export function useFormCompose(netSlug: string, eventId: number) {
   const acceptVariables = useCallback(async (vars: Record<string, string>, onError: (m: string) => void) => {
     setVariables(vars);
     try {
-      const p = await previewForm(eventId, { template_path: templatePath, variables: vars, datetime_stamp: stamp }, netSlug);
+      const p = await previewForm(eventId, { template_path: templatePath, variables: vars, datetime_stamp: stamp });
       setPreview(p); setStep("preview");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Build failed");
     }
-  }, [eventId, netSlug, templatePath, stamp]);
+  }, [eventId, templatePath, stamp]);
 
   const send = useCallback(async (onDone: () => Promise<void>, onError: (m: string) => void) => {
     try {
       const { delivered } = await sendFormMessage(
-        eventId, { template_path: templatePath, variables, datetime_stamp: stamp, reply_to_id: replyToId }, netSlug,
+        eventId, { template_path: templatePath, variables, datetime_stamp: stamp, reply_to_id: replyToId },
       );
       await onDone();
       if (!delivered) onError("Form saved but not delivered — check delivery / retry.");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Send failed");
     }
-  }, [eventId, netSlug, templatePath, variables, stamp, replyToId]);
+  }, [eventId, templatePath, variables, stamp, replyToId]);
 
   // reset() returns the panel to the catalog step with all session state cleared.
   // Use this instead of bare setStep("catalog") so stale prefill / replyToId

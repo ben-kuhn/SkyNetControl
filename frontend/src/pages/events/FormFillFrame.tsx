@@ -4,13 +4,13 @@ import { formRenderUrl } from "../../api/events";
 import { Button } from "../../components/Button";
 
 interface Props {
-  netSlug: string;
+  eventId: number;
   inputFormPath: string;
   prefill?: Record<string, string>;
   onVariables: (vars: Record<string, string>) => void;
 }
 
-export function FormFillFrame({ netSlug, inputFormPath, prefill, onVariables }: Props) {
+export function FormFillFrame({ eventId, inputFormPath, prefill, onVariables }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function FormFillFrame({ netSlug, inputFormPath, prefill, onVariables }: 
         ref={ref}
         title="Winlink form"
         sandbox="allow-scripts"
-        src={formRenderUrl(netSlug, inputFormPath, prefill)}
+        src={formRenderUrl(eventId, inputFormPath, prefill)}
         className="w-full h-[480px] border border-border rounded-md bg-white"
       />
       <div className="flex justify-end">

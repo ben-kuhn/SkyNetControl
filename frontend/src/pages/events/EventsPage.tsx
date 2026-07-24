@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { createEvent, fetchEvents } from "../../api/events";
 import { Button } from "../../components/Button";
 import { Input } from "../../components/Input";
@@ -20,8 +20,7 @@ const TYPE_LABEL: Record<EventType, string> = {
 };
 
 export function EventsPage() {
-  const { slug } = useParams<{ slug: string }>();
-  const { role } = useCurrentNet();
+  const { slug, role } = useCurrentNet();
   const canWrite = role === "net_control" || role === "admin";
 
   const [events, setEvents] = useState<NetEvent[]>([]);
@@ -37,35 +36,30 @@ export function EventsPage() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    if (!slug) return;
     try {
-      setEvents(await fetchEvents(slug));
+      setEvents(await fetchEvents());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load events");
     } finally {
       setLoading(false);
     }
-  }, [slug]);
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function submit(activate: boolean) {
-    if (!slug || !name.trim()) return;
+  async function submit() {
+    if (!name.trim()) return;
     setSaving(true);
     try {
-      await createEvent(
-        {
-          name: name.trim(),
-          event_type: eventType,
-          description: description.trim() || null,
-          scheduled_start: scheduledStart ? new Date(scheduledStart).toISOString() : null,
-          activate,
-        },
-        slug,
-      );
+      await createEvent({
+        name: name.trim(),
+        event_type: eventType,
+        description: description.trim() || null,
+        scheduled_start: scheduledStart ? new Date(scheduledStart).toISOString() : null,
+      });
       setShowCreate(false);
       setName("");
       setDescription("");
@@ -157,11 +151,8 @@ export function EventsPage() {
           />
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button variant="secondary" loading={saving} onClick={() => void submit(false)}>
+            <Button loading={saving} onClick={() => void submit()}>
               Create draft
-            </Button>
-            <Button loading={saving} onClick={() => void submit(true)}>
-              Create &amp; activate now
             </Button>
           </div>
         </div>
