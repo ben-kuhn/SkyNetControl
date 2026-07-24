@@ -41,6 +41,7 @@ from backend.modules.forms.net_routes import net_forms_router
 from backend.modules.events.routes import events_router
 from backend.modules.events.config_routes import event_config_router
 from backend.modules.events.pat_routes import pat_router as winlink_pat_router, event_pat_router
+from backend.modules.events.forms_routes import event_forms_router
 
 
 _DEFAULT_JWT_SECRET = "change-me-in-production"
@@ -322,6 +323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(event_config_router)  # prefix: /api/events (config sub-routes)
     app.include_router(event_pat_router)  # prefix: /api/events/{event_id}/pat/…
     app.include_router(winlink_pat_router)  # prefix: /api/nets/{net_slug}/pat
+    app.include_router(event_forms_router)  # prefix: /api/events/{event_id}/forms
     app.include_router(net_forms_router)  # prefix: /api/nets/{net_slug}/forms
     app.include_router(notifications_router)  # prefix: /api/nets/{net_slug}/notifications
     app.include_router(audit_router, prefix="/api/audit")
