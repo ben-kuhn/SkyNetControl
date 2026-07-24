@@ -120,6 +120,42 @@ keys on the existing admin `/config` page (an admin sets `aprs.server`,
 weather/NWS defaults, PAT/delivery defaults once); the per-event config UI
 overrides them.
 
+#### PAT config UI notes (EP2)
+
+Clarifications from testing that constrain the EP2 config UI (per-event **and**
+per-net PAT settings):
+
+- **PAT has no native API auth.** PAT's HTTP interface (`pat http`) binds to
+  localhost and trusts the local user — there is no PAT-side API token or
+  password. The `pat_http_auth_mode` / `username` / `password` / `token` fields
+  authenticate to an **optional reverse proxy** placed in front of PAT (nginx /
+  Caddy), *not* to PAT itself. `pat_client.py` injects them as a plain HTTP
+  `Authorization` header (Basic or Bearer). The default and common case is
+  `auth_mode=none` — **no secret exists at all**.
+- **UI treatment.** `pat_http_base_url` is the **primary field** for HTTP
+  transport (it selects *which PAT instance / Winlink account* the event or net
+  transmits through — a non-secret endpoint URL). The auth fields
+  (`pat_http_auth_mode` + `username` / `password` / `token`) are an **Advanced /
+  optional block, hidden behind an "Advanced" toggle** that is off by default;
+  they only appear when the operator explicitly opts in. This applies to both
+  the per-event config panel and the existing per-net settings — the
+  password/token are configurable at either scope but stay hidden unless
+  Advanced is checked. Secrets remain masked on read (`"***"`, per the existing
+  config-route discipline) and are never inherited across an ownership boundary.
+- **Identity lives in PAT, not this app.** Whichever `pat_http_base_url` an event
+  uses determines its Winlink identity, because that PAT instance is logged into
+  one Winlink account in *its own* config file. So the "who can send as whom"
+  question is a deployment-trust decision about which PAT base URL an event may
+  point at — not a credential-leak concern. The genuinely-sensitive event-level
+  keys are the **delivery secrets** (`delivery.groupsio.api_key`, SMTP password),
+  which stay admin/global-owned and masked.
+- **Mailbox-path (file handoff) still ships.** The currently-released build
+  (`origin/main` @ `1f82a5c`) still uses the file-based `pat_mailbox_path`
+  handoff; the PAT HTTP transport (SP5) is newer local-only work. Event config
+  must therefore continue to carry `pat_mailbox_path` alongside the `pat_http_*`
+  keys so events work under **both** the file-handoff and HTTP transports —
+  `pat_mailbox_path` is not superseded.
+
 ### Routes
 
 Event endpoints move from `/api/nets/{slug}/events/…` to top-level `/api/events/…`:
