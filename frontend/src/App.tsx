@@ -26,6 +26,7 @@ import { EventsPage } from "./pages/events/EventsPage";
 import { EventDashboardPage } from "./pages/events/EventDashboardPage";
 import { EventReportPage } from "./pages/events/EventReportPage";
 import { EventMapPage } from "./pages/events/EventMapPage";
+import { EventSettingsPage } from "./pages/events/EventSettingsPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { RequireNetRole } from "./components/RequireNetRole";
 import { RequireEventRole } from "./components/RequireEventRole";
@@ -120,7 +121,7 @@ function GatedRoutes() {
           <Route path="/events/:eventId" element={<EventProvider><RequireEventRole min="read"><EventDashboardPage /></RequireEventRole></EventProvider>} />
           <Route path="/events/:eventId/map" element={<EventProvider><RequireEventRole min="read"><EventMapPage /></RequireEventRole></EventProvider>} />
           <Route path="/events/:eventId/report" element={<EventProvider><RequireEventRole min="read"><EventReportPage /></RequireEventRole></EventProvider>} />
-          {/* /events/:eventId/settings — Task 10 (EventSettingsPage not yet implemented) */}
+          <Route path="/events/:eventId/settings" element={<EventProvider><RequireEventRole min="control"><EventSettingsPage /></RequireEventRole></EventProvider>} />
           {/* /e/:token — Task 12 (PublicEventPage not yet implemented) */}
         </Route>
 

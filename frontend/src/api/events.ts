@@ -351,3 +351,48 @@ export async function fetchEventWeather(eventId: number, token?: string): Promis
 export async function fetchEventByToken(token: string): Promise<EventSnapshot> {
   return apiFetch<EventSnapshot>(`/events/by-token/${encodeURIComponent(token)}`);
 }
+
+// --- Owner-only event management ---
+
+export async function addOperator(eventId: number, callsign: string): Promise<{ operators: string[] }> {
+  return apiFetch<{ operators: string[] }>(`/events/${eventId}/operators`, {
+    method: "POST",
+    body: JSON.stringify({ callsign }),
+  });
+}
+
+export async function removeOperator(eventId: number, callsign: string): Promise<void> {
+  return apiFetch<void>(`/events/${eventId}/operators/${encodeURIComponent(callsign)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function setEventVisibility(
+  eventId: number,
+  visibility: string,
+): Promise<{ visibility: string }> {
+  return apiFetch<{ visibility: string }>(`/events/${eventId}/visibility`, {
+    method: "PATCH",
+    body: JSON.stringify({ visibility }),
+  });
+}
+
+export async function rotatePublicToken(eventId: number): Promise<{ public_token: string }> {
+  return apiFetch<{ public_token: string }>(`/events/${eventId}/token/rotate`, {
+    method: "POST",
+  });
+}
+
+export async function transferEvent(
+  eventId: number,
+  callsign: string,
+): Promise<{ owner: string }> {
+  return apiFetch<{ owner: string }>(`/events/${eventId}/transfer`, {
+    method: "POST",
+    body: JSON.stringify({ callsign }),
+  });
+}
+
+export async function deleteEvent(eventId: number): Promise<void> {
+  return apiFetch<void>(`/events/${eventId}`, { method: "DELETE" });
+}

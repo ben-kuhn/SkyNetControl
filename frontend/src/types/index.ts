@@ -332,6 +332,14 @@ export interface NetEvent {
   aprs_range_km: number | null;
   aprs_beacon_posts: boolean;
   weather_enabled: boolean;
+  /** Present when the user is a control operator (owner or co-operator). */
+  owner?: string;
+  /** Callsigns of co-operators; present when is_control. */
+  operators?: string[];
+  /** Public share token; present when is_control. */
+  public_token?: string;
+  /** "private" | "public"; always present. */
+  visibility?: string;
 }
 
 export interface EventPost {
