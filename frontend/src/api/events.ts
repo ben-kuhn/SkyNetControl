@@ -348,8 +348,8 @@ export async function fetchEventWeather(eventId: number, token?: string): Promis
 
 // --- By token (public page) ---
 
-export async function fetchEventByToken(token: string): Promise<EventSnapshot> {
-  return apiFetch<EventSnapshot>(`/events/by-token/${encodeURIComponent(token)}`);
+export async function fetchEventByToken(token: string): Promise<NetEvent> {
+  return apiFetch<NetEvent>(`/events/by-token/${encodeURIComponent(token)}`);
 }
 
 // --- Owner-only event management ---

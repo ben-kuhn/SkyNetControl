@@ -27,6 +27,7 @@ import { EventDashboardPage } from "./pages/events/EventDashboardPage";
 import { EventReportPage } from "./pages/events/EventReportPage";
 import { EventMapPage } from "./pages/events/EventMapPage";
 import { EventSettingsPage } from "./pages/events/EventSettingsPage";
+import { PublicEventPage } from "./pages/events/PublicEventPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { RequireNetRole } from "./components/RequireNetRole";
 import { RequireEventRole } from "./components/RequireEventRole";
@@ -85,6 +86,9 @@ function GatedRoutes() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
 
+        {/* Anonymous public event page — no auth, no AppShell */}
+        <Route path="/e/:token" element={<PublicEventPage />} />
+
         <Route
           path="/register"
           element={
@@ -122,7 +126,6 @@ function GatedRoutes() {
           <Route path="/events/:eventId/map" element={<EventProvider><RequireEventRole min="read"><EventMapPage /></RequireEventRole></EventProvider>} />
           <Route path="/events/:eventId/report" element={<EventProvider><RequireEventRole min="read"><EventReportPage /></RequireEventRole></EventProvider>} />
           <Route path="/events/:eventId/settings" element={<EventProvider><RequireEventRole min="control"><EventSettingsPage /></RequireEventRole></EventProvider>} />
-          {/* /e/:token — Task 12 (PublicEventPage not yet implemented) */}
         </Route>
 
         {/* Per-net routes: /nets/:slug/... */}
