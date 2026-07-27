@@ -338,8 +338,8 @@ export interface NetEvent {
   operators?: string[];
   /** Public share token; present when is_control. */
   public_token?: string;
-  /** "private" | "public"; always present. */
-  visibility?: string;
+  /** always present. */
+  visibility?: "private" | "public";
 }
 
 export interface EventPost {

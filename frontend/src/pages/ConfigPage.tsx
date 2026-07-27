@@ -377,8 +377,8 @@ export function ConfigPage() {
       if (Object.keys(payload).length > 0) {
         await setConfigBulk(payload);
         setSavedValues((prev) => ({ ...prev, ...payload }));
+        addToast("Settings saved", "success");
       }
-      addToast("Settings saved", "success");
     } catch {
       addToast("Failed to save settings", "error");
     } finally {

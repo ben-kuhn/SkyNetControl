@@ -335,10 +335,6 @@ export async function abortPatSession(eventId: number, sessionId: number): Promi
   return apiFetch<{ ok: boolean }>(`/events/${eventId}/pat/sessions/${sessionId}/abort`, { method: "POST" });
 }
 
-export async function testPatConnection(eventId: number): Promise<{ ok: boolean; error?: string }> {
-  return apiFetch<{ ok: boolean; error?: string }>(`/events/${eventId}/pat/test`, { method: "POST" });
-}
-
 // --- Weather ---
 
 export async function fetchEventWeather(eventId: number, token?: string): Promise<WeatherData> {

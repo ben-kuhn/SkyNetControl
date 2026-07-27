@@ -239,7 +239,7 @@ export function EventSettingsPage() {
     setVisibility(event.visibility ?? "private");
   }, [event.visibility]);
 
-  const handleSetVisibility = async (v: string) => {
+  const handleSetVisibility = async (v: "private" | "public") => {
     setVisibility(v);
     setSavingVisibility(true);
     try {

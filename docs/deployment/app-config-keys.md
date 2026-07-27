@@ -117,7 +117,7 @@ When an operator marks an event **public**, a read-only viewer page becomes avai
 /e/{public_token}
 ```
 
-where `{public_token}` is a random UUID generated on first publish and stored in `events.public_token`. The page shows the live map, activity log, and weather layers. **Messages are never shown** on the public page, regardless of the event's message visibility setting.
+where `{public_token}` is an unguessable URL-safe token generated at event creation (rotatable via `POST /api/events/{id}/token/rotate`) and stored in `events.public_token`. The page shows the live map, activity log, and weather layers. **Messages are never shown** on the public page, regardless of the event's message visibility setting.
 
 The public link requires no login and can be shared freely. Operators can **rotate** the token (generating a fresh UUID) from the event's Settings panel; the old URL immediately returns 404. The token survives net reassignment and event renames.
 
