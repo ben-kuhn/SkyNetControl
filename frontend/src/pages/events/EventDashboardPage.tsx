@@ -40,7 +40,7 @@ export function EventDashboardPage() {
   const [messagesOpen, setMessagesOpen] = useState(false);
   const eventMessages = useEventMessages(
     eventId,
-    messagesOpen || (updates?.event.status === "active"),
+    canWrite && (messagesOpen || (updates?.event.status === "active")),
   );
 
   // Point 3: toast-driven error reporter and generic action helper
@@ -289,33 +289,35 @@ export function EventDashboardPage() {
         </div>
       </div>
 
-      {/* Messages panel */}
-      <div className="mt-6">
-        <button
-          onClick={() => setMessagesOpen(!messagesOpen)}
-          className="text-sm font-semibold text-text-primary hover:text-accent flex items-center gap-2"
-        >
-          {messagesOpen ? "▾" : "▸"} Messages
-          {eventMessages.unreadCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-xs bg-accent text-bg-base">
-              {eventMessages.unreadCount}
-            </span>
+      {/* Messages panel — control only (messages route is CONTROL-gated) */}
+      {canWrite && (
+        <div className="mt-6">
+          <button
+            onClick={() => setMessagesOpen(!messagesOpen)}
+            className="text-sm font-semibold text-text-primary hover:text-accent flex items-center gap-2"
+          >
+            {messagesOpen ? "▾" : "▸"} Messages
+            {eventMessages.unreadCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-xs bg-accent text-bg-base">
+                {eventMessages.unreadCount}
+              </span>
+            )}
+          </button>
+          {messagesOpen && (
+            <div className="mt-2">
+              <MessagesPanel
+                event={event}
+                messages={eventMessages.messages}
+                messagingConfigured={eventMessages.messagingConfigured}
+                canWrite={canWrite}
+                onChanged={eventMessages.refresh}
+                onError={onError}
+                onInfo={onInfo}
+              />
+            </div>
           )}
-        </button>
-        {messagesOpen && (
-          <div className="mt-2">
-            <MessagesPanel
-              event={event}
-              messages={eventMessages.messages}
-              messagingConfigured={eventMessages.messagingConfigured}
-              canWrite={canWrite}
-              onChanged={eventMessages.refresh}
-              onError={onError}
-              onInfo={onInfo}
-            />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -130,8 +130,8 @@ export function MapPanel({
           </span>
         )}
         {expanded && aprsStatus === "disabled" && (
-          <Link to={`/settings`} className="text-xs text-text-muted hover:text-accent underline">
-            enable in net settings
+          <Link to={`/events/${event.id}/settings`} className="text-xs text-text-muted hover:text-accent underline">
+            enable in event settings
           </Link>
         )}
         {expanded && hidden.size > 0 && (

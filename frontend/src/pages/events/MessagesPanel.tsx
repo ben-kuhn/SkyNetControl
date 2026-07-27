@@ -1,5 +1,6 @@
 // frontend/src/pages/events/MessagesPanel.tsx
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { eventAttachmentUrl, fetchReplyForm, rescanEventMailbox, retryEventMessage, setEventMessageStatus } from "../../api/events";
 import { Button } from "../../components/Button";
 import { useFormCompose } from "../../hooks/useFormCompose";
@@ -134,9 +135,9 @@ export function MessagesPanel({
       {!messagingConfigured && (
         <p className="text-xs text-text-muted mb-2">
           No PAT mailbox configured for this net — inbound Winlink is off.{" "}
-          <a href={`/settings`} className="text-accent hover:underline">
-            Configure it in net settings.
-          </a>
+          <Link to={`/events/${event.id}/settings`} className="text-accent hover:underline">
+            Configure it in event settings.
+          </Link>
         </p>
       )}
 
