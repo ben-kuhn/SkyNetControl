@@ -7,6 +7,13 @@ import { Modal } from "../../components/Modal";
 import { Spinner } from "../../components/Spinner";
 import type { EventStatus, EventType, NetEvent } from "../../types";
 
+/** Current local time as a `datetime-local` value (YYYY-MM-DDTHH:mm). */
+function nowLocalDatetime(): string {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
 const STATUS_BADGE: Record<EventStatus, string> = {
   draft: "bg-bg-elevated text-text-muted",
   active: "bg-success/15 text-success",
@@ -137,12 +144,21 @@ export function EventsPage() {
             </select>
           </label>
           <Input label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <Input
-            label="Scheduled start"
-            type="datetime-local"
-            value={scheduledStart}
-            onChange={(e) => setScheduledStart(e.target.value)}
-          />
+          <div>
+            <Input
+              label="Scheduled start"
+              type="datetime-local"
+              value={scheduledStart}
+              onChange={(e) => setScheduledStart(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={() => setScheduledStart(nowLocalDatetime())}
+              className="mt-1 text-sm text-accent hover:underline"
+            >
+              Now
+            </button>
+          </div>
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button loading={saving} onClick={() => void submit()}>

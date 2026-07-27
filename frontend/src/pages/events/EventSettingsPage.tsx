@@ -178,6 +178,11 @@ function initializeConfig(raw: Record<string, string>): Record<string, string> {
       out[k] = "";
     }
   }
+  // Pre-fill APRS-IS shared-infra defaults so the fields aren't blank. The backend
+  // defaults to these too (aprs/manager.py), so they're not required — seeding both
+  // config and savedConfig keeps them non-dirty until the operator changes them.
+  if (!out["aprs.server"]) out["aprs.server"] = "rotate.aprs2.net";
+  if (!out["aprs.port"]) out["aprs.port"] = "14580";
   return out;
 }
 
@@ -413,13 +418,22 @@ export function EventSettingsPage() {
               className="w-full bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-y"
             />
           </div>
-          <Input
-            label="Scheduled start (ISO datetime)"
-            value={scheduledStart}
-            onChange={(e) => setScheduledStart(e.target.value)}
-            placeholder="2025-06-01T14:00:00"
-            mono
-          />
+          <div>
+            <Input
+              label="Scheduled start (ISO datetime)"
+              value={scheduledStart}
+              onChange={(e) => setScheduledStart(e.target.value)}
+              placeholder="2025-06-01T14:00:00"
+              mono
+            />
+            <button
+              type="button"
+              onClick={() => setScheduledStart(new Date().toISOString())}
+              className="mt-1 text-sm text-accent hover:underline"
+            >
+              Now
+            </button>
+          </div>
           <div>
             <Button
               variant={generalDirty ? "primary" : "secondary"}
