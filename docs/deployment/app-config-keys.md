@@ -63,7 +63,7 @@ Also reads `net_address` (above). The backend has two transport modes:
 
 ### PAT HTTP transport
 
-Drives PAT (the Winlink client) over its built-in HTTP API instead of the file handoff, and adds operator-triggered radio connections with a live session log (the **Connect (PAT)** control in an event's Messages panel — NCS only). All keys are per-net with a global fallback, set from the **PAT transport** section of a net's settings page. When `pat_transport_enabled` is off (default), behavior is unchanged from the file handoff above.
+Drives PAT (the Winlink client) over its built-in HTTP API instead of the file handoff, and adds operator-triggered radio connections with a live session log (the **Connect (PAT)** control in an event's Messages panel — NCS only). All keys are **per-net with a global fallback**: the global values are set on the `/config` admin page (key name as shown below) and are inherited by any net that has no per-net override, **including net-free events** created from the top-level Events section. Per-net overrides are set from the **PAT transport** section of a net's settings page. When `pat_transport_enabled` is off (default), behavior is unchanged from the file handoff above.
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -91,7 +91,7 @@ Supported provider names depend on `backend/integrations/callbook/service.py` �
 
 ## Weather overlay
 
-Per-net weather layers on the live event map, for emergency/skywarn nets: an animated precipitation-radar loop (RainViewer) and active NWS watch/warning polygons. Configured from the **Weather overlay** section of a net's settings page. All keys are per-net with a global fallback; default off is a zero-cost no-op (no layers render, no external calls). No API key is needed — radar and NWS alerts are both free/keyless, so these keys are stored plaintext.
+Per-net weather layers on the live event map, for emergency/skywarn nets: an animated precipitation-radar loop (RainViewer) and active NWS watch/warning polygons. Configured from the **Weather overlay** section of a net's settings page. All keys are **per-net with a global fallback** (global values on `/config` are inherited by any net or net-free event that has no per-net override); default off is a zero-cost no-op (no layers render, no external calls). No API key is needed — radar and NWS alerts are both free/keyless, so these keys are stored plaintext.
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -102,6 +102,26 @@ Per-net weather layers on the live event map, for emergency/skywarn nets: an ani
 - **Radar** is fetched client-side directly from RainViewer (no backend involvement, no key); a RainViewer outage only blanks the radar layer.
 - **Warnings** are proxied by the backend (`GET /api/nets/{slug}/events/{id}/weather`), which fetches `api.weather.gov/alerts/active` for the coverage area with a short shared cache (~60s) and degrades gracefully — an NWS problem surfaces as a status chip (`stale`/`unavailable`), never an error. US-only (NWS); radar is global.
 - Both layers are viewer-visible (read-only) on active events.
+
+## Global config defaults for net-free events (EP2)
+
+Starting with the live-events feature (EP2), events can be created independently of any net (from the top-level **Events** section). These "net-free" events inherit their PAT transport, weather overlay, APRS, and delivery settings from the **global** config values — i.e., the same `pat_transport_enabled`, `pat_http_base_url`, `weather.enabled`, etc. keys documented above, but set on the `/config` admin page rather than on a per-net settings page.
+
+Per-event overrides (set from the event's Settings panel) always win over the global defaults.
+
+## Anonymous public event page
+
+When an operator marks an event **public**, a read-only viewer page becomes available at:
+
+```
+/e/{public_token}
+```
+
+where `{public_token}` is a random UUID generated on first publish and stored in `events.public_token`. The page shows the live map, activity log, and weather layers. **Messages are never shown** on the public page, regardless of the event's message visibility setting.
+
+The public link requires no login and can be shared freely. Operators can **rotate** the token (generating a fresh UUID) from the event's Settings panel; the old URL immediately returns 404. The token survives net reassignment and event renames.
+
+To find the current public URL for an event, read `GET /api/events/{id}` → `public_token` field, then construct `/e/{public_token}`.
 
 ## Editing values
 
