@@ -217,9 +217,9 @@ const WEATHER_DEFAULT_FIELDS: ConfigField[] = [
     key: "weather.alert_states",
     label: "Alert States (optional)",
     type: "text",
-    placeholder: '["MN","WI"]',
+    placeholder: 'MN, WI',
     mono: true,
-    helpText: 'Default JSON list of 2-letter state codes for NWS alerts. Leave blank to auto-detect from the event location.',
+    helpText: 'Default comma-separated 2-letter state codes for NWS alerts (e.g. MN, WI). Leave blank to auto-detect from the event location.',
   },
 ];
 

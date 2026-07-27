@@ -167,9 +167,9 @@ const WEATHER_FIELDS: ConfigField[] = [
     key: "weather.alert_states",
     label: "Alert states (optional)",
     type: "text",
-    placeholder: '["MN","WI"]',
+    placeholder: 'MN, WI',
     mono: true,
-    helpText: 'JSON list of 2-letter state codes for NWS alerts. Leave blank to auto-detect from the event location.',
+    helpText: 'Comma-separated 2-letter state codes for NWS alerts (e.g. MN, WI). Leave blank to auto-detect from the event location.',
     visibleWhen: (v) => v["weather.enabled"] === "true",
   },
   {

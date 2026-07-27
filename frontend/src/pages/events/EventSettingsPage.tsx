@@ -73,9 +73,9 @@ const EVENT_WEATHER_FIELDS: ConfigField[] = [
     key: "weather.alert_states",
     label: "Alert states (optional)",
     type: "text",
-    placeholder: '["MN","WI"]',
+    placeholder: "MN, WI",
     mono: true,
-    helpText: "JSON list of 2-letter state codes for NWS alerts. Leave blank to auto-detect from the event location.",
+    helpText: "Comma-separated 2-letter state codes for NWS alerts (e.g. MN, WI). Leave blank to auto-detect from the event location.",
     visibleWhen: (v) => v["weather.enabled"] === "true",
   },
   {
@@ -83,7 +83,7 @@ const EVENT_WEATHER_FIELDS: ConfigField[] = [
     label: "NWS contact (optional)",
     type: "text",
     placeholder: "you@example.com",
-    helpText: "Contact included in the NWS API request identifier. Defaults to the net Winlink address.",
+    helpText: "Contact included in the NWS API request identifier. Defaults to the event's from-address.",
     visibleWhen: (v) => v["weather.enabled"] === "true",
   },
 ];
@@ -192,6 +192,20 @@ export function EventSettingsPage() {
   const isOwner =
     user != null &&
     (event.owner === user.callsign || event.created_by === user.callsign || user.is_admin);
+
+  // APRS callsign defaults to the event owner's callsign on the backend, so show
+  // that as the placeholder rather than a hardcoded net call (e.g. W0NE).
+  const ownerCall = event.owner || event.created_by || "";
+  const aprsFields = EVENT_APRS_FIELDS.map((f) =>
+    f.key === "aprs.callsign"
+      ? {
+          ...f,
+          placeholder: ownerCall || "YOURCALL",
+          helpText:
+            "Callsign used to log in and transmit objects. Defaults to the event owner's callsign; override only to use a different call you're licensed for.",
+        }
+      : f,
+  );
 
   // --- General section state ---
   const [name, setName] = useState(event.name);
@@ -491,7 +505,7 @@ export function EventSettingsPage() {
 
           <SettingsSection
             title="APRS"
-            fields={EVENT_APRS_FIELDS}
+            fields={aprsFields}
             values={config}
             savedValues={savedConfig}
             onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}

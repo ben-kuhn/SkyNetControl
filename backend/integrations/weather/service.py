@@ -5,6 +5,7 @@ when NWS is unavailable."""
 from __future__ import annotations
 
 import json
+import re
 import time as _time
 from datetime import datetime, timezone
 
@@ -47,15 +48,25 @@ def _event_location(db: Session, event: Event) -> tuple[float, float] | None:
     return (sum(c[0] for c in coords) / len(coords), sum(c[1] for c in coords) / len(coords))
 
 
+def _parse_state_codes(raw: str | None) -> list[str]:
+    """Accept a JSON list (``["MN","WI"]``) OR a comma/space-separated string
+    (``MN, WI``) of 2-letter state codes. Empty/unparseable -> ``[]``."""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(s).strip().upper() for s in parsed if str(s).strip()]
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return [tok.strip().upper() for tok in re.split(r"[,\s]+", raw) if tok.strip()]
+
+
 def _resolve_states(db: Session, event: Event, client: WeatherClient) -> list[str]:
-    raw = get_event_config(db, event.id, "weather.alert_states")
-    if raw:
-        try:
-            states = [str(s).strip().upper() for s in json.loads(raw) if str(s).strip()]
-            if states:
-                return states
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
+    states = _parse_state_codes(get_event_config(db, event.id, "weather.alert_states"))
+    if states:
+        return states
     loc = _event_location(db, event)
     if loc is None:
         return []

@@ -107,3 +107,28 @@ def test_unavailable_with_no_cache():
     r = weather_service.get_event_alerts(db, ev_id, client=FakeClient(unavailable=True))
     assert r["status"] == "unavailable"
     assert r["alerts"] == EMPTY
+
+
+def test_parse_state_codes_accepts_json_and_comma_separated():
+    p = weather_service._parse_state_codes
+    # JSON list still works
+    assert p('["MN","WI"]') == ["MN", "WI"]
+    # comma-separated (the friendly form the UI now shows)
+    assert p("MN, WI") == ["MN", "WI"]
+    assert p("mn,wi") == ["MN", "WI"]
+    # space-separated + mixed whitespace
+    assert p("MN WI") == ["MN", "WI"]
+    assert p("  MN ,  WI ") == ["MN", "WI"]
+    # empty / blank -> no states (falls back to geolocation)
+    assert p("") == []
+    assert p(None) == []
+    assert p("   ") == []
+
+
+def test_comma_separated_alert_states_resolves(monkeypatch):
+    db, ev_id = _db()
+    set_event_config(db, ev_id, "weather.enabled", "true")
+    set_event_config(db, ev_id, "weather.alert_states", "MN, WI")
+    r = weather_service.get_event_alerts(db, ev_id, client=FakeClient())
+    # ok status means the configured states were used (not the no_area fallback)
+    assert r["status"] == "ok"
