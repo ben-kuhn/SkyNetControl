@@ -1,7 +1,16 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  python = pkgs.python312;
+  # Upstream nixpkgs currently ships inline-snapshot with a failing test suite
+  # (black became an optional dependency in 0.19.0, breaking its formatting
+  # tests). It's only a check-input of anthropic, so skip its checks — otherwise
+  # `anthropic`, and thus this package, fails to build. Remove once nixpkgs fixes
+  # inline-snapshot. Underlying cause: default.nix/shell.nix use unpinned <nixpkgs>.
+  python = pkgs.python312.override {
+    packageOverrides = _self: super: {
+      inline-snapshot = super.inline-snapshot.overridePythonAttrs (_: { doCheck = false; });
+    };
+  };
   frontend = import ./frontend.nix { inherit pkgs; };
   # Bake the running git SHA into the binary so the admin sidebar can
   # surface "this is commit X" — gives the operator a way to confirm
