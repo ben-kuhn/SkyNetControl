@@ -5,7 +5,9 @@ let
   # (black became an optional dependency in 0.19.0, breaking its formatting
   # tests). It's only a check-input of anthropic, so skip its checks — otherwise
   # `anthropic`, and thus this package, fails to build. Remove once nixpkgs fixes
-  # inline-snapshot. Underlying cause: default.nix/shell.nix use unpinned <nixpkgs>.
+  # inline-snapshot. We deliberately track a floating <nixpkgs> to keep deps fresh
+  # (security) and absorb transient upstream breakage with narrow overrides like
+  # this — not by pinning the whole tree.
   python = pkgs.python312.override {
     packageOverrides = _self: super: {
       inline-snapshot = super.inline-snapshot.overridePythonAttrs (_: { doCheck = false; });
