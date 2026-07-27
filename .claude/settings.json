@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(alembic heads*)",
+      "Bash(.venv/bin/pytest*)",
+      "Bash(nix-shell --run \"ruff check\")"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/check-silent-stall.py"
+          }
+        ]
+      }
+    ]
+  },
+  "worktree": {
+    "baseRef": "head"
+  }
+}
