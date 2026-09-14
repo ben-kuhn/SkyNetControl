@@ -1,7 +1,7 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> {}, gitSha ? null }:
 
 let
-  skynetcontrol = import ./default.nix { inherit pkgs; };
+  skynetcontrol = import ./default.nix { inherit pkgs gitSha; };
 
   # Container entrypoint: idempotently apply pending Alembic migrations,
   # then exec the uvicorn server. `alembic upgrade head` is a no-op when

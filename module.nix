@@ -2,7 +2,7 @@
 
 let
   cfg = config.services.skynetcontrol;
-  skynetcontrol = import ./default.nix { inherit pkgs; };
+  skynetcontrol = import ./default.nix { inherit pkgs; gitSha = cfg.gitSha; };
 in
 {
   options.services.skynetcontrol = {
@@ -109,6 +109,21 @@ in
         real client. Required behind a reverse proxy (nginx, Caddy,
         Cloudflare tunnel) or every visitor shares one bucket. Typical
         same-host proxy value: "127.0.0.1,::1".
+      '';
+    };
+
+    gitSha = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Git commit SHA to bake into the /api/version endpoint. When the
+        package is built from a GitHub tarball fetch (a flake=false
+        `github:` input), the source has no .git to derive the SHA from,
+        so it must be injected here. The importing flake knows its own
+        locked revision — set this to
+        `builtins.substring 0 8 (builtins.toString inputs.skynetcontrol.rev)`
+        (or similar). Leave null to let default.nix derive it from the
+        source tree when building from a git checkout.
       '';
     };
   };
