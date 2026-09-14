@@ -1,4 +1,4 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> {}, gitSha ? null }:
 
 let
   # Upstream nixpkgs currently ships inline-snapshot with a failing test suite
@@ -17,11 +17,16 @@ let
   # Bake the running git SHA into the binary so the admin sidebar can
   # surface "this is commit X" — gives the operator a way to confirm
   # the deployed code matches what was pushed without shelling into the
-  # box. Falls back to "unknown" when built from a non-git source (CI
-  # tarball, archive, etc.); the runtime fallback to "dev" in
-  # backend/version.py handles `run-dev.sh`.
-  gitSha =
-    if builtins.pathExists ./.git
+  # box. Callers that build from a commit they know about (GitHub
+  # tarball fetches via a flake input have no .git to read) pass `gitSha`
+  # explicitly; otherwise we fall back to reading it from the source tree
+  # when available. Falls back to "unknown" when built from a non-git
+  # source (gitHub tarball, CI archive, etc.) and nothing was injected;
+  # the runtime fallback to "dev" in backend/version.py handles
+  # `run-dev.sh`.
+  bakedGitSha =
+    if gitSha != null then gitSha
+    else if builtins.pathExists ./.git
     then pkgs.lib.substring 0 8 (pkgs.lib.commitIdFromGitRepo ./.git)
     else "unknown";
 in
@@ -95,7 +100,7 @@ python.pkgs.buildPythonApplication {
   makeWrapperArgs = [
     "--set" "SKYNET_STATIC_DIR" "${placeholder "out"}/share/skynetcontrol/static"
     "--set" "ALEMBIC_CONFIG" "${placeholder "out"}/share/skynetcontrol/alembic.ini"
-    "--set" "SKYNET_GIT_SHA" gitSha
+    "--set" "SKYNET_GIT_SHA" bakedGitSha
   ];
 
   meta = {
