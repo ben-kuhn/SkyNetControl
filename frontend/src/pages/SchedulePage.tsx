@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { fetchActivities } from "../api/activities";
 import {
   createSeason,
   createSession,
@@ -15,6 +16,7 @@ import { Spinner } from "../components/Spinner";
 import { useToast } from "../context/ToastContext";
 import { useCurrentNet } from "../hooks/useCurrentNet";
 import type {
+  Activity,
   NetRole,
   Season,
   Session,
@@ -56,16 +58,46 @@ function formatDate(value: string, opts?: Intl.DateTimeFormatOptions): string {
   return new Date(value).toLocaleDateString(undefined, opts);
 }
 
+function ActivitySelect({
+  value,
+  activities,
+  onChange,
+}: {
+  value: string;
+  activities: Activity[];
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium text-text-secondary">Activity</label>
+      <select
+        className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="0">— None —</option>
+        {activities.map((a) => (
+          <option key={a.id} value={String(a.id)}>
+            {a.title}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function SessionCard({
   session,
   canEdit,
   onEdit,
   checkinsPath,
+  activityTitle,
 }: {
   session: Session;
   canEdit: boolean;
   onEdit: () => void;
   checkinsPath: string;
+  activityTitle?: string | null;
 }) {
   return (
     <div className="bg-bg-surface border border-border rounded-lg p-4">
@@ -94,6 +126,11 @@ function SessionCard({
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
         <span>Type: {session.session_type.replace(/_/g, " ")}</span>
+        {activityTitle && (
+          <span className="text-accent">
+            Activity: <span className="font-medium">{activityTitle}</span>
+          </span>
+        )}
         {session.net_control_callsign && (
           <span>
             NCS:{" "}
@@ -356,12 +393,14 @@ function CreateSessionModal({
   onCreated,
   seasons,
   slug,
+  activities,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
   seasons: Season[];
   slug: string;
+  activities: Activity[];
 }) {
   const { addToast } = useToast();
   const emptyForm = {
@@ -371,6 +410,7 @@ function CreateSessionModal({
     season_id: "",
     grace_period_hours: "24",
     net_control_callsign: "",
+    activity_id: "",
   };
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
@@ -394,6 +434,7 @@ function CreateSessionModal({
         season_id: form.season_id ? Number(form.season_id) : null,
         grace_period_hours: Number(form.grace_period_hours) || 24,
         net_control_callsign: form.net_control_callsign.trim() || null,
+        activity_id: form.activity_id ? Number(form.activity_id) : null,
       }, slug);
       addToast("Session created", "success");
       setForm(emptyForm);
@@ -470,6 +511,14 @@ function CreateSessionModal({
           </div>
         )}
 
+        {form.session_type === "activity" && (
+          <ActivitySelect
+            value={form.activity_id}
+            activities={activities}
+            onChange={(id) => setForm((f) => ({ ...f, activity_id: id }))}
+          />
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Grace period (hours)"
@@ -511,12 +560,14 @@ function EditSessionModal({
   session,
   onSaved,
   slug,
+  activities,
 }: {
   open: boolean;
   onClose: () => void;
   session: Session | null;
   onSaved: () => void;
   slug: string;
+  activities: Activity[];
 }) {
   const { addToast } = useToast();
   const [form, setForm] = useState({
@@ -525,6 +576,7 @@ function EditSessionModal({
     net_control_callsign: "",
     grace_period_hours: "24",
     end_date: "",
+    activity_id: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -536,6 +588,7 @@ function EditSessionModal({
         net_control_callsign: session.net_control_callsign ?? "",
         grace_period_hours: String(session.grace_period_hours),
         end_date: session.end_date ?? "",
+        activity_id: session.activity_id ? String(session.activity_id) : "",
       });
     }
   }, [session]);
@@ -550,6 +603,7 @@ function EditSessionModal({
         net_control_callsign: form.net_control_callsign.trim() || null,
         grace_period_hours: Number(form.grace_period_hours) || 24,
         end_date: form.end_date || null,
+        activity_id: form.activity_id ? Number(form.activity_id) : null,
       }, slug);
       addToast("Session updated", "success");
       onSaved();
@@ -603,6 +657,14 @@ function EditSessionModal({
             ))}
           </select>
         </div>
+
+        {form.session_type === "activity" && (
+          <ActivitySelect
+            value={form.activity_id}
+            activities={activities}
+            onChange={(id) => setForm((f) => ({ ...f, activity_id: id }))}
+          />
+        )}
 
         <Input
           label="Net control callsign"
@@ -694,6 +756,7 @@ export function SchedulePage() {
   const { addToast } = useToast();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSeasonModal, setShowSeasonModal] = useState(false);
@@ -709,10 +772,11 @@ export function SchedulePage() {
     const seasonsCall: Promise<Season[]> = editSessions
       ? fetchSeasons(slug)
       : Promise.resolve([]);
-    Promise.all([fetchSessions(slug), seasonsCall])
-      .then(([s, seas]) => {
+    Promise.all([fetchSessions(slug), seasonsCall, fetchActivities(slug)])
+      .then(([s, seas, acts]) => {
         setSessions(s);
         setSeasons(seas);
+        setActivities(acts);
       })
       .catch(() => setError("Failed to load schedule"))
       .finally(() => setLoading(false));
@@ -746,6 +810,12 @@ export function SchedulePage() {
       ),
     [seasons],
   );
+
+  const activityTitleById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const a of activities) map.set(a.id, a.title);
+    return map;
+  }, [activities]);
 
   const handleDeleteSeason = async (season: Season) => {
     const completedCount = season.sessions.filter((s) => s.status === "completed").length;
@@ -826,6 +896,11 @@ export function SchedulePage() {
                     canEdit={editSessions}
                     onEdit={() => setEditingSession(session)}
                     checkinsPath={`/nets/${slug}/checkins`}
+                    activityTitle={
+                      session.activity_id
+                        ? activityTitleById.get(session.activity_id)
+                        : null
+                    }
                   />
                 ))}
               </div>
@@ -845,6 +920,11 @@ export function SchedulePage() {
                     canEdit={editSessions}
                     onEdit={() => setEditingSession(session)}
                     checkinsPath={`/nets/${slug}/checkins`}
+                    activityTitle={
+                      session.activity_id
+                        ? activityTitleById.get(session.activity_id)
+                        : null
+                    }
                   />
                 ))}
               </div>
@@ -889,6 +969,7 @@ export function SchedulePage() {
         onCreated={loadData}
         seasons={seasons}
         slug={slug}
+        activities={activities}
       />
       <EditSessionModal
         open={editingSession !== null}
@@ -896,6 +977,7 @@ export function SchedulePage() {
         session={editingSession}
         onSaved={loadData}
         slug={slug}
+        activities={activities}
       />
     </div>
   );

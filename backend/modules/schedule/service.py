@@ -93,6 +93,7 @@ def update_session(
     session_type: SessionType | None = None,
     net_control_callsign: str | None = None,
     activity_id: int | None = None,
+    set_activity_id: bool = False,
     grace_period_hours: float | None = None,
     end_date: date | None = None,
 ) -> NetSession | None:
@@ -106,7 +107,11 @@ def update_session(
         session_obj.session_type = session_type
     if net_control_callsign is not None:
         session_obj.net_control_callsign = net_control_callsign
-    if activity_id is not None:
+    # activity_id is set only when the caller explicitly decides it (schema
+    # uses model_fields_set so a bare PATCH omitting activity_id can't clobber
+    # an existing assignment) — this lets an operator clear the assignment by
+    # sending an explicit null.
+    if set_activity_id:
         session_obj.activity_id = activity_id
     if grace_period_hours is not None:
         session_obj.grace_period_hours = grace_period_hours

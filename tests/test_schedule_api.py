@@ -274,6 +274,94 @@ async def test_update_session(test_client, test_settings):
 
 
 @pytest.mark.asyncio
+async def test_assign_activity_to_session(test_client, test_settings, db_setup):
+    """An activity-week session must be able to carry an activity assignment.
+
+    This is the fix for the SchedulePage picking up activities at all — the
+    reminder templates render `activity_title` from the session's activity_id,
+    so without this the activity never lands in reminder drafts.
+    """
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+
+    with db_setup() as session:
+        from backend.modules.activities.models import Activity
+
+        from backend.modules.nets.models import Net
+
+        net = session.query(Net).filter_by(slug="t").one()
+        activity = Activity(
+            net_id=net.id,
+            title="Simplex Exercise",
+            description="Local simplex comms drill",
+            instructions="Tune to 146.520 MHz.",
+        )
+        session.add(activity)
+        session.commit()
+        activity_id = activity.id
+
+    create_resp = await test_client.post(
+        SESSIONS_URL,
+        json={
+            "start_date": "2026-09-10",
+            "session_type": "activity",
+        },
+        cookies={"access_token": token},
+    )
+    session_id = create_resp.json()["id"]
+    assert create_resp.json()["activity_id"] is None
+
+    response = await test_client.patch(
+        f"/api/nets/t/schedule/sessions/{session_id}",
+        json={"activity_id": activity_id},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["activity_id"] == activity_id
+
+
+@pytest.mark.asyncio
+async def test_clear_activity_from_session(test_client, test_settings, db_setup):
+    """Sending an explicit null for activity_id clears the assignment."""
+    token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
+
+    with db_setup() as session:
+        from backend.modules.activities.models import Activity
+
+        from backend.modules.nets.models import Net
+
+        net = session.query(Net).filter_by(slug="t").one()
+        activity = Activity(
+            net_id=net.id,
+            title="Drill",
+            description="D",
+            instructions="I",
+        )
+        session.add(activity)
+        session.commit()
+        activity_id = activity.id
+
+    create_resp = await test_client.post(
+        SESSIONS_URL,
+        json={
+            "start_date": "2026-09-10",
+            "session_type": "activity",
+            "activity_id": activity_id,
+        },
+        cookies={"access_token": token},
+    )
+    session_id = create_resp.json()["id"]
+    assert create_resp.json()["activity_id"] == activity_id
+
+    response = await test_client.patch(
+        f"/api/nets/t/schedule/sessions/{session_id}",
+        json={"activity_id": None},
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["activity_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_create_adhoc_real_event(test_client, test_settings):
     token = make_test_token("W0NE", test_settings, is_admin=True, token_version=0)
     response = await test_client.post(
