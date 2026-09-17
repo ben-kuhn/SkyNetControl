@@ -69,8 +69,11 @@ export async function reparseSession(
 export async function approveSession(
   sessionId: number,
   netSlug: string,
-): Promise<{ session_status: string; members_updated: number }> {
-  return apiFetch(`/nets/${netSlug}/checkins/approve/${sessionId}`, { method: "POST" });
+): Promise<{ session_status: string; members_updated: number; roster_id: number | null }> {
+  return apiFetch<{ session_status: string; members_updated: number; roster_id: number | null }>(
+    `/nets/${netSlug}/checkins/approve/${sessionId}`,
+    { method: "POST" },
+  );
 }
 
 export async function lookupCallsign(

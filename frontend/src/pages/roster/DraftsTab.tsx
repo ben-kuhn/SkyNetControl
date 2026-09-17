@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
-  approveRoster,
   fetchRosters,
   generateRosterDraft,
   previewRoster,
   regenerateRosterDraft,
   resendRoster,
-  sendRoster,
   skipRoster,
+  submitRoster,
   updateRosterDraft,
 } from "../../api/roster";
 import { fetchSessions } from "../../api/schedule";
@@ -43,6 +43,7 @@ function formatLongDate(iso: string): string {
 
 export function DraftsTab() {
   const { slug } = useCurrentNet();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [rosters, setRosters] = useState<Roster[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +72,22 @@ export function DraftsTab() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Deep-link support: /roster?focus=<id> (optionally &status=) opens that
+  // roster in the editor. Used by the check-ins close-session jump.
+  const focusId = searchParams.get("focus");
+  useEffect(() => {
+    if (!focusId || rosters.length === 0) return;
+    const target = rosters.find((r) => r.id === Number(focusId));
+    if (!target) return;
+    setStatusFilter(target.status as RosterStatus);
+    setSelectedId(target.id);
+    // Clear the param so subsequent edits/refreshes don't re-force selection.
+    const next = new URLSearchParams(searchParams);
+    next.delete("focus");
+    next.delete("status");
+    setSearchParams(next, { replace: true });
+  }, [focusId, rosters, searchParams, setSearchParams]);
 
   const sessionById = useMemo(() => {
     const map = new Map<number, Session>();
@@ -295,21 +312,19 @@ function DetailPanel({
     }
   };
 
-  const handleApprove = async () => {
-    try {
-      const updated = await approveRoster(roster.id, slug);
-      onChanged(updated);
-      onInfo("Roster approved.");
-    } catch (e: any) {
-      onError(e?.detail ?? e?.message ?? "Approve failed");
-    }
-  };
-
   const handleSend = async () => {
+    // One-click Send: save tweaks, approve (as operator), and dispatch.
+    // submitRoster returns 502 with delivery errors when dispatch fails.
     try {
-      const updated = await sendRoster(roster.id, slug);
+      const updated = await submitRoster(roster.id, {
+        content_subject: subject,
+        content_header: header,
+        content_welcome: welcome,
+        content_comments: comments,
+        content_footer: footer,
+      }, slug);
       onChanged(updated);
-      onInfo("Roster sent.");
+      onInfo(updated.status === "sent" ? "Roster sent." : "Roster updated.");
     } catch (e: any) {
       onError(e?.detail ?? e?.message ?? "Send failed");
     }
@@ -404,12 +419,7 @@ function DetailPanel({
             Regenerate from check-ins
           </button>
         )}
-        {isDraft && (
-          <button onClick={handleApprove} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
-            Approve
-          </button>
-        )}
-        {isApproved && (
+        {(isDraft || isApproved) && (
           <button onClick={handleSend} className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90">
             Send
           </button>
@@ -421,7 +431,7 @@ function DetailPanel({
         )}
         {(isDraft || isApproved) && (
           <button onClick={handleSkip} className="px-3 py-1.5 text-sm border border-warning/40 rounded-md text-warning hover:bg-warning/[0.08]">
-            Skip
+            Discard
           </button>
         )}
       </div>

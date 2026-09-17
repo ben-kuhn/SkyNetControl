@@ -797,9 +797,13 @@ export function CheckInsPage() {
     try {
       const result = await approveSession(selectedSessionId, slug);
       addToast(`Session approved. ${result.members_updated} member records updated.`, "success");
-      // Approval is the gate to roster work — jump straight there so the
-      // operator doesn't have to navigate manually mid-workflow.
-      navigate(`/nets/${slug}/roster`);
+      // Closing a session auto-generates the roster draft (when a default
+      // template exists) — jump straight into the editor for it.
+      if (result.roster_id !== undefined && result.roster_id !== null) {
+        navigate(`/nets/${slug}/roster?focus=${result.roster_id}`);
+      } else {
+        navigate(`/nets/${slug}/roster`);
+      }
     } catch {
       addToast("Approve failed", "error");
     } finally {

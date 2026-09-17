@@ -25,6 +25,20 @@ export async function approveRoster(id: number, netSlug: string): Promise<Roster
   return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/approve`, { method: "POST" });
 }
 
+export async function submitRoster(
+  id: number,
+  content: Partial<Pick<
+    Roster,
+    "content_subject" | "content_header" | "content_welcome" | "content_comments" | "content_footer"
+  >>,
+  netSlug: string,
+): Promise<Roster> {
+  return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/submit`, {
+    method: "POST",
+    body: JSON.stringify(content),
+  });
+}
+
 export async function sendRoster(id: number, netSlug: string): Promise<Roster> {
   return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/send`, { method: "POST" });
 }
