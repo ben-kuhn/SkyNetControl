@@ -49,7 +49,6 @@ export function DraftsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<RosterStatus>("draft");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
 
@@ -73,21 +72,28 @@ export function DraftsTab() {
     loadAll();
   }, [loadAll]);
 
-  // Deep-link support: /roster?focus=<id> (optionally &status=) opens that
-  // roster in the editor. Used by the check-ins close-session jump.
-  const focusId = searchParams.get("focus");
-  useEffect(() => {
-    if (!focusId || rosters.length === 0) return;
-    const target = rosters.find((r) => r.id === Number(focusId));
-    if (!target) return;
-    setStatusFilter(target.status as RosterStatus);
-    setSelectedId(target.id);
-    // Clear the param so subsequent edits/refreshes don't re-force selection.
+  // The open draft is driven by the URL (?focus=<id>), not component state,
+  // so navigating away and back (or refreshing) restores the same editor
+  // instead of dumping the operator back on a bare list.
+  const focusRaw = searchParams.get("focus");
+  const selectedId = focusRaw ? Number(focusRaw) : null;
+
+  const selectRoster = (id: number | null) => {
     const next = new URLSearchParams(searchParams);
-    next.delete("focus");
-    next.delete("status");
+    if (id === null) next.delete("focus");
+    else next.set("focus", String(id));
     setSearchParams(next, { replace: true });
-  }, [focusId, rosters, searchParams, setSearchParams]);
+  };
+
+  // When a focused roster loads in, make sure its status bucket is the active
+  // filter so the row the editor belongs to is actually visible in the list.
+  useEffect(() => {
+    if (!focusRaw || rosters.length === 0) return;
+    const target = rosters.find((r) => r.id === Number(focusRaw));
+    if (target && target.status !== statusFilter) {
+      setStatusFilter(target.status as RosterStatus);
+    }
+  }, [focusRaw, rosters, statusFilter]);
 
   const sessionById = useMemo(() => {
     const map = new Map<number, Session>();
@@ -173,7 +179,7 @@ export function DraftsTab() {
                     return (
                       <tr
                         key={r.id}
-                        onClick={() => setSelectedId(isSelected ? null : r.id)}
+                        onClick={() => selectRoster(isSelected ? null : r.id)}
                         className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
                           isSelected
                             ? "bg-accent/[0.08] border-l-2 border-l-accent"
@@ -214,7 +220,7 @@ export function DraftsTab() {
                 roster={selected}
                 session={sessionById.get(selected.session_id) ?? null}
                 slug={slug}
-                onClose={() => setSelectedId(null)}
+                onClose={() => selectRoster(null)}
                 onChanged={(updated) =>
                   setRosters((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
                 }
@@ -242,7 +248,7 @@ export function DraftsTab() {
               return exists ? prev.map((r) => (r.id === generated.id ? generated : r)) : [generated, ...prev];
             });
             setStatusFilter("draft");
-            setSelectedId(generated.id);
+            selectRoster(generated.id);
             setShowGenerateModal(false);
           }}
           onError={(msg) => addToast(msg, "error")}

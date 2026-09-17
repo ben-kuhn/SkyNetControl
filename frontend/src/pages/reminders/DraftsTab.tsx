@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   fetchReminders,
   generateDueReminders,
@@ -41,15 +42,27 @@ function formatLongDate(iso: string): string {
 
 export function DraftsTab() {
   const { slug } = useCurrentNet();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ReminderStatus>("draft");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
 
-const { addToast } = useToast();
+  const { addToast } = useToast();
+
+  // The open reminder is driven by the URL (?focus=<id>) so that navigating
+  // away and back (or refreshing) restores the same editor.
+  const focusRaw = searchParams.get("focus");
+  const selectedId = focusRaw ? Number(focusRaw) : null;
+
+  const selectReminder = (id: number | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (id === null) next.delete("focus");
+    else next.set("focus", String(id));
+    setSearchParams(next, { replace: true });
+  };
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -61,25 +74,37 @@ const { addToast } = useToast();
       setReminders(rs);
       setSessions(ss);
       setError(null);
-      // If there are drafts needing attention, open the most recent one.
+      // If there are drafts needing attention and nothing is focused yet, open
+      // the most recent one so the operator sees it immediately.
       const drafts = rs.filter((r) => r.status === "draft");
-      if (drafts.length > 0 && selectedId === null) {
+      if (drafts.length > 0 && !searchParams.get("focus")) {
         const newest = drafts.reduce((a, b) =>
           a.drafted_at >= b.drafted_at ? a : b,
         );
-        setSelectedId(newest.id);
+        selectReminder(newest.id);
       }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load");
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll]);
+
+  // When a focused reminder loads in, make sure its status bucket is the
+  // active filter so the row the editor belongs to is visible in the list.
+  useEffect(() => {
+    if (!focusRaw || reminders.length === 0) return;
+    const target = reminders.find((r) => r.id === Number(focusRaw));
+    if (target && target.status !== statusFilter) {
+      setStatusFilter(target.status as ReminderStatus);
+    }
+  }, [focusRaw, reminders, statusFilter]);
 
   const sessionById = useMemo(() => {
     const map = new Map<number, Session>();
@@ -155,7 +180,7 @@ const { addToast } = useToast();
                     return (
                       <tr
                         key={r.id}
-                        onClick={() => setSelectedId(isSelected ? null : r.id)}
+                        onClick={() => selectReminder(isSelected ? null : r.id)}
                         className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
                           isSelected
                             ? "bg-accent/[0.08] border-l-2 border-l-accent"
@@ -196,7 +221,7 @@ const { addToast } = useToast();
                 reminder={selected}
                 session={sessionById.get(selected.session_id) ?? null}
                 slug={slug}
-                onClose={() => setSelectedId(null)}
+                onClose={() => selectReminder(null)}
                 onChanged={(updated) =>
                   setReminders((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
                 }
@@ -218,7 +243,7 @@ const { addToast } = useToast();
               return exists ? prev.map((r) => (r.id === generated.id ? generated : r)) : [generated, ...prev];
             });
             setStatusFilter("draft");
-            setSelectedId(generated.id);
+            selectReminder(generated.id);
             setShowGenerateModal(false);
           }}
           onError={(msg) => addToast(msg, "error")}
