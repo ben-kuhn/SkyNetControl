@@ -22,6 +22,26 @@ export async function approveReminder(id: number, netSlug: string): Promise<Remi
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/approve`, { method: "POST" });
 }
 
+export async function submitReminder(
+  id: number,
+  content: { content_subject?: string; content_body?: string },
+  netSlug: string,
+): Promise<Reminder> {
+  return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/submit`, {
+    method: "POST",
+    body: JSON.stringify(content),
+  });
+}
+
+export async function generateDueReminders(
+  netSlug: string,
+): Promise<{ generated: number; reminders: Reminder[] }> {
+  return apiFetch<{ generated: number; reminders: Reminder[] }>(
+    `/nets/${netSlug}/reminders/generate`,
+    { method: "POST" },
+  );
+}
+
 export async function sendReminder(id: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/send`, { method: "POST" });
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  approveReminder,
   fetchReminders,
+  generateDueReminders,
   generateReminderDraft,
   regenerateReminderDraft,
-  sendReminder,
   skipReminder,
+  submitReminder,
   updateReminderDraft,
 } from "../../api/reminders";
 import { fetchSessions } from "../../api/schedule";
@@ -49,15 +49,26 @@ export function DraftsTab() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
 
-  const { addToast } = useToast();
+const { addToast } = useToast();
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
+      // Auto-generate any due reminder drafts so the operator doesn't have to
+      // run a separate "generate" step first. Idempotent server-side.
+      await generateDueReminders(slug);
       const [rs, ss] = await Promise.all([fetchReminders(slug), fetchSessions(slug)]);
       setReminders(rs);
       setSessions(ss);
       setError(null);
+      // If there are drafts needing attention, open the most recent one.
+      const drafts = rs.filter((r) => r.status === "draft");
+      if (drafts.length > 0 && selectedId === null) {
+        const newest = drafts.reduce((a, b) =>
+          a.drafted_at >= b.drafted_at ? a : b,
+        );
+        setSelectedId(newest.id);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to load");
     } finally {
@@ -67,6 +78,7 @@ export function DraftsTab() {
 
   useEffect(() => {
     loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll]);
 
   const sessionById = useMemo(() => {
@@ -257,21 +269,15 @@ function DetailPanel({
     }
   };
 
-  const handleApprove = async () => {
-    try {
-      const updated = await approveReminder(reminder.id, slug);
-      onChanged(updated);
-      onInfo("Reminder approved.");
-    } catch (e: any) {
-      onError(e?.detail ?? e?.message ?? "Approve failed");
-    }
-  };
-
   const handleSend = async () => {
+    // One-click Send: save tweaks, approve (as operator), and dispatch.
     try {
-      const updated = await sendReminder(reminder.id, slug);
+      const updated = await submitReminder(reminder.id, {
+        content_subject: subject,
+        content_body: body,
+      }, slug);
       onChanged(updated);
-      onInfo("Reminder sent.");
+      onInfo(updated.status === "sent" ? "Reminder sent." : "Reminder updated.");
     } catch (e: any) {
       onError(e?.detail ?? e?.message ?? "Send failed");
     }
@@ -359,19 +365,16 @@ function DetailPanel({
             <button onClick={handleRegenerate} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
               Regenerate from template
             </button>
-            <button onClick={handleApprove} className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated">
-              Approve
-            </button>
           </>
         )}
-        {isApproved && (
+        {(isDraft || isApproved) && (
           <button onClick={handleSend} className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90">
             Send
           </button>
         )}
         {(isDraft || isApproved) && (
           <button onClick={handleSkip} className="px-3 py-1.5 text-sm border border-warning/40 rounded-md text-warning hover:bg-warning/[0.08]">
-            Skip
+            Discard
           </button>
         )}
       </div>
