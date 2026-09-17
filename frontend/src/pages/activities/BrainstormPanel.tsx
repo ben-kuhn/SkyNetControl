@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   approveChatSession,
+  extractChatActivity,
   sendChatMessage,
   startChatSession,
   type ActivityInput,
@@ -25,6 +26,7 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const [showApprove, setShowApprove] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [extracting, setExtracting] = useState(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -116,6 +118,27 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
 
   const hasAssistant = messages.some((m) => m.role === "assistant");
 
+  const handleExtract = async () => {
+    if (!sessionId || extracting) return;
+    setExtracting(true);
+    try {
+      const fields = await extractChatActivity(sessionId, slug);
+      setTitle(fields.title);
+      setDescription(fields.description);
+      setInstructions(fields.instructions);
+      setTagsText(fields.tags.join(", "));
+      addToast("Filled from chat — review and save.", "success");
+    } catch (e: any) {
+      if (e?.status === 503) {
+        addToast("Claude API key not configured.", "error");
+      } else {
+        addToast(e?.detail ?? e?.message ?? "Failed to extract from chat", "error");
+      }
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const containerCls = modal
     ? "fixed inset-0 z-50 bg-bg-base p-4 flex flex-col"
     : "border border-border rounded-lg bg-bg-surface flex flex-col h-[calc(100vh-8rem)] max-h-[800px]";
@@ -205,7 +228,16 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
 
       {showApprove && (
         <div className="pt-3 border-t border-border">
-          <h3 className="text-sm font-semibold text-text-primary mb-2">Save chat as activity</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-text-primary">Save chat as activity</h3>
+            <button
+              onClick={handleExtract}
+              disabled={extracting || !hasAssistant}
+              className="px-3 py-1.5 text-sm bg-accent/[0.12] text-accent rounded-md font-medium hover:bg-accent/20 disabled:opacity-50"
+            >
+              {extracting ? "Extracting…" : "Fill from chat"}
+            </button>
+          </div>
           <div className="mb-2">
             <label className="block text-[0.6875rem] uppercase tracking-wider text-text-muted font-semibold mb-1">Title</label>
             <input

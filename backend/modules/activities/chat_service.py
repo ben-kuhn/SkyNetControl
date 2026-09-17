@@ -1,3 +1,5 @@
+import json
+
 import anthropic
 
 from datetime import datetime, timezone
@@ -36,12 +38,13 @@ def _call_claude(
     api_key: str,
     messages: list[dict],
     model: str = DEFAULT_MODEL,
+    system: str = SYSTEM_PROMPT,
 ) -> anthropic.types.Message:
     client = anthropic.Anthropic(api_key=api_key)
     return client.messages.create(
         model=model,
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
+        system=system,
         messages=messages,
     )
 
@@ -120,6 +123,48 @@ def send_message(
     db.refresh(assistant_msg)
 
     return user_msg, assistant_msg
+
+
+EXTRACTION_PROMPT = """You are reviewing a brainstorm conversation between a net control operator and \
+an assistant about an amateur radio net activity. Extract the finalized activity proposal from the last \
+assistant turn that proposes one. Respond with a single JSON object, no markdown fences, with exactly these keys:
+- "title": a short, specific activity name
+- "description": one or two sentences summarizing what the activity is
+- "instructions": step-by-step participant instructions in plain text (newlines allowed as \\n in the JSON string)
+- "tags": an array of 1–4 short, useful tag strings (e.g. ["Winlink", "VHF", "CW"])
+If the conversation has not yet converged on a concrete proposal, set all fields to empty strings and tags to [].
+Return ONLY the JSON object — no commentary before or after."""
+
+
+def extract_activity_fields(db: Session, chat_session_id: int, api_key: str) -> dict:
+    """Ask Claude to pull a structured activity proposal out of the chat transcript.
+
+    Used by the approve flow to prefill the activity form instead of forcing the
+    operator to copy-paste from the transcript. The operator still reviews/edits
+    before saving, so this is intentionally best-effort scaffolding.
+    """
+    history = get_chat_history(db, chat_session_id)
+    messages = [{"role": m.role.value, "content": m.content} for m in history[-HISTORY_WINDOW:]]
+
+    response = _call_claude(api_key=api_key, messages=messages, system=EXTRACTION_PROMPT)
+    raw = response.content[0].text.strip()
+    # Claude occasionally wraps the object in markdown fences despite instructions.
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Fall back to returning nothing rather than crashing the approve form.
+        return {"title": "", "description": "", "instructions": "", "tags": []}
+    return {
+        "title": str(data.get("title", "") or "").strip(),
+        "description": str(data.get("description", "") or "").strip(),
+        "instructions": str(data.get("instructions", "") or "").strip(),
+        "tags": [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()],
+    }
 
 
 def link_chat_to_activity(db: Session, chat_session_id: int, activity_id: int) -> None:

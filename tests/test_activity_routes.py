@@ -438,6 +438,36 @@ async def test_chat_session_unlinked_accessible(admin_client, db_setup):
     assert resp.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_approve_chat_creates_activity(admin_client, db_setup):
+    """Approving a chat session materializes an activity and links the chat."""
+    with db_setup["factory"]() as session:
+        chat = ChatSession()
+        session.add(chat)
+        session.commit()
+        chat_id = chat.id
+
+    resp = await admin_client.post(
+        f"{BASE}/chat/sessions/{chat_id}/approve",
+        json={
+            "title": "Simplex Drill",
+            "description": "Local simplex comms exercise",
+            "instructions": "Tune to 146.520 MHz and call CQ.",
+            "tag_names": ["VHF", "simplex"],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["title"] == "Simplex Drill"
+    assert body["tags"] == [{"id": body["tags"][0]["id"], "name": "VHF"},
+                            {"id": body["tags"][1]["id"], "name": "simplex"}]
+    assert body["is_default"] is False
+
+    with db_setup["factory"]() as session:
+        chat = session.get(ChatSession, chat_id)
+        assert chat.activity_id == body["id"]
+
+
 # --- Budget guardrails ---
 
 
@@ -539,3 +569,61 @@ async def test_chat_zero_limits_disable_caps(nc_client, db_setup, fake_send_mess
     resp = await nc_client.post(f"{BASE}/chat/sessions/{chat_id}/messages", json={"content": "hi"})
     assert resp.status_code == 200
     assert fake_send_message == ["hi"]
+
+
+# --- Chat → activity extraction (build-from-chat) ---
+
+
+@pytest.fixture
+def fake_extract(monkeypatch):
+    """Replace routes.extract_activity_fields; records the chat id, returns a canned proposal."""
+    calls = []
+
+    def _fake(db, chat_session_id, api_key):
+        calls.append((chat_session_id, api_key))
+        return {
+            "title": "Simplex Drill",
+            "description": "A local simplex comms exercise in the field.",
+            "instructions": "1. Tune to 146.520\n2. Call CQ.\n3. Send a report.",
+            "tags": ["VHF", "simplex"],
+        }
+
+    import backend.modules.activities.routes as activities_routes
+
+    monkeypatch.setattr(activities_routes, "extract_activity_fields", _fake)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_extract_chat_returns_fields(nc_client, db_setup, fake_extract):
+    with db_setup["factory"]() as session:
+        chat = ChatSession()
+        session.add(chat)
+        session.add(AppConfig(key="claude_api_key", value="test-key"))
+        session.commit()
+        chat_id = chat.id
+
+    resp = await nc_client.post(f"{BASE}/chat/sessions/{chat_id}/extract")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["title"] == "Simplex Drill"
+    assert body["tags"] == ["VHF", "simplex"]
+    assert fake_extract == [(chat_id, "test-key")]
+
+
+@pytest.mark.asyncio
+async def test_extract_missing_api_key_503(nc_client, db_setup):
+    with db_setup["factory"]() as session:
+        chat = ChatSession()
+        session.add(chat)
+        session.commit()
+        chat_id = chat.id
+
+    resp = await nc_client.post(f"{BASE}/chat/sessions/{chat_id}/extract")
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_extract_unknown_session_404(nc_client):
+    resp = await nc_client.post(f"{BASE}/chat/sessions/9999/extract")
+    assert resp.status_code == 404

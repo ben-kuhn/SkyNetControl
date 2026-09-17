@@ -10,6 +10,7 @@ from backend.config_mgmt.service import get_config_value
 from backend.modules.activities.chat_service import (
     count_user_messages_today,
     create_chat_session,
+    extract_activity_fields,
     get_chat_history,
     get_chat_session,
     link_chat_to_activity,
@@ -273,6 +274,31 @@ async def send_chat_message_route(
         "user_message": _message_to_response(user_msg),
         "assistant_message": _message_to_response(assistant_msg),
     }
+
+
+@activities_router.post("/chat/sessions/{chat_session_id}/extract")
+async def extract_chat_route(
+    chat_session_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    chat = get_chat_session(db, chat_session_id, net_id=ctx.net.id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    api_key = get_config_value(db, "claude_api_key")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Claude API key not configured. Set 'claude_api_key' in app config.",
+        )
+
+    try:
+        fields = extract_activity_fields(db, chat_session_id, api_key)
+    except Exception as exc:
+        logger.exception("Claude extraction failed for chat session %s", chat_session_id)
+        raise HTTPException(status_code=502, detail="Claude extraction failed.") from exc
+    return fields
 
 
 @activities_router.post("/chat/sessions/{chat_session_id}/approve", status_code=201)
