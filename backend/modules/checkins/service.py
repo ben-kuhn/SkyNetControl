@@ -597,13 +597,28 @@ def delete_checkin(db: Session, checkin_id: int, net_id: int | None = None) -> b
 
 
 def approve_session_checkins(db: Session, session_id: int, net_id: int | None = None) -> None:
-    """Approve all check-ins for a session: update Member records, mark session completed."""
+    """Approve all check-ins for a session: update Member records, mark session completed.
+
+    Idempotent: member records are only finalized once per session. The normal
+    flow calls this from both the check-ins approve button and roster
+    approve/submit for the same session; without the guard, ``total_check_ins``
+    would be incremented twice. The first call stamps ``NetSession.members_finalized_at``;
+    later calls skip the member upsert (and still ensure the session is COMPLETED).
+    """
     checkins = get_checkins_for_session(db, session_id)
     now = datetime.now(timezone.utc)
 
+    net_session = db.get(NetSession, session_id)
+
+    if net_session is not None and net_session.members_finalized_at is not None:
+        # Already finalized by an earlier approve/submit for this session.
+        if net_session.status != SessionStatus.COMPLETED:
+            net_session.status = SessionStatus.COMPLETED
+            db.commit()
+        return
+
     # Resolve net_id if not provided
     if net_id is None:
-        net_session = db.get(NetSession, session_id)
         if net_session is not None:
             net_id = get_net_id_for_session(db, net_session)
 
@@ -632,9 +647,9 @@ def approve_session_checkins(db: Session, session_id: int, net_id: int | None = 
             # Fallback: no net_id known, skip member upsert
             logger.warning("approve_session_checkins: no net_id for session %d, skipping member upsert", session_id)
 
-    net_session = db.get(NetSession, session_id)
     if net_session is not None:
         net_session.status = SessionStatus.COMPLETED
+        net_session.members_finalized_at = now
 
     db.commit()
 

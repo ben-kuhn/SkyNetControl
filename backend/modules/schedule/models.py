@@ -1,5 +1,5 @@
 import enum
-from datetime import date, time
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     Integer,
@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     Time,
     Boolean,
+    DateTime,
     Enum,
     ForeignKey,
     Float,
@@ -65,6 +66,10 @@ class NetSession(Base):
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), nullable=False, default=SessionStatus.SCHEDULED)
     activity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     net_control_callsign: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Timestamp of the first member-record finalization (approve_session_checkins).
+    # Set once; guards idempotency so closing a session and then approving/
+    # submitting the roster can't double-count member totals.
+    members_finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     season: Mapped["NetSeason | None"] = relationship(back_populates="sessions")
 

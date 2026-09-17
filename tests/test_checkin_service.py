@@ -623,6 +623,43 @@ def test_approve_updates_existing_member(db, net_id, season_and_session):
     assert member.total_check_ins == 11
 
 
+def test_approve_session_checkins_is_idempotent(db, net_id, season_and_session):
+    """Calling approve_session_checkins twice must not double-count member totals.
+
+    The roster approve/submit path calls this after the check-ins page already
+    finalized member records — without the guard, total_check_ins increments
+    a second time.
+    """
+    _, net_session = season_and_session
+    checkin = CheckIn(
+        session_id=net_session.id,
+        callsign="W0TWO",
+        name="Twice",
+        mode="Winlink",
+        parse_status=ParseStatus.AUTO,
+        timing_status=TimingStatus.ON_TIME,
+        is_new_member=True,
+    )
+    db.add(checkin)
+    db.commit()
+
+    approve_session_checkins(db, net_session.id, net_id=net_id)
+    db.refresh(net_session)
+    approved_at = net_session.members_finalized_at
+    assert approved_at is not None
+    assert net_session.status == SessionStatus.COMPLETED
+
+    # Second call (e.g. via roster approve) is a no-op for member records.
+    approve_session_checkins(db, net_session.id, net_id=net_id)
+    db.refresh(net_session)
+    assert net_session.members_finalized_at == approved_at
+    assert net_session.status == SessionStatus.COMPLETED
+
+    member = db.get(Member, (net_id, "W0TWO"))
+    assert member is not None
+    assert member.total_check_ins == 1
+
+
 def test_get_checkins_by_callsign_returns_all_sessions_desc(db, net_id):
     """Returns (CheckIn, session_date) tuples for a callsign across sessions, newest first."""
     from datetime import date, time
