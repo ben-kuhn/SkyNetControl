@@ -301,6 +301,7 @@ async def update_session(
         session_type=body.session_type,
         net_control_callsign=body.net_control_callsign,
         activity_id=body.activity_id,
+        set_activity_id="activity_id" in body.model_fields_set,
         grace_period_hours=body.grace_period_hours,
         end_date=body.end_date,
     )

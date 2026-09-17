@@ -59,6 +59,23 @@ export async function sendChatMessage(
   });
 }
 
+export interface ExtractedActivityFields {
+  title: string;
+  description: string;
+  instructions: string;
+  tags: string[];
+}
+
+export async function extractChatActivity(
+  sessionId: number,
+  netSlug: string,
+): Promise<ExtractedActivityFields> {
+  return apiFetch<ExtractedActivityFields>(
+    `/nets/${netSlug}/activities/chat/sessions/${sessionId}/extract`,
+    { method: "POST" },
+  );
+}
+
 export async function approveChatSession(
   sessionId: number,
   input: ActivityInput,
