@@ -298,6 +298,84 @@ async def test_approve_session(test_client, test_settings, db_setup):
 
 
 @pytest.mark.asyncio
+async def test_approve_session_with_default_roster_template_returns_roster_id(
+    test_client, test_settings, db_setup
+):
+    """Closing a session auto-generates the roster draft when a default
+    roster template exists, so the frontend can jump straight to the editor."""
+    from backend.modules.roster.models import RosterTemplate
+    from backend.modules.nets.models import Net
+
+    with db_setup() as session:
+        net = session.query(Net).filter_by(slug=NET_SLUG).one()
+        session.add(
+            RosterTemplate(
+                net_id=net.id,
+                name="Default",
+                subject_template="Roster {{ date }}",
+                header_template="Header",
+                welcome_template="Welcome",
+                comments_template="Comments",
+                footer_template="Footer",
+                is_default=True,
+            )
+        )
+        checkin = CheckIn(
+            session_id=1,
+            callsign="W0ROST",
+            name="Roster Person",
+            mode="Winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        )
+        session.add(checkin)
+        session.commit()
+
+    token = make_test_token("W0NC", test_settings, token_version=0)
+    response = await test_client.post(
+        f"{BASE}/approve/1",
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["roster_id"] is not None
+
+    with db_setup() as session:
+        from backend.modules.roster.models import RosterLog
+
+        log = session.get(RosterLog, data["roster_id"])
+        assert log is not None
+        assert log.session_id == 1
+        assert log.content_subject == "Roster April 10, 2026"
+
+
+@pytest.mark.asyncio
+async def test_approve_session_without_roster_template_returns_null(
+    test_client, test_settings, db_setup
+):
+    """No default roster template → no auto-generated draft, roster_id null."""
+    with db_setup() as session:
+        checkin = CheckIn(
+            session_id=1,
+            callsign="W0NULL",
+            name="No Template",
+            mode="Winlink",
+            parse_status=ParseStatus.AUTO,
+            timing_status=TimingStatus.ON_TIME,
+        )
+        session.add(checkin)
+        session.commit()
+
+    token = make_test_token("W0NC", test_settings, token_version=0)
+    response = await test_client.post(
+        f"{BASE}/approve/1",
+        cookies={"access_token": token},
+    )
+    assert response.status_code == 200
+    assert response.json()["roster_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_member_can_read_and_scan(test_client, test_settings):
     """Net members (including viewers) can read checkins; scan requires NET_CONTROL."""
     viewer_token = make_test_token("KD0TST", test_settings, token_version=0)

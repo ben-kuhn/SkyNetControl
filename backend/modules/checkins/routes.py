@@ -332,10 +332,29 @@ async def approve_session_route(
     checkins = get_checkins_for_session(db, session_id)
     approve_session_checkins(db, session_id, net_id=ctx.net.id)
 
+    # Jump-start the roster write-up: if the net has a default roster template,
+    # auto-generate the draft so the operator lands straight in the editor.
+    # generate_draft is idempotent, so re-approving is harmless.
+    roster_id = None
+    from backend.modules.roster.models import RosterTemplate
+    from backend.modules.roster.service import generate_draft
+
+    has_template = (
+        db.query(RosterTemplate)
+        .filter(RosterTemplate.net_id == ctx.net.id, RosterTemplate.is_default.is_(True))
+        .first()
+        is not None
+    )
+    if has_template:
+        log = generate_draft(db, session_id, net_id=ctx.net.id)
+        if log is not None:
+            roster_id = log.id
+
     db.refresh(net_session)
     return {
         "session_status": net_session.status.value,
         "members_updated": len(checkins),
+        "roster_id": roster_id,
     }
 
 
