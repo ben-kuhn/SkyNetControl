@@ -549,6 +549,47 @@ def mark_sent(db: Session, roster_id: int) -> RosterLog | None:
     return log
 
 
+def submit_roster(
+    db: Session,
+    roster_id: int,
+    approver_callsign: str,
+    content_subject: str | None = None,
+    content_header: str | None = None,
+    content_welcome: str | None = None,
+    content_comments: str | None = None,
+    content_footer: str | None = None,
+) -> RosterLog | None:
+    """One-click Save + Approve + Send for the roster editor.
+
+    DRAFT: applies any provided edits, approves (stamping the acting operator
+    as approver and finalizing session member records — idempotently), then
+    dispatches. APPROVED: dispatches immediately (retry path). Returns None (and
+    leaves the log in APPROVED) when the delivery backends all fail, so the
+    operator can retry from the same editor. SENT / SKIPPED return None.
+    """
+    log = db.get(RosterLog, roster_id)
+    if log is None or log.status not in (RosterStatus.DRAFT, RosterStatus.APPROVED):
+        return None
+
+    if log.status == RosterStatus.DRAFT:
+        updated = update_draft(
+            db,
+            roster_id,
+            content_subject=content_subject,
+            content_header=content_header,
+            content_welcome=content_welcome,
+            content_comments=content_comments,
+            content_footer=content_footer,
+        )
+        if updated is None:
+            return None
+        approved = approve_roster(db, roster_id, approver_callsign)
+        if approved is None:
+            return None
+
+    return mark_sent(db, roster_id)
+
+
 def resend_roster(db: Session, roster_id: int) -> RosterLog | None:
     """Re-dispatch an already SENT roster through delivery backends.
 

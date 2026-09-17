@@ -511,6 +511,77 @@ async def test_send_reminder(admin_client, db_setup):
 
 
 @pytest.mark.anyio
+async def test_submit_reminder_draft_to_sent(admin_client, db_setup):
+    """One-click Send: DRAFT → (save edits) → approve → sent."""
+    with db_setup["factory"]() as db:
+        log = ReminderLog(
+            session_id=db_setup["net_session"].id,
+            template_id=None,
+            status=ReminderStatus.DRAFT,
+            content_subject="Subject",
+            content_body="Body",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(log)
+        db.commit()
+        log_id = log.id
+
+    with patch("backend.integrations.delivery.service.dispatch_delivery", return_value=True):
+        resp = await admin_client.post(
+            f"{BASE}/{log_id}/submit",
+            json={"content_body": "Edited body"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "sent"
+    assert body["content_body"] == "Edited body"
+    assert body["approved_by"] == "W0NE"
+
+
+@pytest.mark.anyio
+async def test_submit_reminder_retry_approved(admin_client, db_setup):
+    with db_setup["factory"]() as db:
+        log = ReminderLog(
+            session_id=db_setup["net_session"].id,
+            template_id=None,
+            status=ReminderStatus.APPROVED,
+            content_subject="Subject",
+            content_body="Body",
+            drafted_at=datetime.now(tz=timezone.utc),
+            approved_at=datetime.now(tz=timezone.utc),
+            approved_by="W0NE",
+        )
+        db.add(log)
+        db.commit()
+        log_id = log.id
+
+    with patch("backend.integrations.delivery.service.dispatch_delivery", return_value=True):
+        resp = await admin_client.post(f"{BASE}/{log_id}/submit", json={})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "sent"
+
+
+@pytest.mark.anyio
+async def test_submit_reminder_delivery_failure_502(admin_client, db_setup):
+    with db_setup["factory"]() as db:
+        log = ReminderLog(
+            session_id=db_setup["net_session"].id,
+            template_id=None,
+            status=ReminderStatus.DRAFT,
+            content_subject="Subject",
+            content_body="Body",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(log)
+        db.commit()
+        log_id = log.id
+
+    with patch("backend.integrations.delivery.service.dispatch_delivery", return_value=False):
+        resp = await admin_client.post(f"{BASE}/{log_id}/submit", json={})
+    assert resp.status_code == 502
+
+
+@pytest.mark.anyio
 async def test_skip_reminder(admin_client, db_setup):
     with db_setup["factory"]() as db:
         log = ReminderLog(

@@ -18,6 +18,7 @@ from backend.modules.roster.service import (
     regenerate_draft as regenerate_draft_service,
     resend_roster as resend_roster_service,
     skip_roster as skip_roster_service,
+    submit_roster as submit_roster_service,
     update_draft as update_draft_service,
     update_template as update_template_service,
     _get_net_id_for_session,
@@ -357,6 +358,41 @@ async def mark_sent_route(
     if result is None:
         # mark_sent kept status APPROVED because delivery failed. Surface the
         # actual backend errors so the UI doesn't show a generic message.
+        errors = get_last_attempt_errors(db, "roster", roster_id)
+        detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
+        raise HTTPException(status_code=502, detail=detail)
+    return _roster_to_response(result)
+
+
+@roster_router.post("/{roster_id}/submit")
+async def submit_roster_route(
+    roster_id: int,
+    body: DraftUpdate,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    """One-click Save + Approve + Send. The UI's primary 'Send' path."""
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    if log.status not in (RosterStatus.DRAFT, RosterStatus.APPROVED):
+        raise HTTPException(
+            status_code=409,
+            detail="Roster not in draft or approved status",
+        )
+    result = submit_roster_service(
+        db,
+        roster_id,
+        approver_callsign=ctx.user.callsign,
+        content_subject=body.content_subject,
+        content_header=body.content_header,
+        content_welcome=body.content_welcome,
+        content_comments=body.content_comments,
+        content_footer=body.content_footer,
+    )
+    if result is None:
+        from backend.integrations.delivery.service import get_last_attempt_errors
+
         errors = get_last_attempt_errors(db, "roster", roster_id)
         detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
         raise HTTPException(status_code=502, detail=detail)

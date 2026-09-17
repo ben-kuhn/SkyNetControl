@@ -417,6 +417,66 @@ async def test_skip_roster_route(admin_client, db_setup):
 
 
 @pytest.mark.anyio
+async def test_submit_roster_route_draft_to_sent(admin_client, db_setup):
+    """One-click Send: DRAFT → (save edits) → approve → sent."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        resp = await admin_client.post(
+            f"{BASE}/{rid}/submit",
+            json={"content_header": "Edited header"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "sent"
+    assert body["content_header"] == "Edited header"
+    assert body["approved_by"] == "W0NE"
+
+
+@pytest.mark.anyio
+async def test_submit_roster_route_retry_approved(admin_client, db_setup):
+    """An APPROVED roster can be re-submitted (send retry)."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    await admin_client.post(f"{BASE}/{rid}/approve")
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=True,
+    ):
+        resp = await admin_client.post(f"{BASE}/{rid}/submit", json={})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "sent"
+
+
+@pytest.mark.anyio
+async def test_submit_roster_route_skipped_409(admin_client, db_setup):
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    await admin_client.post(f"{BASE}/{rid}/skip")
+    resp = await admin_client.post(f"{BASE}/{rid}/submit", json={})
+    assert resp.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_submit_roster_route_delivery_failure_502(admin_client, db_setup):
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    with patch(
+        "backend.integrations.delivery.service.dispatch_delivery",
+        return_value=False,
+    ):
+        resp = await admin_client.post(f"{BASE}/{rid}/submit", json={})
+    assert resp.status_code == 502
+
+
+@pytest.mark.anyio
 async def test_approve_non_draft_returns_409(admin_client, db_setup):
     sid = db_setup["net_session"].id
     gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")

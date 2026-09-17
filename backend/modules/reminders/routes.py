@@ -16,6 +16,7 @@ from backend.modules.reminders.service import (
     mark_sent,
     regenerate_draft,
     skip_reminder,
+    submit_reminder,
     update_draft,
     update_template,
     _get_net_id_for_session,
@@ -319,6 +320,38 @@ async def mark_sent_route(
         raise HTTPException(status_code=409, detail="Reminder not in approved status")
     result = mark_sent(db, reminder_id)
     if result is None:
+        errors = get_last_attempt_errors(db, "reminder", reminder_id)
+        detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
+        raise HTTPException(status_code=502, detail=detail)
+    return _reminder_to_response(result)
+
+
+@reminders_router.post("/{reminder_id}/submit")
+async def submit_reminder_route(
+    reminder_id: int,
+    body: DraftUpdate,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    """One-click Save + Approve + Send. The UI's primary 'Send' path."""
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if log.status not in (ReminderStatus.DRAFT, ReminderStatus.APPROVED):
+        raise HTTPException(
+            status_code=409,
+            detail="Reminder not in draft or approved status",
+        )
+    result = submit_reminder(
+        db,
+        reminder_id,
+        approver_callsign=ctx.user.callsign,
+        content_subject=body.content_subject,
+        content_body=body.content_body,
+    )
+    if result is None:
+        from backend.integrations.delivery.service import get_last_attempt_errors
+
         errors = get_last_attempt_errors(db, "reminder", reminder_id)
         detail = "Send failed: " + "; ".join(errors) if errors else "Send failed (no delivery backends configured)"
         raise HTTPException(status_code=502, detail=detail)

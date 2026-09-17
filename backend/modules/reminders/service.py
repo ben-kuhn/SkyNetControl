@@ -510,3 +510,38 @@ def regenerate_draft(db: Session, reminder_id: int) -> ReminderLog | None:
     db.commit()
     db.refresh(log)
     return log
+
+
+def submit_reminder(
+    db: Session,
+    reminder_id: int,
+    approver_callsign: str,
+    content_subject: str | None = None,
+    content_body: str | None = None,
+) -> ReminderLog | None:
+    """One-click Save + Approve + Send for the reminder editor.
+
+    DRAFT: applies any provided edits, approves (stamping the acting operator
+    as approver), then dispatches. APPROVED: dispatches immediately (retry
+    path). Returns None (and leaves the log in APPROVED) when the delivery
+    backends all fail so the operator can retry from the same editor.
+    SENT / SKIPPED return None.
+    """
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or log.status not in (ReminderStatus.DRAFT, ReminderStatus.APPROVED):
+        return None
+
+    if log.status == ReminderStatus.DRAFT:
+        updated = update_draft(
+            db,
+            reminder_id,
+            content_subject=content_subject,
+            content_body=content_body,
+        )
+        if updated is None:
+            return None
+        approved = approve_reminder(db, reminder_id, approver_callsign)
+        if approved is None:
+            return None
+
+    return mark_sent(db, reminder_id)
