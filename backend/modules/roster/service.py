@@ -315,9 +315,13 @@ def generate_draft(
     template_id: int | None = None,
     net_id: int | None = None,
 ) -> RosterLog | None:
-    """Create a DRAFT RosterLog for the given session. Idempotent."""
+    """Create a DRAFT RosterLog for the given session. Idempotent.
+
+    A SKIPPED log is treated as discarded: generating for the session again
+    re-renders it against the current template and flips it back to DRAFT.
+    """
     existing = db.query(RosterLog).filter(RosterLog.session_id == session_id).first()
-    if existing is not None:
+    if existing is not None and existing.status != RosterStatus.SKIPPED:
         return existing
 
     net_session = db.get(NetSession, session_id)
@@ -340,6 +344,25 @@ def generate_draft(
 
     context = build_roster_context(db, net_session)
     sections = render_roster(template, context)
+
+    if existing is not None:
+        # Revive a discarded (SKIPPED) log in place so the session keeps its
+        # single-roster identity while picking up the current template.
+        existing.template_id = template.id
+        existing.status = RosterStatus.DRAFT
+        existing.content_subject = sections["subject"]
+        existing.content_header = sections["header"]
+        existing.content_welcome = sections["welcome"]
+        existing.content_comments = sections["comments"]
+        existing.content_footer = sections["footer"]
+        existing.session_url = context["session_url"] or None
+        existing.drafted_at = datetime.now(tz=timezone.utc)
+        existing.approved_at = None
+        existing.sent_at = None
+        existing.approved_by = None
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     log = RosterLog(
         session_id=session_id,
@@ -647,6 +670,22 @@ def skip_roster(db: Session, roster_id: int) -> RosterLog | None:
     db.refresh(log)
     purge_session_source_files(db, log.session_id)
     return log
+
+
+def delete_roster(db: Session, roster_id: int) -> bool:
+    """Permanently delete a RosterLog regardless of status.
+
+    A fresh draft can always be generated for the session afterwards via
+    ``generate_draft``.
+    """
+    log = db.get(RosterLog, roster_id)
+    if log is None:
+        return False
+    session_id = log.session_id
+    db.delete(log)
+    db.commit()
+    purge_session_source_files(db, session_id)
+    return True
 
 
 def update_draft(

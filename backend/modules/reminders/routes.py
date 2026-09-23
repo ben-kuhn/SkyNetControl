@@ -8,6 +8,7 @@ from backend.modules.reminders.models import ReminderLog, ReminderStatus, Remind
 from backend.modules.reminders.service import (
     approve_reminder,
     create_template,
+    delete_reminder,
     delete_template,
     generate_draft,
     generate_due_drafts,
@@ -386,3 +387,15 @@ async def regenerate_reminder_route(
     if result is None:
         raise HTTPException(status_code=409, detail="Reminder not in draft status")
     return _reminder_to_response(result)
+
+
+@reminders_router.delete("/{reminder_id}", status_code=204)
+async def delete_reminder_route(
+    reminder_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = db.get(ReminderLog, reminder_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    delete_reminder(db, reminder_id)

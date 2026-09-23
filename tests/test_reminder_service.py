@@ -8,13 +8,14 @@ from backend.config_mgmt.service import set_config_value
 from backend.db.base import Base
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
-from backend.modules.reminders.models import ReminderTemplate, TemplateType, ReminderStatus
+from backend.modules.reminders.models import ReminderLog, ReminderTemplate, TemplateType, ReminderStatus
 from backend.modules.reminders.service import (
     create_template,
     get_template,
     list_templates,
     update_template,
     delete_template,
+    delete_reminder,
     build_template_context,
     render_reminder,
     generate_draft,
@@ -434,6 +435,106 @@ def test_generate_draft_is_idempotent(db: Session, net_id, season_and_sessions):
     assert log1 is not None
     assert log2 is not None
     assert log1.id == log2.id
+
+
+def test_generate_draft_revives_skipped_log(db: Session, net_id, season_and_sessions):
+    """Generating for a discarded (SKIPPED) session re-renders it and flips it back to DRAFT."""
+    season, session1, session2, activity = season_and_sessions
+    tmpl = create_template(
+        db,
+        net_id=net_id,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id, net_id=net_id)
+    assert log is not None
+    assert skip_reminder(db, log.id) is not None
+
+    # Operator edits the template, then generates again for the same session
+    update_template(db, tmpl.id, net_id=net_id, subject_template="Updated subject {{ date }}")
+    revived = generate_draft(db, session1.id, net_id=net_id)
+    assert revived is not None
+    assert revived.id == log.id
+    assert revived.status == ReminderStatus.DRAFT
+    assert revived.approved_at is None
+    assert "Updated subject" in revived.content_subject
+    assert "April 10, 2026" in revived.content_subject
+
+
+def test_generate_draft_does_not_revive_live_status(db: Session, net_id, season_and_sessions):
+    """A DRAFT/APPROVED/SENT log is returned unchanged (idempotency preserved)."""
+    season, session1, _, _ = season_and_sessions
+    create_template(
+        db,
+        net_id=net_id,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Original {{ date }}",
+        body_template="Body",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id, net_id=net_id)
+    assert log is not None
+    approve_reminder(db, log.id, approver_callsign="W0NE")
+    again = generate_draft(db, session1.id, net_id=net_id)
+    assert again is not None
+    assert again.id == log.id
+    assert again.status == ReminderStatus.APPROVED
+    assert "Original" in again.content_subject
+
+
+def test_delete_reminder(db: Session, net_id, season_and_sessions):
+    season, session1, _, _ = season_and_sessions
+    create_template(
+        db,
+        net_id=net_id,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id, net_id=net_id)
+    assert log is not None
+    assert delete_reminder(db, log.id) is True
+    assert db.get(ReminderLog, log.id) is None
+
+
+def test_delete_reminder_missing_returns_false(db: Session):
+    assert delete_reminder(db, 999) is False
+
+
+def test_generate_draft_after_delete_creates_new_log(db: Session, net_id, season_and_sessions):
+    """Deleting a reminder frees the session so generate_draft creates a fresh log."""
+    season, session1, _, _ = season_and_sessions
+    create_template(
+        db,
+        net_id=net_id,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    log = generate_draft(db, session1.id, net_id=net_id)
+    assert log is not None
+    assert delete_reminder(db, log.id) is True
+    assert db.get(ReminderLog, log.id) is None
+
+    new_log = generate_draft(db, session1.id, net_id=net_id)
+    assert new_log is not None
+    assert new_log.status == ReminderStatus.DRAFT
+    assert new_log.session_id == session1.id
+    # The session keeps a single reminder identity
+    logs = db.query(ReminderLog).filter(ReminderLog.session_id == session1.id).all()
+    assert len(logs) == 1
 
 
 def test_generate_draft_with_explicit_template(db: Session, net_id, season_and_sessions):

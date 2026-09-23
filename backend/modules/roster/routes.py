@@ -9,6 +9,7 @@ from backend.modules.roster.service import (
     approve_roster as approve_roster_service,
     assemble_roster as assemble_roster_service,
     create_template as create_template_service,
+    delete_roster as delete_roster_service,
     delete_template as delete_template_service,
     generate_draft as generate_draft_service,
     generate_due_drafts as generate_due_drafts_service,
@@ -451,3 +452,15 @@ async def regenerate_roster_route(
     if result is None:
         raise HTTPException(status_code=409, detail="Roster not in draft status")
     return _roster_to_response(result)
+
+
+@roster_router.delete("/{roster_id}", status_code=204)
+async def delete_roster_route(
+    roster_id: int,
+    ctx: NetContext = Depends(require_net_role(NetRole.NET_CONTROL)),
+    db: Session = Depends(get_db_session),
+):
+    log = db.get(RosterLog, roster_id)
+    if log is None or not _verify_log_net(db, log, ctx.net.id):
+        raise HTTPException(status_code=404, detail="Roster not found")
+    delete_roster_service(db, roster_id)

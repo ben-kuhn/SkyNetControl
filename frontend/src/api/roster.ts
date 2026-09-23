@@ -51,6 +51,10 @@ export async function skipRoster(id: number, netSlug: string): Promise<Roster> {
   return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/skip`, { method: "POST" });
 }
 
+export async function deleteRoster(id: number, netSlug: string): Promise<void> {
+  await apiFetch<void>(`/nets/${netSlug}/roster/${id}`, { method: "DELETE" });
+}
+
 export async function regenerateRosterDraft(id: number, netSlug: string): Promise<Roster> {
   return apiFetch<Roster>(`/nets/${netSlug}/roster/${id}/regenerate`, { method: "POST" });
 }

@@ -273,10 +273,14 @@ def generate_draft(
     template_id: int | None = None,
     net_id: int | None = None,
 ) -> ReminderLog | None:
-    """Create a DRAFT ReminderLog for the given session. Idempotent."""
-    # Idempotency: return existing log if one already exists for this session
+    """Create a DRAFT ReminderLog for the given session. Idempotent.
+
+    A SKIPPED log is treated as discarded: generating for the session again
+    re-renders it against the current template and flips it back to DRAFT.
+    """
+    # Idempotency: return an existing live log (draft/approved/sent) unchanged.
     existing = db.query(ReminderLog).filter(ReminderLog.session_id == session_id).first()
-    if existing is not None:
+    if existing is not None and existing.status != ReminderStatus.SKIPPED:
         return existing
 
     net_session = db.get(NetSession, session_id)
@@ -303,6 +307,21 @@ def generate_draft(
 
     context = build_template_context(db, net_session)
     subject, body = render_reminder(template, context)
+
+    if existing is not None:
+        # Revive a discarded (SKIPPED) log in place so the session keeps its
+        # single-reminder identity while picking up the current template.
+        existing.template_id = template.id
+        existing.status = ReminderStatus.DRAFT
+        existing.content_subject = subject
+        existing.content_body = body
+        existing.drafted_at = datetime.now(tz=timezone.utc)
+        existing.approved_at = None
+        existing.sent_at = None
+        existing.approved_by = None
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     log = ReminderLog(
         session_id=session_id,
@@ -450,6 +469,20 @@ def skip_reminder(db: Session, reminder_id: int) -> ReminderLog | None:
     db.commit()
     db.refresh(log)
     return log
+
+
+def delete_reminder(db: Session, reminder_id: int) -> bool:
+    """Permanently delete a ReminderLog regardless of status.
+
+    A fresh draft can always be generated for the session afterwards via
+    ``generate_draft``.
+    """
+    log = db.get(ReminderLog, reminder_id)
+    if log is None:
+        return False
+    db.delete(log)
+    db.commit()
+    return True
 
 
 def update_draft(

@@ -698,6 +698,109 @@ async def test_action_cross_net_404(admin_client, db_setup):
     assert resp.status_code == 404
 
 
+# --- Delete ---
+
+
+@pytest.mark.anyio
+async def test_delete_reminder(admin_client, db_setup):
+    """Any reminder can be deleted; generating for the session afterwards creates a fresh draft."""
+    with db_setup["factory"]() as db:
+        log = ReminderLog(
+            session_id=db_setup["net_session"].id,
+            template_id=db_setup["template"].id,
+            status=ReminderStatus.DRAFT,
+            content_subject="Subject",
+            content_body="Body",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(log)
+        db.commit()
+        log_id = log.id
+
+    resp = await admin_client.delete(f"{BASE}/{log_id}")
+    assert resp.status_code == 204
+
+    # Deleted log is gone from the list
+    listing = await admin_client.get(f"{BASE}/")
+    assert listing.status_code == 200
+    assert all(r["id"] != log_id for r in listing.json())
+
+    # The session is freed: generating produces a fresh draft
+    resp2 = await admin_client.post(f"{BASE}/generate/{db_setup['net_session'].id}")
+    assert resp2.status_code == 200
+    assert resp2.json()["status"] == "draft"
+    listing2 = await admin_client.get(f"{BASE}/")
+    assert any(r["id"] == resp2.json()["id"] for r in listing2.json())
+
+
+@pytest.mark.anyio
+async def test_delete_reminder_not_found(admin_client):
+    resp = await admin_client.delete(f"{BASE}/999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_delete_reminder_cross_net_404(admin_client, db_setup):
+    """Deleting a reminder from another net returns 404, not a 200."""
+    with db_setup["factory"]() as db:
+        net2 = Net(slug="del-net2", name="Delete Net 2")
+        db.add(net2)
+        db.flush()
+        season2 = NetSeason(
+            net_id=net2.id,
+            name="S2",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 6, 30),
+            day_of_week=3,
+            time=time(18, 0),
+        )
+        db.add(season2)
+        db.flush()
+        session2 = NetSession(
+            season_id=season2.id,
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 1),
+            grace_period_hours=24.0,
+            session_type=SessionType.REGULAR_CHECKIN,
+            status=SessionStatus.SCHEDULED,
+        )
+        db.add(session2)
+        db.flush()
+        log2 = ReminderLog(
+            session_id=session2.id,
+            template_id=None,
+            status=ReminderStatus.SKIPPED,
+            content_subject="Net2 Subject",
+            content_body="Net2 Body",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(log2)
+        db.commit()
+        log2_id = log2.id
+
+    resp = await admin_client.delete(f"{BASE}/{log2_id}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_viewer_cannot_delete(viewer_client, db_setup):
+    with db_setup["factory"]() as db:
+        log = ReminderLog(
+            session_id=db_setup["net_session"].id,
+            template_id=None,
+            status=ReminderStatus.SKIPPED,
+            content_subject="S",
+            content_body="B",
+            drafted_at=datetime.now(tz=timezone.utc),
+        )
+        db.add(log)
+        db.commit()
+        log_id = log.id
+
+    resp = await viewer_client.delete(f"{BASE}/{log_id}")
+    assert resp.status_code == 403
+
+
 # --- Regenerate ---
 
 

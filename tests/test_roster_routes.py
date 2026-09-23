@@ -417,6 +417,37 @@ async def test_skip_roster_route(admin_client, db_setup):
 
 
 @pytest.mark.anyio
+async def test_delete_roster_route(admin_client, db_setup):
+    """Any roster can be deleted; generating for the session afterwards creates a fresh draft."""
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+
+    resp = await admin_client.delete(f"{BASE}/{rid}")
+    assert resp.status_code == 204
+
+    # The session is freed: generating produces a fresh draft
+    gen_resp2 = await admin_client.post(f"{BASE}/generate/{sid}")
+    assert gen_resp2.status_code == 200
+    assert gen_resp2.json()["status"] == "draft"
+
+
+@pytest.mark.anyio
+async def test_delete_roster_route_404_when_missing(admin_client):
+    resp = await admin_client.delete(f"{BASE}/999")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_delete_roster_route_requires_role(viewer_client, admin_client, db_setup):
+    sid = db_setup["net_session"].id
+    gen_resp = await admin_client.post(f"{BASE}/generate/{sid}")
+    rid = gen_resp.json()["id"]
+    resp = await viewer_client.delete(f"{BASE}/{rid}")
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
 async def test_submit_roster_route_draft_to_sent(admin_client, db_setup):
     """One-click Send: DRAFT → (save edits) → approve → sent."""
     sid = db_setup["net_session"].id

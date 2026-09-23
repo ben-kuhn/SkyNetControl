@@ -50,6 +50,10 @@ export async function skipReminder(id: number, netSlug: string): Promise<Reminde
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/skip`, { method: "POST" });
 }
 
+export async function deleteReminder(id: number, netSlug: string): Promise<void> {
+  await apiFetch<void>(`/nets/${netSlug}/reminders/${id}`, { method: "DELETE" });
+}
+
 export async function regenerateReminderDraft(id: number, netSlug: string): Promise<Reminder> {
   return apiFetch<Reminder>(`/nets/${netSlug}/reminders/${id}/regenerate`, { method: "POST" });
 }

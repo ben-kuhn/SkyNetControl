@@ -9,13 +9,14 @@ from backend.db.base import Base
 from backend.modules.schedule.models import NetSeason, NetSession, SessionType, SessionStatus
 from backend.modules.activities.models import Activity
 from backend.modules.checkins.models import CheckIn, ParseStatus, TimingStatus
-from backend.modules.roster.models import RosterStatus
+from backend.modules.roster.models import RosterLog, RosterStatus
 from backend.modules.roster.service import (
     create_template,
     get_template,
     list_templates,
     update_template,
     delete_template,
+    delete_roster,
     build_roster_context,
     render_roster,
     generate_draft,
@@ -463,6 +464,50 @@ def test_generate_draft_idempotent(db, season_and_sessions, default_template):
     log1 = generate_draft(db, session1.id)
     log2 = generate_draft(db, session1.id)
     assert log1.id == log2.id
+
+
+def test_generate_draft_revives_skipped(db, season_and_sessions, default_template):
+    """Generating for a discarded (SKIPPED) session re-renders it and flips it back to DRAFT."""
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    assert skip_roster(db, log.id) is not None
+
+    update_template(db, default_template.id, subject_template="Updated {{ date }}")
+    revived = generate_draft(db, session1.id)
+    assert revived is not None
+    assert revived.id == log.id
+    assert revived.status == RosterStatus.DRAFT
+    assert "Updated" in revived.content_subject
+
+
+def test_delete_roster(db, season_and_sessions, default_template):
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    assert delete_roster(db, log.id) is True
+    assert db.get(RosterLog, log.id) is None
+
+
+def test_delete_roster_missing_returns_false(db):
+    assert delete_roster(db, 999) is False
+
+
+def test_generate_draft_after_delete_creates_new_log(db, season_and_sessions, default_template):
+    """Deleting a roster frees the session so generate_draft creates a fresh log."""
+    _, session1, _, _ = season_and_sessions
+    log = generate_draft(db, session1.id)
+    assert log is not None
+    assert delete_roster(db, log.id) is True
+    assert db.get(RosterLog, log.id) is None
+
+    new_log = generate_draft(db, session1.id)
+    assert new_log is not None
+    assert new_log.status == RosterStatus.DRAFT
+    assert new_log.session_id == session1.id
+    # The session keeps a single roster identity
+    logs = db.query(RosterLog).filter(RosterLog.session_id == session1.id).all()
+    assert len(logs) == 1
 
 
 def test_generate_draft_session_not_found(db, default_template):

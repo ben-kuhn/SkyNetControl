@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  deleteRoster,
   fetchRosters,
   generateRosterDraft,
   previewRoster,
@@ -114,6 +115,16 @@ export function DraftsTab() {
 
   const selected = selectedId ? rosters.find((r) => r.id === selectedId) ?? null : null;
 
+  // Switching status tabs is an explicit operator choice: clear a focused
+  // roster that doesn't belong to the new bucket so the focus-sync effect
+  // can't yank the filter straight back (e.g. escaping the Skipped tab).
+  const handleStatusChange = (s: RosterStatus) => {
+    setStatusFilter(s);
+    if (selected && selected.status !== s) {
+      selectRoster(null);
+    }
+  };
+
   const handlePreview = async (id: number) => {
     try {
       const { text } = await previewRoster(id, slug);
@@ -138,7 +149,7 @@ export function DraftsTab() {
         {STATUSES.map((s) => (
           <button
             key={s}
-            onClick={() => setStatusFilter(s)}
+            onClick={() => handleStatusChange(s)}
             className={`px-3 py-1.5 text-xs rounded-md border flex items-center gap-2 transition-colors ${
               statusFilter === s
                 ? "bg-accent/[0.08] border-accent text-text-primary font-medium"
@@ -224,6 +235,10 @@ export function DraftsTab() {
                 onChanged={(updated) =>
                   setRosters((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
                 }
+                onDeleted={(id) => {
+                  setRosters((prev) => prev.filter((r) => r.id !== id));
+                  selectRoster(null);
+                }}
                 onPreview={() => handlePreview(selected.id)}
                 onError={(msg) => addToast(msg, "error")}
                 onInfo={(msg) => addToast(msg, "success")}
@@ -264,6 +279,7 @@ function DetailPanel({
   slug,
   onClose,
   onChanged,
+  onDeleted,
   onPreview,
   onError,
   onInfo,
@@ -273,6 +289,7 @@ function DetailPanel({
   slug: string;
   onClose: () => void;
   onChanged: (r: Roster) => void;
+  onDeleted: (id: number) => void;
   onPreview: () => void;
   onError: (msg: string) => void;
   onInfo: (msg: string) => void;
@@ -371,6 +388,19 @@ function DetailPanel({
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm("Delete this roster permanently? You can generate a new draft afterwards.")) {
+      return;
+    }
+    try {
+      await deleteRoster(roster.id, slug);
+      onDeleted(roster.id);
+      onInfo("Roster deleted.");
+    } catch (e: any) {
+      onError(e?.detail ?? e?.message ?? "Delete failed");
+    }
+  };
+
   return (
     <div className="border border-border rounded-lg p-4 bg-bg-surface">
       <div className="flex items-start justify-between mb-3 pb-3 border-b border-border">
@@ -440,6 +470,12 @@ function DetailPanel({
             Discard
           </button>
         )}
+        <button
+          onClick={handleDelete}
+          className="ml-auto px-3 py-1.5 text-sm border border-danger/40 rounded-md text-danger hover:bg-danger/[0.08]"
+        >
+          Delete
+        </button>
       </div>
     </div>
   );
