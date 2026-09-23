@@ -103,6 +103,30 @@ Per-net weather layers on the live event map, for emergency/skywarn nets: an ani
 - **Warnings** are proxied by the backend (`GET /api/nets/{slug}/events/{id}/weather`), which fetches `api.weather.gov/alerts/active` for the coverage area with a short shared cache (~60s) and degrades gracefully — an NWS problem surfaces as a status chip (`stale`/`unavailable`), never an error. US-only (NWS); radar is global.
 - Both layers are viewer-visible (read-only) on active events.
 
+## NCO reminder emails
+
+Per-net emails to net control (NCO) prompting them to review and send the
+reminder draft the day before each scheduled net. A background loop wakes on a
+timer, auto-generates any due drafts, and emails the NCO at the morning time the
+day before a net; if the reminder still hasn't been **sent** by the evening time
+the same day, it emails again. Never applies to week-long sessions. Requires
+SMTP (`smtp.*` keys) to be configured. Configured from the **NCO reminder
+emails** section of a net's settings page.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `reminders.nco_email_enabled` | `"true"` / `"false"` | Default `"false"`. Master switch. |
+| `reminders.nco_email_timezone` | IANA zone string | Zone used to interpret the morning/evening times (e.g. `America/Chicago`). Unset = server's local timezone (fixed offset), falling back to UTC. |
+| `reminders.nco_email_morning_time` | `HH:MM` | Default `07:00`. Local time the day before a net to email the NCO with a link to the draft. |
+| `reminders.nco_email_evening_time` | `HH:MM` | Default `19:00`. Local time the day before a net to send the follow-up if the reminder is still unsent. |
+| `reminders.nco_email_to` | email string (optional) | Explicit recipient override. Unset = resolve the session NCO's account email (`User.email`), falling back to the lowest-id admin. If no address resolves, the email is skipped (logged). |
+| `reminders.nco_email_check_interval_minutes` | int | Default `5`. How often the background loop re-checks. |
+
+The email links to the draft editor
+(`/nets/{slug}/reminders?focus=<id>`) so the NCO can review and one-click send.
+An email is suppressed when the session's reminder is already `SENT` or was
+deliberately `SKIPPED` (discarded).
+
 ## Global config defaults for net-free events (EP2)
 
 Starting with the live-events feature (EP2), events can be created independently of any net (from the top-level **Events** section). These "net-free" events inherit their PAT transport, weather overlay, APRS, and delivery settings from the **global** config values — i.e., the same `pat_transport_enabled`, `pat_http_base_url`, `weather.enabled`, etc. keys documented above, but set on the `/config` admin page rather than on a per-net settings page.

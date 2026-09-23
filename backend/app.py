@@ -153,6 +153,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             pass
 
+        nco_reminder_task = None
+        try:
+            from backend.modules.reminders.nco import nco_reminder_loop
+
+            nco_reminder_task = asyncio.create_task(nco_reminder_loop(session_factory))
+        except Exception:
+            pass
+
         try:
             from backend.integrations.aprs.manager import start_for_active_events
 
@@ -169,6 +177,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             scanner_task.cancel()
             try:
                 await scanner_task
+            except asyncio.CancelledError:
+                pass
+
+        if nco_reminder_task is not None:
+            nco_reminder_task.cancel()
+            try:
+                await nco_reminder_task
             except asyncio.CancelledError:
                 pass
 

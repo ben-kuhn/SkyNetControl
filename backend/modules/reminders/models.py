@@ -29,6 +29,23 @@ class ReminderStatus(str, enum.Enum):
     SKIPPED = "skipped"
 
 
+class NcoReminderKind(str, enum.Enum):
+    MORNING = "morning"
+    EVENING = "evening"
+
+
+class NcoReminderLog(Base):
+    __tablename__ = "nco_reminder_logs"
+    __table_args__ = (UniqueConstraint("session_id", "kind", name="uq_nco_reminder_logs_session_kind"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(Integer, ForeignKey("net_sessions.id"), nullable=False)
+    kind: Mapped[NcoReminderKind] = mapped_column(Enum(NcoReminderKind), nullable=False)
+    emailed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    session: Mapped["NetSession"] = relationship()
+
+
 class ReminderTemplate(Base):
     __tablename__ = "reminder_templates"
     __table_args__ = (UniqueConstraint("net_id", "name", name="uq_reminder_templates_net_name"),)

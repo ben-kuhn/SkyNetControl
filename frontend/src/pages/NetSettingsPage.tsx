@@ -222,6 +222,48 @@ function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
   ];
 }
 
+const NCO_REMINDER_FIELDS: ConfigField[] = [
+  {
+    key: "reminders.nco_email_enabled",
+    label: "NCO reminder emails",
+    type: "boolean",
+    helpText:
+      "Email net control the day before each scheduled net to review and send the reminder draft. Requires SMTP to be configured.",
+  },
+  {
+    key: "reminders.nco_email_timezone",
+    label: "Timezone",
+    placeholder: "America/Chicago",
+    mono: true,
+    helpText:
+      "IANA timezone for the morning/evening reminder times. Leave blank to use the server's local timezone.",
+    visibleWhen: (v) => v["reminders.nco_email_enabled"] === "true",
+  },
+  {
+    key: "reminders.nco_email_morning_time",
+    label: "Morning email time",
+    placeholder: "07:00",
+    helpText: "Local time (HH:MM) to email NCO with a link to the reminder draft the day before the net.",
+    visibleWhen: (v) => v["reminders.nco_email_enabled"] === "true",
+  },
+  {
+    key: "reminders.nco_email_evening_time",
+    label: "Evening follow-up time",
+    placeholder: "19:00",
+    helpText:
+      "Local time (HH:MM) to email NCO again if the reminder still hasn't been sent. Only applies to the day before the net.",
+    visibleWhen: (v) => v["reminders.nco_email_enabled"] === "true",
+  },
+  {
+    key: "reminders.nco_email_to",
+    label: "Recipient override (optional)",
+    placeholder: "nco@example.com",
+    helpText:
+      "Send to this address instead of resolving the session NCO's account email. Leave blank to auto-resolve.",
+    visibleWhen: (v) => v["reminders.nco_email_enabled"] === "true",
+  },
+];
+
 export function NetSettingsPage() {
   const { net, slug } = useCurrentNet();
   const { user, refreshUser } = useAuth();
@@ -488,6 +530,16 @@ export function NetSettingsPage() {
             onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
             onSave={handleSectionSave("aprs")}
             saving={savingSection === "aprs"}
+          />
+
+          <SettingsSection
+            title="NCO reminder emails"
+            fields={NCO_REMINDER_FIELDS}
+            values={config}
+            savedValues={savedConfig}
+            onChange={(k, v) => setConfig((prev) => ({ ...prev, [k]: v }))}
+            onSave={handleSectionSave("nco-reminder")}
+            saving={savingSection === "nco-reminder"}
           />
 
           <SettingsSection
