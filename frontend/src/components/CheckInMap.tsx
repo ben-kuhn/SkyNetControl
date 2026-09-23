@@ -6,6 +6,11 @@ import { useTheme } from "../hooks/useTheme";
 
 const TILE_URL_DARK =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+// Esri's dark gray basemap ships as a minimal base plus a separate
+// reference layer carrying labels, political boundaries, and roads — the
+// base alone is just country/state outlines.
+const TILE_URL_DARK_REF =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
 const TILE_URL_LIGHT =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const TILE_ATTR =
@@ -28,6 +33,7 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const darkRefLayerRef = useRef<L.TileLayer | null>(null);
   const markersRef = useRef<Map<number, L.CircleMarker>>(new Map());
 
   // Initialize map once
@@ -61,17 +67,34 @@ export function CheckInMap({ checkins, selectedCheckinId, onSelectCheckin }: Pro
       map.remove();
       mapRef.current = null;
       tileLayerRef.current = null;
+      darkRefLayerRef.current = null;
     };
     // Map init runs once; the theme effect below handles light/dark swaps
     // via setUrl so we don't tear down and re-create the map on toggle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Swap the basemap tile URL whenever the UI theme flips.
+  // Swap the basemap tile URL whenever the UI theme flips. Dark theme adds
+  // Esri's dark-gray reference overlay (labels/boundaries/roads) on top of
+  // the minimal dark base.
   useEffect(() => {
-    const layer = tileLayerRef.current;
-    if (!layer) return;
-    layer.setUrl(theme === "light" ? TILE_URL_LIGHT : TILE_URL_DARK);
+    const base = tileLayerRef.current;
+    if (!base) return;
+    const isDark = theme !== "light";
+    base.setUrl(isDark ? TILE_URL_DARK : TILE_URL_LIGHT);
+
+    const ref = darkRefLayerRef.current;
+    if (isDark) {
+      if (!ref && mapRef.current) {
+        darkRefLayerRef.current = L.tileLayer(TILE_URL_DARK_REF, {
+          attribution: TILE_ATTR,
+          maxZoom: 18,
+        }).addTo(mapRef.current);
+      }
+    } else if (ref) {
+      ref.remove();
+      darkRefLayerRef.current = null;
+    }
   }, [theme]);
 
   // Render markers when checkins change

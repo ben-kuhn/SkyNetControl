@@ -8,6 +8,11 @@ import type { BeaconedObject, EventParticipant, EventPost, EventStation, Partici
 
 const TILE_URL_DARK =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+// Esri's dark gray basemap ships as a minimal base plus a separate
+// reference layer carrying labels, political boundaries, and roads — the
+// base alone is just country/state outlines.
+const TILE_URL_DARK_REF =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
 const TILE_URL_LIGHT =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 const TILE_ATTR =
@@ -80,6 +85,7 @@ export function EventMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const darkRefLayerRef = useRef<L.TileLayer | null>(null);
   const layersRef = useRef<{
     participants: L.LayerGroup;
     trails: L.LayerGroup;
@@ -133,6 +139,7 @@ export function EventMap({
       map.remove();
       mapRef.current = null;
       tileLayerRef.current = null;
+      darkRefLayerRef.current = null;
       layersRef.current = null;
       radarLayersRef.current = [];
     };
@@ -140,7 +147,23 @@ export function EventMap({
   }, []);
 
   useEffect(() => {
-    tileLayerRef.current?.setUrl(theme === "light" ? TILE_URL_LIGHT : TILE_URL_DARK);
+    const base = tileLayerRef.current;
+    if (!base) return;
+    const isDark = theme !== "light";
+    base.setUrl(isDark ? TILE_URL_DARK : TILE_URL_LIGHT);
+
+    const ref = darkRefLayerRef.current;
+    if (isDark) {
+      if (!ref && mapRef.current) {
+        darkRefLayerRef.current = L.tileLayer(TILE_URL_DARK_REF, {
+          attribution: TILE_ATTR,
+          maxZoom: 18,
+        }).addTo(mapRef.current);
+      }
+    } else if (ref) {
+      ref.remove();
+      darkRefLayerRef.current = null;
+    }
   }, [theme]);
 
   // Redraw layers on data change
