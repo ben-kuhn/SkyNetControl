@@ -663,6 +663,46 @@ def test_generate_due_drafts_skips_completed_sessions(db: Session, net_id, seaso
     assert session1.id not in session_ids
 
 
+def test_generate_due_drafts_skips_past_sessions(db: Session, net_id, season_and_sessions):
+    """SCHEDULED sessions whose date has already passed must not be auto-drafted."""
+    season, session1, session2, activity = season_and_sessions
+    # session1 (Apr 10) and session2 (Apr 17) are both in the past relative to
+    # today (Apr 20), but neither is marked CANCELLED/COMPLETED.
+    create_template(
+        db,
+        net_id=net_id,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 20)):
+        drafts = generate_due_drafts(db, net_id=net_id)
+
+    assert drafts == []
+
+
+def test_generate_due_drafts_includes_session_today(db: Session, net_id, season_and_sessions):
+    """A session today (days_until == 0) is still upcoming and gets a draft."""
+    season, session1, session2, activity = season_and_sessions
+    create_template(
+        db,
+        net_id=net_id,
+        name="Regular Default",
+        template_type=TemplateType.REGULAR_CHECKIN,
+        subject_template="Net on {{ date }}",
+        body_template="Check-in on {{ date }}.",
+        lead_time_days=3,
+        is_default=True,
+    )
+    with patch("backend.modules.reminders.service._today", return_value=date(2026, 4, 10)):
+        drafts = generate_due_drafts(db, net_id=net_id)
+
+    assert [d.session_id for d in drafts] == [session1.id]
+
+
 def test_approve_reminder(db: Session, net_id, season_and_sessions):
     season, session1, session2, activity = season_and_sessions
     create_template(

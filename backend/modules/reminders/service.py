@@ -338,7 +338,9 @@ def generate_draft(
 
 
 def generate_due_drafts(db: Session, net_id: int | None = None) -> list[ReminderLog]:
-    """Generate drafts for all SCHEDULED sessions that are within their lead time.
+    """Generate drafts for all SCHEDULED, upcoming sessions within their lead time.
+
+    Sessions whose start date has already passed are never auto-drafted.
 
     If *net_id* is supplied only sessions belonging to that net are processed and
     only that net's default templates are used.  When *net_id* is ``None`` all
@@ -383,7 +385,7 @@ def generate_due_drafts(db: Session, net_id: int | None = None) -> list[Reminder
             continue
 
         days_until = (session.start_date - today).days
-        if days_until <= template.lead_time_days:
+        if 0 <= days_until <= template.lead_time_days:
             log = generate_draft(db, session.id, template_id=template.id, net_id=session_net_id)
             if log is not None:
                 drafts.append(log)

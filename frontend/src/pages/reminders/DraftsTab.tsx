@@ -33,6 +33,17 @@ function formatShortDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+// Session dates arrive as "YYYY-MM-DD" (date-only), so a lexical compare
+// against today's local date is a timezone-safe "is it still upcoming".
+function isUpcomingOrToday(iso: string): boolean {
+  if (!iso) return false;
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  return iso >= `${y}-${m}-${d}`;
+}
+
 function formatLongDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
     year: "numeric",
@@ -249,7 +260,7 @@ export function DraftsTab() {
       )}
       {showGenerateModal && (
         <GenerateModal
-          sessions={sessions.filter((s) => s.status === "scheduled")}
+          sessions={sessions.filter((s) => s.status === "scheduled" && isUpcomingOrToday(s.start_date))}
           slug={slug}
           onClose={() => setShowGenerateModal(false)}
           onGenerated={(generated) => {
