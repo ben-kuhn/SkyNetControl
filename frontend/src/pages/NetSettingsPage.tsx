@@ -9,6 +9,7 @@ import { useToast } from "../context/ToastContext";
 import { useAuth } from "../hooks/useAuth";
 import { useCurrentNet } from "../hooks/useCurrentNet";
 import { getNetConfig, patchNet, sendGroupsIoTest, setNetConfigBulk, testNetPatConnection } from "../api/nets";
+import { IANA_TIMEZONES } from "../data/timezones";
 
 function parseStringArray(raw: string): string[] {
   try {
@@ -222,37 +223,6 @@ function deliveryFields(winlinkEnabled: boolean): ConfigField[] {
   ];
 }
 
-const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "Server local timezone" },
-  { value: "UTC", label: "UTC" },
-  { value: "America/New_York", label: "Eastern Time (America/New_York)" },
-  { value: "America/Chicago", label: "Central Time (America/Chicago)" },
-  { value: "America/Denver", label: "Mountain Time (America/Denver)" },
-  { value: "America/Phoenix", label: "Arizona (America/Phoenix, no DST)" },
-  { value: "America/Los_Angeles", label: "Pacific Time (America/Los_Angeles)" },
-  { value: "America/Anchorage", label: "Alaska (America/Anchorage)" },
-  { value: "Pacific/Honolulu", label: "Hawaii (Pacific/Honolulu)" },
-  { value: "America/Toronto", label: "Eastern Time, Canada (America/Toronto)" },
-  { value: "America/Vancouver", label: "Pacific Time, Canada (America/Vancouver)" },
-  { value: "America/Edmonton", label: "Mountain Time, Canada (America/Edmonton)" },
-  { value: "America/Winnipeg", label: "Central Time, Canada (America/Winnipeg)" },
-  { value: "America/Halifax", label: "Atlantic Time, Canada (America/Halifax)" },
-  { value: "America/St_Johns", label: "Newfoundland (America/St_Johns)" },
-  { value: "America/Mexico_City", label: "Mexico City (America/Mexico_City)" },
-  { value: "America/Sao_Paulo", label: "São Paulo (America/Sao_Paulo)" },
-  { value: "Europe/London", label: "London (Europe/London)" },
-  { value: "Europe/Berlin", label: "Berlin (Europe/Berlin)" },
-  { value: "Europe/Paris", label: "Paris (Europe/Paris)" },
-  { value: "Africa/Johannesburg", label: "Johannesburg (Africa/Johannesburg)" },
-  { value: "Asia/Dubai", label: "Dubai (Asia/Dubai)" },
-  { value: "Asia/Singapore", label: "Singapore (Asia/Singapore)" },
-  { value: "Asia/Kolkata", label: "India (Asia/Kolkata)" },
-  { value: "Asia/Tokyo", label: "Tokyo (Asia/Tokyo)" },
-  { value: "Australia/Perth", label: "Perth (Australia/Perth)" },
-  { value: "Australia/Sydney", label: "Sydney (Australia/Sydney)" },
-  { value: "Pacific/Auckland", label: "Auckland (Pacific/Auckland)" },
-];
-
 const NCO_REMINDER_FIELDS: ConfigField[] = [
   {
     key: "reminders.nco_email_enabled",
@@ -264,10 +234,10 @@ const NCO_REMINDER_FIELDS: ConfigField[] = [
   {
     key: "reminders.nco_email_timezone",
     label: "Timezone",
-    type: "select",
-    options: TIMEZONE_OPTIONS,
+    type: "tzselect",
+    tzZones: IANA_TIMEZONES,
     helpText:
-      "The local timezone for the morning/evening reminder times. Choose 'Server local timezone' to use the server's own zone.",
+      "The local timezone for the morning/evening reminder times, split into region and city. Choose 'Server local timezone' to use the server's own zone.",
     visibleWhen: (v) => v["reminders.nco_email_enabled"] === "true",
   },
   {

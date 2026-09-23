@@ -4,12 +4,13 @@ import { Button } from "./Button";
 export interface ConfigField {
   key: string;
   label: string;
-  type?: "text" | "boolean" | "multiselect" | "select";
+  type?: "text" | "boolean" | "multiselect" | "select" | "tzselect";
   placeholder?: string;
   helpText: string;
   mono?: boolean;
   secret?: boolean;
   options?: { value: string; label: string }[];
+  tzZones?: string[];
   visibleWhen?: (values: Record<string, string>) => boolean;
 }
 
@@ -72,6 +73,67 @@ function FieldRow({
           </option>
         ))}
       </select>
+    );
+  } else if (type === "tzselect") {
+    const zones = field.tzZones ?? [];
+    const parts = value.split("/");
+    const currentRegion = value ? parts[0] : "";
+    const currentArea = parts.slice(1).join("/");
+
+    const regionSet = new Set(zones.map((z) => z.split("/")[0]));
+    if (currentRegion && !regionSet.has(currentRegion)) regionSet.add(currentRegion);
+    const regions = Array.from(regionSet).sort();
+
+    const areaSet = currentRegion
+      ? new Set(
+          zones
+            .filter((z) => z.startsWith(`${currentRegion}/`))
+            .map((z) => z.slice(currentRegion.length + 1)),
+        )
+      : new Set<string>();
+    if (currentArea && !areaSet.has(currentArea)) areaSet.add(currentArea);
+    const areas = Array.from(areaSet).sort();
+
+    input = (
+      <div className="flex gap-2 max-w-md">
+        <select
+          value={currentRegion}
+          onChange={(e) => {
+            const region = e.target.value;
+            if (!region) {
+              onChange("");
+              return;
+            }
+            const zoneAreas = zones
+              .filter((z) => z.startsWith(`${region}/`))
+              .map((z) => z.slice(region.length + 1))
+              .sort();
+            const first = zoneAreas[0];
+            onChange(first ? `${region}/${first}` : region);
+          }}
+          className="flex-1 bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary"
+        >
+          <option value="">Server local timezone</option>
+          {regions.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+        {currentRegion && areas.length > 0 && (
+          <select
+            value={currentArea}
+            onChange={(e) => onChange(`${currentRegion}/${e.target.value}`)}
+            className="flex-1 bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary"
+          >
+            {areas.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
     );
   } else if (type === "multiselect") {
     const selected = parseStringArray(value);
