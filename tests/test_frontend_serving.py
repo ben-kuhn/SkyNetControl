@@ -82,9 +82,13 @@ async def test_security_headers_set_on_responses():
         # and script-src is just 'self' — also no unsafe-inline.
         assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
         # Leaflet tile CDN must be allowed under img-src or the check-in
-        # map renders blank — see CheckInMap.tsx's TILE_URL.
+        # map renders blank — see CheckInMap.tsx's TILE_URL. Esri tiles
+        # replaced CARTO after CARTO began watermarking keyless requests.
         img_src = csp.split("img-src")[1].split(";")[0]
-        assert "basemaps.cartocdn.com" in img_src
+        assert "server.arcgisonline.com" in img_src
+        assert "tilecache.rainviewer.com" in img_src
+        # RainViewer's index fetch must be allowed under connect-src.
+        assert "api.rainviewer.com" in csp.split("connect-src")[1].split(";")[0]
         # HSTS only when https — default app_base_url is http://localhost:8000.
         assert "strict-transport-security" not in resp.headers
 

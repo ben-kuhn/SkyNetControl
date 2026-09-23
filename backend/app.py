@@ -250,15 +250,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # report-uri is deprecated in favour of report-to + Reporting-Endpoints,
     # but every current browser still honours it as a fallback; emit both
     # so a future browser that drops report-uri still calls our endpoint.
-    # cartocdn.com hosts the Leaflet map tiles referenced by
-    # frontend/src/components/CheckInMap.tsx — without it img-src 'self'
-    # blocks every tile and the map renders blank.
+    # server.arcgisonline.com hosts the Leaflet map tiles referenced by
+    # frontend/src/components/CheckInMap.tsx / EventMap.tsx — without it
+    # img-src 'self' blocks every tile and the map renders blank. (CARTO
+    # basemaps were dropped after they started watermarking keyless
+    # requests with an "API key required" overlay.)
     csp = (
         "default-src 'self'; "
         f"script-src {script_src}; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https://*.basemaps.cartocdn.com; "
-        "connect-src 'self'; "
+        "img-src 'self' data: https://server.arcgisonline.com https://tilecache.rainviewer.com; "
+        "connect-src 'self' https://api.rainviewer.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
