@@ -129,7 +129,7 @@ export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessi
       addToast("Activity created from chat.", "success");
       onApproved(activity);
     } catch (e: any) {
-      addToast(e?.detail ?? e?.message ?? "Failed to save activity", "error");
+      addToast(e?.detail || e?.message || "Failed to save activity", "error");
     } finally {
       setSubmitting(false);
     }
@@ -151,7 +151,34 @@ export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessi
       if (e?.status === 503) {
         addToast("Claude API key not configured.", "error");
       } else {
-        addToast(e?.detail ?? e?.message ?? "Failed to extract from chat", "error");
+        addToast(e?.detail || e?.message || "Failed to extract from chat", "error");
+      }
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  // Single-click conversion: show the activity form and pull the fields
+  // from the chat automatically so the operator doesn't have to click
+  // "Convert to activity" and then "Fill from chat".
+  const handleConvertToActivity = async () => {
+    if (!sessionId || !hasAssistant) return;
+    setShowApprove(true);
+    setExtracting(true);
+    try {
+      const fields = await extractChatActivity(sessionId, slug);
+      setTitle(fields.title);
+      setDescription(fields.description);
+      setInstructions(fields.instructions);
+      setTagsText(fields.tags.join(", "));
+      if (!fields.title) {
+        addToast("Chat hasn't settled on a proposal — fill in the fields or keep chatting.", "info");
+      }
+    } catch (e: any) {
+      if (e?.status === 503) {
+        addToast("Claude API key not configured.", "error");
+      } else {
+        addToast(e?.detail || e?.message || "Failed to extract from chat", "error");
       }
     } finally {
       setExtracting(false);
@@ -237,8 +264,8 @@ export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessi
       {!showApprove && (
         <div className="pt-3 border-t border-border flex gap-2 flex-wrap">
           <button
-            onClick={() => setShowApprove(true)}
-            disabled={!hasAssistant || !sessionId}
+            onClick={handleConvertToActivity}
+            disabled={!hasAssistant || !sessionId || extracting}
             title={
               hasAssistant
                 ? "Review the chat and save it as an activity"
@@ -246,7 +273,7 @@ export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessi
             }
             className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90 disabled:opacity-40"
           >
-            Convert to activity
+            {extracting ? "Extracting…" : "Convert to activity"}
           </button>
         </div>
       )}

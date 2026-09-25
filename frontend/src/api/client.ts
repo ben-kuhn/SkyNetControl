@@ -29,10 +29,15 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
-    let detail = response.statusText;
+    // HTTP/2 (and many proxies) send an empty reason phrase, so never rely
+    // on statusText alone — guarantee a non-empty detail string for the
+    // toast/error surfaces downstream.
+    let detail = response.statusText || `Request failed (${response.status})`;
     try {
       const body = await response.json();
-      detail = body.detail || detail;
+      if (body && typeof body.detail === "string" && body.detail.trim()) {
+        detail = body.detail;
+      }
     } catch {
       // response body wasn't JSON
     }
