@@ -28,6 +28,27 @@ from backend.modules.activities.service import (
 
 logger = logging.getLogger(__name__)
 
+
+def _claude_error_detail(exc: Exception) -> str:
+    """Map a Claude/Anthropic API exception to a useful, non-leaky 502 detail.
+
+    The full exception is already logged server-side; this only surfaces the
+    *kind* of failure so the operator can act on it without exposing request
+    IDs, key prefixes, or raw prompt content.
+    """
+    status = getattr(exc, "status_code", None)
+    if status == 429:
+        return "Claude is rate-limiting this request — wait a moment and retry."
+    if status == 401:
+        return "Claude rejected the API key — check 'claude_api_key' in config."
+    if status == 404:
+        return "Claude model not found — check the configured model."
+    if status == 400:
+        message = getattr(exc, "message", None) or str(exc)
+        safe = " ".join(message.split())[:200]
+        return f"Claude rejected the request: {safe}"
+    return "Claude API call failed."
+
 activities_router = APIRouter(prefix="/api/nets/{net_slug}/activities", tags=["activities"])
 
 
@@ -265,11 +286,11 @@ async def send_chat_message_route(
             db, chat_session_id, body.content, api_key=api_key, sender_callsign=ctx.user.callsign
         )
     except Exception as exc:
-        # Log the full exception server-side; return a generic 502 so we
+        # Log the full exception server-side; return a classified 502 so we
         # don't leak Anthropic SDK details (request IDs, rate-limit info,
         # key prefixes) to the client.
         logger.exception("Claude API call failed for chat session %s", chat_session_id)
-        raise HTTPException(status_code=502, detail="Claude API call failed.") from exc
+        raise HTTPException(status_code=502, detail=_claude_error_detail(exc)) from exc
     return {
         "user_message": _message_to_response(user_msg),
         "assistant_message": _message_to_response(assistant_msg),
@@ -297,7 +318,7 @@ async def extract_chat_route(
         fields = extract_activity_fields(db, chat_session_id, api_key)
     except Exception as exc:
         logger.exception("Claude extraction failed for chat session %s", chat_session_id)
-        raise HTTPException(status_code=502, detail="Claude extraction failed.") from exc
+        raise HTTPException(status_code=502, detail=_claude_error_detail(exc)) from exc
     return fields
 
 

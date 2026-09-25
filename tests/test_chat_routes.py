@@ -172,3 +172,46 @@ async def test_send_message_without_api_key(admin_client, db_setup):
         json={"content": "Hello"},
     )
     assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_claude_rate_limit_returns_classified_502(admin_client):
+    """A Claude rate-limit surfaces as a 502 with an actionable detail, not a bare message."""
+    create_resp = await admin_client.post(BASE + "/chat/sessions")
+    chat_id = create_resp.json()["id"]
+
+    class _RateLimit(Exception):
+        status_code = 429
+
+    with patch("backend.modules.activities.chat_service._call_claude", side_effect=_RateLimit("too fast")):
+        response = await admin_client.post(
+            f"{BASE}/chat/sessions/{chat_id}/messages",
+            json={"content": "Hello"},
+        )
+
+    assert response.status_code == 502
+    assert "rate-limiting" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_extract_claude_error_returns_classified_502(admin_client):
+    """Extraction failures carry a classified detail instead of a generic message."""
+    create_resp = await admin_client.post(BASE + "/chat/sessions")
+    chat_id = create_resp.json()["id"]
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="Here is a proposal.")]
+    with patch("backend.modules.activities.chat_service._call_claude", return_value=mock_response):
+        await admin_client.post(
+            f"{BASE}/chat/sessions/{chat_id}/messages",
+            json={"content": "Propose an activity"},
+        )
+
+    class _AuthError(Exception):
+        status_code = 401
+
+    with patch("backend.modules.activities.chat_service._call_claude", side_effect=_AuthError("bad key")):
+        response = await admin_client.post(f"{BASE}/chat/sessions/{chat_id}/extract")
+
+    assert response.status_code == 502
+    assert "API key" in response.json()["detail"]
