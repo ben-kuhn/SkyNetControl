@@ -269,19 +269,26 @@ export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessi
         </button>
       </div>
 
-      {hasAssistant && !showApprove && (
-        <div className="pt-3 border-t border-border flex gap-2">
+      {!showApprove && (
+        <div className="pt-3 border-t border-border flex gap-2 flex-wrap">
           <button
             onClick={() => setShowApprove(true)}
-            className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated"
+            disabled={!hasAssistant || !sessionId}
+            title={
+              hasAssistant
+                ? "Review the chat and save it as an activity"
+                : "Send a message first, then convert the brainstorm to an activity"
+            }
+            className="px-3 py-1.5 text-sm bg-accent text-bg-base rounded-md font-medium hover:opacity-90 disabled:opacity-40"
           >
-            Save as activity
+            Convert to activity
           </button>
           {onTransferToNewActivity && (
             <button
               onClick={handleTransferToNewActivity}
               disabled={extracting || !sessionId}
-              className="px-3 py-1.5 text-sm bg-accent/[0.12] text-accent rounded-md font-medium hover:bg-accent/20 disabled:opacity-50"
+              title="Open the New Activity form pre-filled from this chat"
+              className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated disabled:opacity-40"
             >
               {extracting ? "Extracting…" : "New activity from chat"}
             </button>
@@ -292,7 +299,7 @@ export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessi
       {showApprove && (
         <div className="pt-3 border-t border-border">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-text-primary">Save chat as activity</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Convert chat to activity</h3>
             <button
               onClick={handleExtract}
               disabled={extracting || !hasAssistant}
