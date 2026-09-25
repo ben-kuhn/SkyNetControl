@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   approveChatSession,
   extractChatActivity,
+  fetchChatSession,
   sendChatMessage,
   startChatSession,
+  type ActivityDraft,
   type ActivityInput,
 } from "../../api/activities";
 import { useCurrentNet } from "../../hooks/useCurrentNet";
@@ -15,11 +17,16 @@ interface Props {
   onApproved: (a: Activity) => void;
   /** When true, render as a fullscreen modal (mobile). Otherwise inline pane. */
   modal: boolean;
+  /** Resume this chat session instead of starting a new one. Owned by the
+   * page so the conversation survives the panel being unmounted. */
+  sessionId?: number | null;
+  onSessionStart?: (sessionId: number) => void;
+  /** Open the standard New Activity form pre-filled from the brainstorm. */
+  onTransferToNewActivity?: (draft: ActivityDraft) => void;
 }
 
-export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
+export function BrainstormPanel({ onClose, onApproved, modal, sessionId, onSessionStart, onTransferToNewActivity }: Props) {
   const { slug } = useCurrentNet();
-  const [sessionId, setSessionId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
@@ -38,9 +45,24 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    if (sessionId) {
+      // Resume an in-progress conversation: reload its persisted history.
+      fetchChatSession(sessionId, slug)
+        .then((s) => {
+          if (!cancelled) setMessages(s.messages);
+        })
+        .catch((e: any) => {
+          if (!cancelled) {
+            addToast(e?.detail ?? e?.message ?? "Failed to load chat", "error");
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     startChatSession(slug)
       .then((s) => {
-        if (!cancelled) setSessionId(s.id);
+        if (!cancelled) onSessionStart?.(s.id);
       })
       .catch((e: any) => {
         if (!cancelled) {
@@ -52,7 +74,7 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
@@ -139,6 +161,38 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
     }
   };
 
+  // Open the standard New Activity form pre-filled with the brainstormed
+  // activity. If the operator hasn't extracted the fields yet, pull them
+  // from the chat automatically so the transfer isn't a blank form.
+  const handleTransferToNewActivity = async () => {
+    if (!onTransferToNewActivity) return;
+    if (!sessionId) return;
+    let draft: ActivityDraft = {
+      title: title.trim(),
+      description,
+      instructions,
+      tags: parseTags(tagsText),
+    };
+    if (!draft.title && messages.some((m) => m.role === "assistant")) {
+      setExtracting(true);
+      try {
+        const fields = await extractChatActivity(sessionId, slug);
+        draft = {
+          title: fields.title,
+          description: fields.description,
+          instructions: fields.instructions,
+          tags: fields.tags,
+        };
+      } catch (e: any) {
+        addToast(e?.detail ?? e?.message ?? "Failed to extract from chat", "error");
+        return;
+      } finally {
+        setExtracting(false);
+      }
+    }
+    onTransferToNewActivity(draft);
+  };
+
   const containerCls = modal
     ? "fixed inset-0 z-50 bg-bg-base p-4 flex flex-col"
     : "border border-border rounded-lg bg-bg-surface flex flex-col h-[calc(100vh-8rem)] max-h-[800px]";
@@ -216,13 +270,22 @@ export function BrainstormPanel({ onClose, onApproved, modal }: Props) {
       </div>
 
       {hasAssistant && !showApprove && (
-        <div className="pt-3 border-t border-border">
+        <div className="pt-3 border-t border-border flex gap-2">
           <button
             onClick={() => setShowApprove(true)}
             className="px-3 py-1.5 text-sm border border-border rounded-md text-text-primary hover:bg-bg-elevated"
           >
             Save as activity
           </button>
+          {onTransferToNewActivity && (
+            <button
+              onClick={handleTransferToNewActivity}
+              disabled={extracting || !sessionId}
+              className="px-3 py-1.5 text-sm bg-accent/[0.12] text-accent rounded-md font-medium hover:bg-accent/20 disabled:opacity-50"
+            >
+              {extracting ? "Extracting…" : "New activity from chat"}
+            </button>
+          )}
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchActivities } from "../api/activities";
+import { fetchActivities, type ActivityDraft } from "../api/activities";
 import { useCurrentNet } from "../hooks/useCurrentNet";
 import type { Activity } from "../types";
 import { ActivityDetailPanel } from "./activities/ActivityDetailPanel";
@@ -9,7 +9,7 @@ type SortKey = "title" | "last_used_at";
 type SortDir = "asc" | "desc";
 type RightPane =
   | { kind: "empty" }
-  | { kind: "detail"; activityId: number | null; mode: "view" | "edit" | "create" }
+  | { kind: "detail"; activityId: number | null; mode: "view" | "edit" | "create"; draft?: ActivityDraft }
   | { kind: "brainstorm" };
 
 function formatShortDate(iso: string | null): string {
@@ -25,6 +25,9 @@ export function ActivitiesPage() {
   const [sortKey, setSortKey] = useState<SortKey>("title");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pane, setPane] = useState<RightPane>({ kind: "empty" });
+  // Owned here (not by BrainstormPanel) so the conversation survives the
+  // panel being unmounted by switching to New Activity / detail and back.
+  const [chatSessionId, setChatSessionId] = useState<number | null>(null);
 
   const detailUnsavedRef = useRef(false);
 
@@ -77,6 +80,10 @@ export function ActivitiesPage() {
 
   const openCreate = () => {
     setPane({ kind: "detail", activityId: null, mode: "create" });
+  };
+
+  const openCreateWithDraft = (draft: ActivityDraft) => {
+    setPane({ kind: "detail", activityId: null, mode: "create", draft });
   };
 
   const openBrainstorm = () => {
@@ -215,6 +222,7 @@ export function ActivitiesPage() {
               <ActivityDetailPanel
                 activity={selectedActivity}
                 initialMode={pane.mode}
+                draft={pane.kind === "detail" ? pane.draft : undefined}
                 onClose={() => setPane({ kind: "empty" })}
                 onSaved={handleSaved}
                 onDeleted={handleDeleted}
@@ -227,6 +235,9 @@ export function ActivitiesPage() {
             <div className="flex-1 min-w-0">
               <BrainstormPanel
                 modal={false}
+                sessionId={chatSessionId}
+                onSessionStart={setChatSessionId}
+                onTransferToNewActivity={openCreateWithDraft}
                 onClose={() => setPane({ kind: "empty" })}
                 onApproved={(a) => {
                   setActivities((prev) => [a, ...prev]);
@@ -239,6 +250,9 @@ export function ActivitiesPage() {
           {pane.kind === "brainstorm" && isMobile && (
             <BrainstormPanel
               modal={true}
+              sessionId={chatSessionId}
+              onSessionStart={setChatSessionId}
+              onTransferToNewActivity={openCreateWithDraft}
               onClose={() => setPane({ kind: "empty" })}
               onApproved={(a) => {
                 setActivities((prev) => [a, ...prev]);

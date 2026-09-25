@@ -8,6 +8,15 @@ export interface ActivityInput {
   tag_names: string[];
 }
 
+/** A proposed activity captured from a brainstorm chat, ready to drop into
+ * the standard New Activity form. */
+export interface ActivityDraft {
+  title: string;
+  description: string;
+  instructions: string;
+  tags: string[];
+}
+
 export async function fetchActivities(netSlug: string): Promise<Activity[]> {
   return apiFetch<Activity[]>(`/nets/${netSlug}/activities/`);
 }
@@ -46,6 +55,13 @@ export async function fetchActivityTags(netSlug: string): Promise<ActivityTag[]>
 
 export async function startChatSession(netSlug: string): Promise<ChatSession> {
   return apiFetch<ChatSession>(`/nets/${netSlug}/activities/chat/sessions`, { method: "POST" });
+}
+
+/** Fetch a chat session with its full persisted message history, so the
+ * brainstorm pane can resume an in-progress conversation after it was
+ * unmounted (e.g. opening New Activity and coming back). */
+export async function fetchChatSession(sessionId: number, netSlug: string): Promise<ChatSession> {
+  return apiFetch<ChatSession>(`/nets/${netSlug}/activities/chat/sessions/${sessionId}`);
 }
 
 export async function sendChatMessage(
