@@ -145,6 +145,14 @@ def extract_activity_fields(db: Session, chat_session_id: int, api_key: str) -> 
     """
     history = get_chat_history(db, chat_session_id)
     messages = [{"role": m.role.value, "content": m.content} for m in history[-HISTORY_WINDOW:]]
+    # The Messages API rejects a conversation that ends on an assistant turn
+    # ('assistant message prefill'), and a brainstorm almost always ends with
+    # Claude's proposal. Prompt the extraction as the trailing user message so
+    # the request is always well-formed.
+    if not messages or messages[-1]["role"] != "user":
+        messages.append(
+            {"role": "user", "content": "Now extract the finalized activity proposal from the conversation above."}
+        )
 
     response = _call_claude(api_key=api_key, messages=messages, system=EXTRACTION_PROMPT)
     raw = response.content[0].text.strip()

@@ -12,6 +12,7 @@ from backend.modules.activities.chat_service import (
     HISTORY_WINDOW,
     SYSTEM_PROMPT,
     create_chat_session,
+    extract_activity_fields,
     get_chat_history,
     get_chat_session,
     link_chat_to_activity,
@@ -44,8 +45,8 @@ def fake_claude(monkeypatch):
     """Replace _call_claude; capture the messages payload it receives."""
     calls = []
 
-    def _fake(api_key, messages, model=chat_service.DEFAULT_MODEL):
-        calls.append({"api_key": api_key, "messages": messages, "model": model})
+    def _fake(api_key, messages, model=chat_service.DEFAULT_MODEL, system=None):
+        calls.append({"api_key": api_key, "messages": messages, "model": model, "system": system})
         return SimpleNamespace(content=[SimpleNamespace(text="A fun activity idea")])
 
     monkeypatch.setattr(chat_service, "_call_claude", _fake)
@@ -149,6 +150,38 @@ def test_send_message_passes_history(db: Session):
         call_args = mock_claude.call_args
         messages = call_args[1]["messages"]
         assert len(messages) == 3  # user, assistant, user
+
+
+def test_extract_activity_fields_ends_with_user_prompt(db: Session, fake_claude):
+    """A brainstorm ends on an assistant turn; extraction must append a user
+    message so the request is well-formed (the API rejects assistant prefill)."""
+    chat = create_chat_session(db)
+    db.add(chat_service.ChatMessage(chat_session_id=chat.id, role=chat_service.ChatMessageRole.USER, content="propose a foxhunt"))
+    db.add(chat_service.ChatMessage(chat_session_id=chat.id, role=chat_service.ChatMessageRole.ASSISTANT, content="Here is the plan"))
+    db.commit()
+
+    fields = extract_activity_fields(db, chat.id, api_key="k")
+
+    sent = fake_claude[0]["messages"]
+    assert sent[-1]["role"] == "user"
+    assert "extract" in sent[-1]["content"].lower()
+    # History is preserved; only a trailing user prompt is appended.
+    assert len(sent) == 3
+
+
+def test_extract_activity_fields_no_extra_prompt_if_ends_with_user(db: Session, fake_claude):
+    """If the transcript already ends on a user turn, nothing is appended."""
+    chat = create_chat_session(db)
+    db.add(chat_service.ChatMessage(chat_session_id=chat.id, role=chat_service.ChatMessageRole.USER, content="first"))
+    db.add(chat_service.ChatMessage(chat_session_id=chat.id, role=chat_service.ChatMessageRole.ASSISTANT, content="reply"))
+    db.add(chat_service.ChatMessage(chat_session_id=chat.id, role=chat_service.ChatMessageRole.USER, content="more detail please"))
+    db.commit()
+
+    extract_activity_fields(db, chat.id, api_key="k")
+
+    sent = fake_claude[0]["messages"]
+    assert sent[-1] == {"role": "user", "content": "more detail please"}
+    assert len(sent) == 3
 
 
 def test_link_chat_to_activity(db: Session):
