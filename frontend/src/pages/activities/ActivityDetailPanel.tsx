@@ -3,7 +3,6 @@ import {
   createActivity,
   deleteActivity,
   updateActivity,
-  type ActivityDraft,
   type ActivityInput,
 } from "../../api/activities";
 import { useCurrentNet } from "../../hooks/useCurrentNet";
@@ -24,8 +23,6 @@ type Mode = "view" | "edit" | "create";
 interface Props {
   activity: Activity | null;
   initialMode: Mode;
-  /** Pre-fill the create form from a brainstorm chat (only applied in create mode). */
-  draft?: ActivityDraft;
   onClose: () => void;
   onSaved: (a: Activity) => void;
   onDeleted: (id: number) => void;
@@ -35,7 +32,6 @@ interface Props {
 export function ActivityDetailPanel({
   activity,
   initialMode,
-  draft,
   onClose,
   onSaved,
   onDeleted,
@@ -56,18 +52,11 @@ export function ActivityDetailPanel({
 
   useEffect(() => {
     setMode(initialMode);
-    if (initialMode === "create" && draft && !activity) {
-      setTitle(draft.title);
-      setDescription(draft.description);
-      setInstructions(draft.instructions);
-      setTagsText(draft.tags.join(", "));
-      return;
-    }
     setTitle(activity?.title ?? "");
     setDescription(activity?.description ?? "");
     setInstructions(activity?.instructions ?? "");
     setTagsText(activity?.tags.map((t) => t.name).join(", ") ?? "");
-  }, [activity?.id, initialMode, draft]);
+  }, [activity?.id, initialMode]);
 
   useEffect(() => {
     if (!hasUnsavedRef) return;

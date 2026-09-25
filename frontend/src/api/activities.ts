@@ -8,15 +8,6 @@ export interface ActivityInput {
   tag_names: string[];
 }
 
-/** A proposed activity captured from a brainstorm chat, ready to drop into
- * the standard New Activity form. */
-export interface ActivityDraft {
-  title: string;
-  description: string;
-  instructions: string;
-  tags: string[];
-}
-
 export async function fetchActivities(netSlug: string): Promise<Activity[]> {
   return apiFetch<Activity[]>(`/nets/${netSlug}/activities/`);
 }
